@@ -1,0 +1,184 @@
+{
+  "info": {
+    "name": "Social Media Post Approval Workflow (Basic MVP)",
+    "description": "Complete Postman collection for testing the Social Media Post Approval platform workflow.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api" },
+    { "key": "smoToken", "value": "" },
+    { "key": "managerToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "postId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "0. System Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "1. Auth - Register SMO",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Rohan SMO\",\n  \"email\": \"smo@test.com\",\n  \"password\": \"password123\",\n  \"role\": \"smo\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Auth - Register Manager",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Priya Manager\",\n  \"email\": \"manager@test.com\",\n  \"password\": \"password123\",\n  \"role\": \"manager\"\n}"
+        }
+      }
+    },
+    {
+      "name": "3. Auth - Register Admin",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Amit Admin\",\n  \"email\": \"admin@test.com\",\n  \"password\": \"password123\",\n  \"role\": \"admin\"\n}"
+        }
+      }
+    },
+    {
+      "name": "4. Auth - Login SMO",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"smo@test.com\",\n  \"password\": \"password123\"\n}"
+        }
+      }
+    },
+    {
+      "name": "5. Posts - Create Post (SMO)",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/posts",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{smoToken}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "caption", "value": "Welcom to our grand openning sale!", "type": "text" },
+            { "key": "image", "type": "file", "src": "" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "6. Posts - Revise Post (SMO)",
+      "request": {
+        "method": "PUT",
+        "url": "{{baseUrl}}/posts/{{postId}}/revise",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{smoToken}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "caption", "value": "Welcome to our grand opening sale! Best quality guaranteed.", "type": "text" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "7. Posts - Submit to Manager (SMO)",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/posts/{{postId}}/submit",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{smoToken}}" }
+        ]
+      }
+    },
+    {
+      "name": "8. Posts - Manager Review (Manager)",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/posts/{{postId}}/manager-review",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{managerToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"approve\",\n  \"comment\": \"Copy and visual verified. Looks good!\"\n}"
+        }
+      }
+    },
+    {
+      "name": "9. Posts - Admin Review (Admin)",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/posts/{{postId}}/admin-review",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"approve\",\n  \"comment\": \"Final brand approval granted.\"\n}"
+        }
+      }
+    },
+    {
+      "name": "10. Posts - Select Platform (SMO)",
+      "request": {
+        "method": "PUT",
+        "url": "{{baseUrl}}/posts/{{postId}}/platform",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{smoToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"platform\": \"instagram\"\n}"
+        }
+      }
+    },
+    {
+      "name": "11. Posts - Confirm Publish URL (SMO/Admin)",
+      "request": {
+        "method": "PUT",
+        "url": "{{baseUrl}}/posts/{{postId}}/publish-url",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{smoToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"manual_publish_url\": \"https://www.instagram.com/p/DB12345678/\"\n}"
+        }
+      }
+    },
+    {
+      "name": "12. Posts - Get Post Full Details (All Revisions & Approvals)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/posts/{{postId}}",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{smoToken}}" }
+        ]
+      }
+    }
+  ]
+}

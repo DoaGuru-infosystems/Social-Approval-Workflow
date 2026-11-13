@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Advanced Model — Workflow</title>
+<style>
+:root{--bg:#f7f7f5;--surface:#ffffff;--card:#f1f0ec;--text:#1d1d1b;--sub:#55544e;
+--border:#ddddd4;--blue:#2a5fab;--teal:#1d7a6e;--amber:#9a6a1f;--red:#a33b2d;--purple:#534ab7;--green:#1d8a5f;
+color-scheme:light dark;}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#15150f;--surface:#1d1d16;
+--card:#24241b;--text:#e7ece9;--sub:#b4b2a9;--border:#3a3a2e;--blue:#85b7eb;--teal:#5fcfc0;--amber:#f0b35f;
+--red:#f0897e;--purple:#afa9ec;--green:#5fcf9d;}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;}
+body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+.wrap{max-width:920px;margin:0 auto;padding:24px 16px 60px;}
+h1{font-size:21px;text-align:center;margin:4px 0 2px;}
+p.sub{color:var(--sub);text-align:center;margin:2px 0 18px;font-size:13px;}
+svg{width:100%;height:auto;display:block;}
+.n{cursor:pointer;}
+.n rect{fill:var(--surface);stroke:var(--border);stroke-width:1.3;}
+.n.active rect{stroke-width:2.5;}
+.n text{fill:var(--text);font-size:12.5px;font-weight:600;}
+.n text.sub{fill:var(--sub);font-weight:400;font-size:10.5px;}
+.c-blue rect{stroke:var(--blue)} .c-teal rect{stroke:var(--teal)} .c-amber rect{stroke:var(--amber)}
+.c-red rect{stroke:var(--red)} .c-purple rect{stroke:var(--purple)} .c-green rect{stroke:var(--green)} .c-gray rect{stroke:var(--sub)}
+line,path{stroke:var(--sub);stroke-width:1.4;}
+.detail{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-top:18px;min-height:70px;}
+.detail h2{margin:0 0 6px;font-size:15px;}
+.detail p{margin:0;color:var(--sub);font-size:13px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Advanced Model — Workflow Overview</h1>
+<p class="sub">Node par click karke uska role samjho</p>
+<svg viewBox="0 0 700 820" id="diagram">
+<defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="var(--sub)" stroke-width="1.4"/></marker></defs>
+
+<line x1="350" y1="80" x2="350" y2="110" marker-end="url(#a)"/>
+<line x1="350" y1="166" x2="350" y2="196" marker-end="url(#a)"/>
+<line x1="350" y1="252" x2="350" y2="282" marker-end="url(#a)"/>
+<path d="M500,317 C570,317 570,224 500,224" fill="none" marker-end="url(#a)"/>
+<line x1="350" y1="352" x2="350" y2="382" marker-end="url(#a)"/>
+<line x1="350" y1="438" x2="350" y2="468" marker-end="url(#a)"/>
+<line x1="350" y1="524" x2="350" y2="554" marker-end="url(#a)"/>
+<line x1="350" y1="610" x2="350" y2="640" marker-end="url(#a)"/>
+<line x1="220" y1="696" x2="180" y2="726" marker-end="url(#a)"/>
+<line x1="480" y1="696" x2="520" y2="726" marker-end="url(#a)"/>
+<line x1="180" y1="752" x2="260" y2="782" marker-end="url(#a)"/>
+<line x1="520" y1="752" x2="440" y2="782" marker-end="url(#a)"/>
+
+<g class="n c-gray" data-i="0"><rect x="200" y="20" width="300" height="60" rx="10"/>
+<text x="350" y="42" text-anchor="middle">Admin: Client + Account Setup</text>
+<text x="350" y="60" text-anchor="middle" class="sub">Multi-client, brand rules, connects</text></g>
+
+<g class="n c-blue" data-i="1"><rect x="200" y="110" width="300" height="56" rx="10"/>
+<text x="350" y="132" text-anchor="middle">Content Creation</text>
+<text x="350" y="150" text-anchor="middle" class="sub">Client, image/video, caption</text></g>
+
+<g class="n c-teal" data-i="2"><rect x="200" y="196" width="300" height="56" rx="10"/>
+<text x="350" y="218" text-anchor="middle">AI Check (Dual Engine)</text>
+<text x="350" y="236" text-anchor="middle" class="sub">Spelling + OCR, primary+fallback</text></g>
+
+<g class="n c-amber" data-i="3"><rect x="200" y="282" width="300" height="70" rx="10"/>
+<text x="350" y="304" text-anchor="middle">Suggestions + Recheck Loop</text>
+<text x="350" y="322" text-anchor="middle" class="sub">Capped retries, then manual review</text></g>
+
+<g class="n c-teal" data-i="4"><rect x="200" y="382" width="300" height="56" rx="10"/>
+<text x="350" y="404" text-anchor="middle">Central TL / Manager Approval</text>
+<text x="350" y="422" text-anchor="middle" class="sub">Sabhi clients ek hi dashboard</text></g>
+
+<g class="n c-purple" data-i="5"><rect x="200" y="468" width="300" height="56" rx="10"/>
+<text x="350" y="490" text-anchor="middle">Common Final Reviewer Login</text>
+<text x="350" y="508" text-anchor="middle" class="sub">Shared account, koi bhi authorized</text></g>
+
+<g class="n c-blue" data-i="6"><rect x="200" y="554" width="300" height="56" rx="10"/>
+<text x="350" y="576" text-anchor="middle">Platform Selection</text>
+<text x="350" y="594" text-anchor="middle" class="sub">Mode ke hisaab se pehle/baad mein</text></g>
+
+<g class="n c-amber" data-i="7"><rect x="200" y="640" width="300" height="56" rx="10"/>
+<text x="350" y="662" text-anchor="middle">Publishing Queue</text>
+<text x="350" y="680" text-anchor="middle" class="sub">Per-destination jobs, retries</text></g>
+
+<g class="n c-green" data-i="8"><rect x="40" y="726" width="280" height="56" rx="10"/>
+<text x="180" y="748" text-anchor="middle">Auto / Image Path</text>
+<text x="180" y="766" text-anchor="middle" class="sub">Direct API publish</text></g>
+
+<g class="n c-red" data-i="9"><rect x="380" y="726" width="280" height="56" rx="10"/>
+<text x="520" y="748" text-anchor="middle">Video Upload App</text>
+<text x="520" y="766" text-anchor="middle" class="sub">Alag Node app, shared DB/disk</text></g>
+
+<g class="n c-green" data-i="10"><rect x="190" y="782" width="320" height="38" rx="10"/>
+<text x="350" y="804" text-anchor="middle">Live Verification + Completed</text></g>
+</svg>
+<div class="detail" id="detail"><h2>Click a step</h2><p>Kisi bhi box par click karke uska role padho.</p></div>
+</div>
+<script>
+const info = [
+["Admin: Client + Account Setup","Admin naya client banata hai, uske brand guidelines set karta hai, Instagram/Facebook/YouTube accounts connect karta hai. Har client ka data isolated rehta hai."],
+["Content Creation","Creator/SMO client select karta hai, image ya video upload karta hai, caption/tagline/hashtags likhta hai. Mode (Recommendation/Full Automation) ke hisaab se platform yahin ya baad mein select hoga."],
+["AI Check (Dual Engine)","Spelling/grammar LanguageTool (primary) + nspell (fallback) se check hota hai. Image ka text Google Vision (primary) + Tesseract.js (fallback) se nikal ke check hota hai. Engine tag report mein dikhta hai."],
+["Suggestions + Recheck Loop","AI jo suggestions deta hai, Creator accept ya edit karta hai. Edit hua toh dobara AI check — lekin max 3-4 baar, uske baad manual review force hota hai."],
+["Central TL / Manager Approval","Ek hi central Creative TL — sabhi clients ki posts isी ek dashboard mein aati hain, client-wise alag assignment nahi."],
+["Common Final Reviewer Login","Ek shared login account (jaise finalreview@yourcompany.com) — koi dedicated employee assign nahi, koi bhi authorized banda is se login karke final approve kar sakta hai."],
+["Platform Selection","Recommendation Mode mein ye Final approval ke baad, SMO manually chunta hai. Full Automation Mode mein ye shuru mein hi client ke saath select ho chuka hota hai."],
+["Publishing Queue","Har destination (platform+account) ka apna job. Failed destination hi retry hota hai, successful ko dobara nahi chhera jata. Retry se pehle actual status reconcile hota hai."],
+["Auto / Image Path","Chhoti files (image) aur Instagram/Facebook ke video_url wale auto-publish seedha Main App se API call karke publish hote hain."],
+["Video Upload App","Bade video (800MB-1GB) ke liye alag Node.js app — A2 ke process-limit ko bachane ke liye. Shared MySQL DB aur shared disk se Main App ke saath indirectly connect."],
+["Live Verification + Completed","Platform se seedha confirm kiya jata hai post live hai ya nahi. Match hua toh Completed, mismatch par Admin/TL ko alert."]
+];
+document.querySelectorAll('.n').forEach(n=>{
+  n.addEventListener('click',()=>{
+    document.querySelectorAll('.n').forEach(x=>x.classList.remove('active'));
+    n.classList.add('active');
+    const i = +n.dataset.i;
+    document.getElementById('detail').innerHTML = '<h2>'+info[i][0]+'</h2><p>'+info[i][1]+'</p>';
+  });
+});
+</script>
+</body>
+</html>
