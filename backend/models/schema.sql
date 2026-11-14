@@ -135,6 +135,8 @@ CREATE TABLE IF NOT EXISTS `ai_check_results` (
   `spelling_issues` JSON NULL,
   `ocr_extracted_text` TEXT NULL,
   `ocr_issues` JSON NULL,
+  `ocr_confidence` DECIMAL(5,2) NULL,
+  `ocr_unreliable` BOOLEAN NOT NULL DEFAULT FALSE,
   `banned_words_found` JSON NULL,
   `missing_mandatory_phrases` JSON NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

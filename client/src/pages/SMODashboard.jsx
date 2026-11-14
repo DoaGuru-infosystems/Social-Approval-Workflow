@@ -69,7 +69,7 @@ const SMODashboard = () => {
         setSelectedClientId(String(list[0].id));
       }
     } catch {
-      showToast('Clients list load karne mein samasya aayi.', 'error');
+      showToast('Unable to load the client list.', 'error');
     }
   };
 
@@ -86,7 +86,7 @@ const SMODashboard = () => {
         loadClientAccounts(p.client_id);
       }
     } catch {
-      showToast('Posts list load karne mein samasya aayi. Kripya refresh karein.', 'error');
+      showToast('Unable to load posts. Please refresh the page.', 'error');
     } finally {
       setIsLoadingPosts(false);
     }
@@ -123,22 +123,22 @@ const SMODashboard = () => {
     e.preventDefault();
 
     if (!selectedClientId) {
-      showToast('Kripya post ke liye Client chunein.', 'warning');
+      showToast('Select a client for this post.', 'warning');
       return;
     }
 
     if (!title.trim()) {
-      showToast('Kripya post ka title likhein.', 'warning');
+      showToast('Enter a title for this post.', 'warning');
       return;
     }
 
     if (!caption.trim()) {
-      showToast('Kripya post ke liye caption likhein.', 'warning');
+      showToast('Enter a caption for this post.', 'warning');
       return;
     }
 
     if (!selectedFile) {
-      showToast('Kripya post ke liye ek creative image upload karein.', 'warning');
+      showToast('Upload an image for this post.', 'warning');
       return;
     }
 
@@ -151,7 +151,7 @@ const SMODashboard = () => {
       formData.append('image', selectedFile);
 
       await postService.createPost(formData);
-      showToast('Post create ho gaya aur Bilingual + Brand AI check complete ho gaya!', 'success');
+      showToast('Post created. Hindi and English spelling and brand checks are complete.', 'success');
 
       // Clear form
       setTitle('');
@@ -161,7 +161,7 @@ const SMODashboard = () => {
       // Refresh posts list
       fetchPosts();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Post create karne mein samasya aayi. Kripya dobara try karein.';
+      const msg = err.response?.data?.message || 'Unable to create the post. Please try again.';
       showToast(msg, 'error');
     } finally {
       setCreatingPost(false);
@@ -171,7 +171,7 @@ const SMODashboard = () => {
   // Open Revision Modal
   const startRevising = (post) => {
     if (post.recheck_count >= 3 || post.manual_review_required) {
-      showToast('Aap 3 recheck attempts use kar chuke hain. Ab direct Manager review hoga.', 'warning');
+      showToast('You have used all 3 recheck attempts. The post will go directly to the Manager for review.', 'warning');
       return;
     }
     setEditingPost(post);
@@ -187,12 +187,12 @@ const SMODashboard = () => {
     if (!editingPost) return;
 
     if (!reviseTitle.trim()) {
-      showToast('Title khali nahi ho sakta.', 'warning');
+      showToast('The title cannot be empty.', 'warning');
       return;
     }
 
     if (!reviseCaption.trim()) {
-      showToast('Caption khali nahi ho sakta.', 'warning');
+      showToast('The caption cannot be empty.', 'warning');
       return;
     }
 
@@ -206,7 +206,7 @@ const SMODashboard = () => {
       }
 
       await postService.revisePost(editingPost.id, formData);
-      showToast('Revision submit ho gaya aur AI recheck complete ho gaya!', 'success');
+      showToast('Revision submitted and the AI recheck is complete.', 'success');
 
       setEditingPost(null);
       setReviseTitle('');
@@ -215,7 +215,7 @@ const SMODashboard = () => {
       setRevisePreview(null);
       fetchPosts();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Revision submit karne mein samasya aayi.';
+      const msg = err.response?.data?.message || 'Unable to submit the revision.';
       showToast(msg, 'error');
     } finally {
       setActiveActionId(null);
@@ -227,10 +227,10 @@ const SMODashboard = () => {
     setActiveActionId(`submit-${postId}`);
     try {
       await postService.submitForReview(postId);
-      showToast('Post Manager review ke liye bhej diya gaya hai!', 'success');
+      showToast('Post sent to the Manager for review.', 'success');
       fetchPosts();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Submit karne mein samasya aayi.';
+      const msg = err.response?.data?.message || 'Unable to submit the post.';
       showToast(msg, 'error');
     } finally {
       setActiveActionId(null);
@@ -243,10 +243,10 @@ const SMODashboard = () => {
     setActiveActionId(`platform-${postId}`);
     try {
       await postService.updatePlatform(postId, platform);
-      showToast(`Platform "${platform}" set ho gaya! Ab live post link paste karein.`, 'success');
+      showToast(`Platform "${platform}" selected. Paste the live post link.`, 'success');
       fetchPosts();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Platform update karne mein samasya aayi.';
+      const msg = err.response?.data?.message || 'Unable to update the platform.';
       showToast(msg, 'error');
     } finally {
       setActiveActionId(null);
@@ -257,22 +257,22 @@ const SMODashboard = () => {
   const handlePublishUrlSubmit = async (postId) => {
     const url = (liveUrls[postId] || '').trim();
     if (!url) {
-      showToast('Kripya published live post ka URL daalein.', 'warning');
+      showToast('Enter the URL of the published post.', 'warning');
       return;
     }
 
     if (!/^https?:\/\//i.test(url)) {
-      showToast('URL sahi format mein hona chahiye (http:// ya https:// se shuru ho).', 'warning');
+      showToast('Enter a valid URL starting with http:// or https://.', 'warning');
       return;
     }
 
     setActiveActionId(`publish-${postId}`);
     try {
       await postService.updatePublishUrl(postId, url);
-      showToast('Live link save ho gaya! Post workflow successfully complete ho gaya.', 'success');
+      showToast('Live link saved. The post workflow is complete.', 'success');
       fetchPosts();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Live URL save karne mein samasya aayi.';
+      const msg = err.response?.data?.message || 'Unable to save the live URL.';
       showToast(msg, 'error');
     } finally {
       setActiveActionId(null);
@@ -292,7 +292,7 @@ const SMODashboard = () => {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[#2B2A27]">SMO Studio & Post Hub</h1>
             <p className="text-sm text-[#6B6A63] mt-0.5">
-              Draft for clients, verify Bilingual AI checks (Hindi + English + Brand Rules), and manage live publishing.
+              Create client drafts, review Hindi and English spelling and brand checks, and manage live publishing.
             </p>
           </div>
           <Button
@@ -326,7 +326,7 @@ const SMODashboard = () => {
                   </label>
                   {clients.length === 0 ? (
                     <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                      Koi active client nahi mila. Pehle Admin se client add karwayein.
+                      No active clients were found. Ask an Admin to add a client first.
                     </div>
                   ) : (
                     <select
@@ -382,7 +382,7 @@ const SMODashboard = () => {
                     rows={4}
                     value={caption}
                     onChange={(e) => setCaption(e.target.value)}
-                    placeholder="Type post copy in English or Hindi (Devanagari)... Spelling, OCR, and Client Brand Guidelines will be verified automatically."
+                    placeholder="Spelling checks support English or Hindi (Devanagari script), not Hinglish."
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-[#2B2A27] placeholder-[#A8A29E] text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white focus:outline-none resize-y transition-all"
                   />
                 </div>
@@ -432,9 +432,9 @@ const SMODashboard = () => {
                 <div className="w-14 h-14 rounded-2xl bg-stone-100 border border-[#E5E2DA] mx-auto flex items-center justify-center text-[#6B6A63] mb-3">
                   <Sparkles className="w-7 h-7 text-emerald-600" />
                 </div>
-                <h4 className="text-base font-semibold text-[#2B2A27]">Abhi koi post create nahi hua hai</h4>
+                <h4 className="text-base font-semibold text-[#2B2A27]">No posts have been created yet</h4>
                 <p className="text-xs text-[#6B6A63] mt-1 max-w-sm mx-auto">
-                  Left side ke form se client select karein aur pehla creative submit karein.
+                  Select a client in the form and submit your first post.
                 </p>
               </div>
             ) : (
@@ -521,7 +521,7 @@ const SMODashboard = () => {
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
                               <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                              Bilingual AI & Brand Rules Check
+                              Hindi and English AI & Brand Rules Check
                             </span>
                             <span className="text-[11px] text-[#6B6A63] font-mono">
                               Rechecks: {post.recheck_count}/3
@@ -582,7 +582,7 @@ const SMODashboard = () => {
                           ) : (
                             <p className="text-xs text-emerald-800 flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl">
                               <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                              <span>Bilingual spelling clean hai (Whitelist words honored).</span>
+                              <span>No Hindi or English spelling issues were found. Whitelisted words are accepted.</span>
                             </p>
                           )}
 
@@ -604,7 +604,7 @@ const SMODashboard = () => {
                             <div className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 p-3 rounded-xl font-semibold">
                               <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
                               <span>
-                                AI recheck limit khatam (3/3). Ab Manager manually dekh kar hi approve karenge.
+                                AI recheck limit reached (3/3). The Manager must review this post manually.
                               </span>
                             </div>
                           )}
@@ -617,7 +617,7 @@ const SMODashboard = () => {
                         {post.status === 'rejected' && (
                           <div className="w-full text-xs text-rose-800 bg-rose-50 border border-rose-200 p-3 rounded-xl flex items-center gap-2">
                             <XCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                            <span><strong>Post Rejected:</strong> Yeh post reviewers dwara reject ho chuka hai.</span>
+                            <span><strong>Post Rejected:</strong> Reviewers have rejected this post.</span>
                           </div>
                         )}
 
@@ -625,7 +625,7 @@ const SMODashboard = () => {
                         {post.status === 'changes_requested' && (
                           <div className="w-full text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2.5 rounded-xl flex items-center gap-2">
                             <RotateCcw className="w-4 h-4 shrink-0 text-amber-600" />
-                            <span><strong>Changes Requested:</strong> Reviewer ne changes maange hain. Post revise karke submit karein.</span>
+                            <span><strong>Changes Requested:</strong> The reviewer requested changes. Revise and resubmit the post.</span>
                           </div>
                         )}
 
@@ -660,7 +660,7 @@ const SMODashboard = () => {
                         {post.status === 'pending_manager' && (
                           <div className="text-xs text-amber-800 font-medium flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl">
                             <Clock className="w-3.5 h-3.5 text-amber-600" />
-                            <span>Submitted: Manager ke review ka intezaar hai...</span>
+                            <span>Submitted: Waiting for Manager review...</span>
                           </div>
                         )}
 
@@ -668,7 +668,7 @@ const SMODashboard = () => {
                         {post.status === 'pending_admin' && (
                           <div className="text-xs text-purple-800 font-medium flex items-center gap-1.5 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-xl">
                             <Clock className="w-3.5 h-3.5 text-purple-600" />
-                            <span>Manager Approved: Final Admin approval ka intezaar hai...</span>
+                            <span>Manager Approved: Waiting for final Admin approval...</span>
                           </div>
                         )}
 
@@ -676,14 +676,14 @@ const SMODashboard = () => {
                         {post.status === 'admin_approved' && (
                           <div className="w-full space-y-2">
                             <div className="text-xs text-sky-800 font-semibold flex items-center gap-1">
-                              <span>Admin Approved! Ab is client ke connected social accounts mein se choose karein:</span>
+                              <span>Admin approved. Select one of this client's connected social accounts:</span>
                             </div>
 
                             {clientConnectedAccounts.length === 0 ? (
                               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
                                 <span>
-                                  <strong>Is client ka koi social account connect nahi hai</strong>, pehle Admin se connect karwayein.
+                                  <strong>This client has no connected social accounts.</strong> Ask an Admin to connect one first.
                                 </span>
                               </div>
                             ) : (

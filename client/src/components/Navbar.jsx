@@ -11,7 +11,7 @@ const Navbar = () => {
 
   const handleLogout = () => {
     logout();
-    showToast('Aap successfully logout ho gaye.', 'success');
+    showToast('You have been signed out.', 'success');
     navigate('/login', { replace: true });
   };
 

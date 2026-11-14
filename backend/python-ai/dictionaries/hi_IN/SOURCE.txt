@@ -1,0 +1,5 @@
+Hindi Hunspell dictionary source:
+https://github.com/LibreOffice/dictionaries/tree/master/hi_IN
+
+The dictionary files are distributed under the GNU General Public License.
+See Copyright and COPYING in this directory.
