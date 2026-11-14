@@ -279,6 +279,7 @@ def handle_check_post(environ, start_response):
     banned_words = data.get("banned_words") or []
     mandatory_phrases = data.get("mandatory_phrases") or []
     image_base64 = data.get("image_base64")
+    per_block_confidence_threshold = data.get("per_block_confidence_threshold")
 
     # 7. Validate & Decode Image if provided
     temp_image_path = None
@@ -359,6 +360,7 @@ def handle_check_post(environ, start_response):
             "whitelist_words": whitelist_words,
             "banned_words": banned_words,
             "mandatory_phrases": mandatory_phrases,
+            "per_block_confidence_threshold": per_block_confidence_threshold,
         }
 
         result = process_post.process_post(post_input, reader=reader, dictionaries=dictionaries)

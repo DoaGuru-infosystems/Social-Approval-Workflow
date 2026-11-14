@@ -33,6 +33,7 @@ from pathlib import Path
 
 
 OCR_CONFIDENCE_THRESHOLD = 0.5
+PER_BLOCK_CONFIDENCE_THRESHOLD = 0.5
 HINDI_DICTIONARY = Path(__file__).resolve().parent / "dictionaries" / "hi_IN" / "hi_IN"
 WORD_PATTERN = re.compile(r"[\u0900-\u097f]+|[A-Za-z]+(?:['’][A-Za-z]+)*")
 
@@ -180,6 +181,10 @@ def process_post(data, reader=None, dictionaries=None):
     ocr_inference_ms = 0.0
     spelling_validation_ms = 0.0
 
+    per_block_threshold = data.get("per_block_confidence_threshold", PER_BLOCK_CONFIDENCE_THRESHOLD)
+    if not isinstance(per_block_threshold, (int, float)) or not math.isfinite(per_block_threshold):
+        per_block_threshold = PER_BLOCK_CONFIDENCE_THRESHOLD
+
     if image_path is not None and not isinstance(image_path, str):
         raise ValueError("image_path must be a string or null.")
     if image_path:
@@ -197,7 +202,8 @@ def process_post(data, reader=None, dictionaries=None):
             raise RuntimeError(f"PaddleOCR could not read the image: {error}") from error
 
         blocks = []
-        confidences = []
+        all_confidences = []
+        accepted_confidences = []
         if detections and isinstance(detections, list):
             for page in detections:
                 if not page or not isinstance(page, list):
@@ -209,7 +215,6 @@ def process_post(data, reader=None, dictionaries=None):
                     if isinstance(text_info, (list, tuple)) and len(text_info) >= 2:
                         detected_text = str(text_info[0]).strip()
                         if detected_text:
-                            blocks.append(detected_text)
                             try:
                                 conf = float(text_info[1])
                                 if not math.isfinite(conf) or conf < 0.0:
@@ -218,12 +223,22 @@ def process_post(data, reader=None, dictionaries=None):
                                     conf = 1.0
                             except (ValueError, TypeError):
                                 conf = 0.0
-                            confidences.append(conf)
+
+                            all_confidences.append(conf)
+                            if conf >= per_block_threshold:
+                                blocks.append(detected_text)
+                                accepted_confidences.append(conf)
 
         ocr_text = "\n".join(blocks)
-        if confidences:
-            ocr_confidence_avg = sum(confidences) / len(confidences)
+        if accepted_confidences:
+            ocr_confidence_avg = sum(accepted_confidences) / len(accepted_confidences)
             ocr_reliable = ocr_confidence_avg >= OCR_CONFIDENCE_THRESHOLD
+        elif all_confidences:
+            ocr_confidence_avg = sum(all_confidences) / len(all_confidences)
+            ocr_reliable = False
+        else:
+            ocr_confidence_avg = 0.0
+            ocr_reliable = False
 
     t_spell_start = time.perf_counter()
     if dictionaries is None:

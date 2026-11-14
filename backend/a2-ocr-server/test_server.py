@@ -567,12 +567,40 @@ class TestPaddleOCRProcessing(unittest.TestCase):
             dictionaries=self.dictionaries,
         )
 
-        self.assertEqual(result["ocr_text"], "scam cure-all")
+        self.assertEqual(result["ocr_text"], "")
         self.assertFalse(result["ocr_reliable"])
         self.assertEqual(result["ocr_confidence_avg"], 0.35)
         # Banned words from OCR text should NOT be flagged when OCR is unreliable
         self.assertEqual(result["banned_words_found"], [])
         self.assertEqual(result["ocr_issues"], [])
+
+    def test_paddleocr_per_block_confidence_filtering(self):
+        mock_reader = MagicMock()
+        mock_reader.ocr.return_value = [
+            [
+                [[[10, 10], [100, 10], [100, 30], [10, 30]], ("APEX HEALTH", 0.94)],
+                [[[10, 40], [100, 40], [100, 60], [10, 60]], ("BackgroundNoise", 0.32)],
+            ]
+        ]
+
+        result = process_post.process_post(
+            {
+                "image_path": self.img_path,
+                "title": "Good Post",
+                "caption": "Good post caption",
+                "whitelist_words": ["APEX"],
+                "banned_words": ["BackgroundNoise"],
+                "mandatory_phrases": [],
+            },
+            reader=mock_reader,
+            dictionaries=self.dictionaries,
+        )
+
+        self.assertIn("APEX HEALTH", result["ocr_text"])
+        self.assertNotIn("BackgroundNoise", result["ocr_text"])
+        self.assertTrue(result["ocr_reliable"])
+        self.assertEqual(result["ocr_confidence_avg"], 0.94)
+        self.assertEqual(result["banned_words_found"], [])
 
     def test_paddleocr_banned_words_flagged_when_reliable(self):
         mock_reader = MagicMock()
@@ -648,7 +676,8 @@ class TestPaddleOCRProcessing(unittest.TestCase):
             dictionaries=self.dictionaries,
         )
 
-        self.assertIn("Line One", result["ocr_text"])
+        self.assertIn("Line Three", result["ocr_text"])
+        self.assertNotIn("Line One", result["ocr_text"])
         import math
         self.assertTrue(math.isfinite(result["ocr_confidence_avg"]))
         self.assertGreaterEqual(result["ocr_confidence_avg"], 0.0)

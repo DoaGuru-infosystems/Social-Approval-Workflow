@@ -68,10 +68,36 @@ class ProcessPostTests(unittest.TestCase):
                 dictionaries=self.dictionaries,
             )
 
-        self.assertEqual(result["ocr_text"], "Welcom")
+        self.assertEqual(result["ocr_text"], "")
         self.assertFalse(result["ocr_reliable"])
         self.assertEqual(result["ocr_issues"], [])
         self.assertNotIn("Welcom", [issue["word"] for issue in result["spelling_issues"]])
+        self.assertEqual(result["banned_words_found"], [])
+
+    def test_per_block_confidence_filtering(self):
+        fake_detections = [
+            [
+                [[[0, 0], [10, 0], [10, 10], [0, 10]], ("GoodText", 0.92)],
+                [[[0, 20], [10, 20], [10, 30], [0, 30]], ("NoiseGarbage", 0.35)],
+            ]
+        ]
+        fake_module = fake_paddleocr(fake_detections)
+        with patch.dict(sys.modules, {"paddleocr": fake_module}):
+            result = process_post.process_post(
+                {
+                    "image_path": str(IMAGE_PATH),
+                    "title": "Healthy",
+                    "caption": "Good",
+                    "whitelist_words": ["GoodText"],
+                    "banned_words": ["NoiseGarbage"],
+                    "mandatory_phrases": [],
+                },
+                dictionaries=self.dictionaries,
+            )
+
+        self.assertEqual(result["ocr_text"], "GoodText")
+        self.assertNotIn("NoiseGarbage", result["ocr_text"])
+        self.assertTrue(result["ocr_reliable"])
         self.assertEqual(result["banned_words_found"], [])
 
     def test_reliable_ocr_text_is_spelling_and_banned_checked(self):

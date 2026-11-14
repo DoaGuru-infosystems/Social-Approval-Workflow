@@ -75,11 +75,12 @@ const runRemoteAICheck = async (inputData) => {
 
   if (inputData.image_path) {
     const resolvedPath = path.resolve(inputData.image_path);
-    if (fs.existsSync(resolvedPath)) {
-      const imageBuffer = fs.readFileSync(resolvedPath);
-      imageBase64 = imageBuffer.toString('base64');
-      imageFilename = path.basename(resolvedPath);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`Image file not found on disk at: ${resolvedPath}`);
     }
+    const imageBuffer = fs.readFileSync(resolvedPath);
+    imageBase64 = imageBuffer.toString('base64');
+    imageFilename = path.basename(resolvedPath);
   }
 
   const payload = {
@@ -92,15 +93,25 @@ const runRemoteAICheck = async (inputData) => {
     mandatory_phrases: inputData.mandatory_phrases || [],
   };
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': apiKey,
-    },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(AI_CHECK_TIMEOUT_MS),
-  });
+  let response;
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiKey,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(AI_CHECK_TIMEOUT_MS),
+    });
+
+    if (response.status === 503 && attempt < maxRetries) {
+      await new Promise((res) => setTimeout(res, (attempt + 1) * 4000));
+      continue;
+    }
+    break;
+  }
 
   if (!response.ok) {
     let errorDetail = `HTTP ${response.status} ${response.statusText}`;
@@ -135,7 +146,9 @@ const runRemoteAICheck = async (inputData) => {
 
 const resolveImagePath = (imagePath) => {
   if (!imagePath) return null;
-  return path.resolve(path.isAbsolute(imagePath) ? imagePath : path.join(backendRoot, imagePath));
+  if (path.isAbsolute(imagePath)) return path.resolve(imagePath);
+  if (fs.existsSync(path.resolve(imagePath))) return path.resolve(imagePath);
+  return path.resolve(path.join(backendRoot, imagePath));
 };
 
 /**
