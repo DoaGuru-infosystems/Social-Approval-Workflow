@@ -1,18 +1,12 @@
-const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const pool = require('../config/db');
 
-const AI_CHECK_TIMEOUT_MS = 120_000;
+// Ensure environment variables are loaded if invoked directly
 const backendRoot = path.resolve(__dirname, '..');
-const pythonThreadEnv = {
-  OPENBLAS_NUM_THREADS: '1',
-  OMP_NUM_THREADS: '1',
-  MKL_NUM_THREADS: '1',
-  NUMEXPR_NUM_THREADS: '1',
-  OPENCV_NUM_THREADS: '1',
-  VECLIB_MAXIMUM_THREADS: '1',
-  BLIS_NUM_THREADS: '1',
-};
+require('dotenv').config({ path: path.join(backendRoot, '.env') });
+
+const AI_CHECK_TIMEOUT_MS = 150_000;
 
 /**
  * Fetch Brand Guidelines for a specific Client
@@ -56,93 +50,88 @@ const getClientGuidelines = async (clientId) => {
 };
 
 /**
- * Run the per-request Python OCR and spelling check.
+ * Run OCR and brand compliance check via Remote A2 Hosting Python API.
  * @param {Object} inputData
+ * @param {string} [inputData.title]
+ * @param {string} [inputData.caption]
+ * @param {string} [inputData.image_path]
+ * @param {string[]} [inputData.whitelist_words]
+ * @param {string[]} [inputData.banned_words]
+ * @param {string[]} [inputData.mandatory_phrases]
  * @returns {Promise<Object>}
  */
-const runPythonAICheck = (inputData) =>
-  new Promise((resolve, reject) => {
-    const pythonExecutable =
-      process.platform === 'win32'
-        ? path.join(backendRoot, 'python-ai', 'venv', 'Scripts', 'python.exe')
-        : path.join(backendRoot, 'python-ai', 'venv', 'bin', 'python');
-    const scriptPath = path.join(backendRoot, 'python-ai', 'process_post.py');
-    const child = spawn(pythonExecutable, [scriptPath], {
-      cwd: backendRoot,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', ...pythonThreadEnv },
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+const runRemoteAICheck = async (inputData) => {
+  const apiUrl = (process.env.A2_OCR_API_URL || 'https://siarasystems.com/ocr-test').replace(/\/+$/, '');
+  const apiKey = (process.env.A2_OCR_API_KEY || '').trim();
 
-    let output = '';
-    let errorOutput = '';
-    let settled = false;
-    const timeout = setTimeout(() => {
-      child.kill();
-      finishWithError(new Error(`AI check timeout after ${AI_CHECK_TIMEOUT_MS / 1000} seconds`));
-    }, AI_CHECK_TIMEOUT_MS);
+  if (!apiKey) {
+    throw new Error('Server configuration error: A2_OCR_API_KEY is not defined in environment.');
+  }
 
-    const finishWithError = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      reject(error);
-    };
+  const endpoint = `${apiUrl}/check-post`;
 
-    child.stdout.on('data', (data) => {
-      output += data.toString('utf8');
-    });
-    child.stderr.on('data', (data) => {
-      errorOutput += data.toString('utf8');
-      process.stderr.write(data);
-    });
-    child.stdin.on('error', (error) => {
-      if (error.code !== 'EPIPE') {
-        finishWithError(new Error(`Failed to send input to Python AI check: ${error.message}`));
-      }
-    });
-    child.on('error', (error) => {
-      finishWithError(new Error(`Unable to start Python AI check: ${error.message}`));
-    });
-    child.on('close', (code) => {
-      if (settled) return;
-      clearTimeout(timeout);
-      if (code !== 0) {
-        finishWithError(new Error(`Python AI check failed: ${errorOutput.trim() || `exit code ${code}`}`));
-        return;
-      }
+  let imageBase64 = null;
+  let imageFilename = null;
 
-      try {
-        const result = JSON.parse(output);
-        if (result.error) {
-          finishWithError(new Error(`Python AI check failed: ${result.error}`));
-          return;
-        }
-        if (
-          !result ||
-          typeof result !== 'object' ||
-          Array.isArray(result) ||
-          typeof result.ocr_text !== 'string' ||
-          typeof result.ocr_reliable !== 'boolean' ||
-          !Number.isFinite(result.ocr_confidence_avg) ||
-          !Array.isArray(result.spelling_issues) ||
-          !Array.isArray(result.ocr_issues) ||
-          !Array.isArray(result.banned_words_found) ||
-          !Array.isArray(result.missing_mandatory_phrases)
-        ) {
-          throw new Error('Unexpected response shape');
-        }
-        settled = true;
-        resolve(result);
-      } catch (error) {
-        finishWithError(
-          new Error(`Invalid JSON from Python AI check${errorOutput ? `: ${errorOutput.trim()}` : ''}`)
-        );
-      }
-    });
+  if (inputData.image_path) {
+    const resolvedPath = path.resolve(inputData.image_path);
+    if (fs.existsSync(resolvedPath)) {
+      const imageBuffer = fs.readFileSync(resolvedPath);
+      imageBase64 = imageBuffer.toString('base64');
+      imageFilename = path.basename(resolvedPath);
+    }
+  }
 
-    child.stdin.end(JSON.stringify(inputData));
+  const payload = {
+    title: inputData.title || '',
+    caption: inputData.caption || '',
+    image_base64: imageBase64,
+    image_filename: imageFilename,
+    whitelist_words: inputData.whitelist_words || [],
+    banned_words: inputData.banned_words || [],
+    mandatory_phrases: inputData.mandatory_phrases || [],
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey,
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(AI_CHECK_TIMEOUT_MS),
   });
+
+  if (!response.ok) {
+    let errorDetail = `HTTP ${response.status} ${response.statusText}`;
+    try {
+      const errJson = await response.json();
+      if (errJson && errJson.error) {
+        errorDetail = errJson.error;
+      }
+    } catch (_) {}
+    throw new Error(`Remote AI check failed: ${errorDetail}`);
+  }
+
+  const result = await response.json();
+
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    Array.isArray(result) ||
+    typeof result.ocr_text !== 'string' ||
+    typeof result.ocr_reliable !== 'boolean' ||
+    !Number.isFinite(result.ocr_confidence_avg) ||
+    !Array.isArray(result.spelling_issues) ||
+    !Array.isArray(result.ocr_issues) ||
+    !Array.isArray(result.banned_words_found) ||
+    !Array.isArray(result.missing_mandatory_phrases)
+  ) {
+    throw new Error('Unexpected response shape from Remote AI check');
+  }
+
+  return result;
+};
 
 const resolveImagePath = (imagePath) => {
   if (!imagePath) return null;
@@ -160,7 +149,7 @@ const resolveImagePath = (imagePath) => {
 const runAiCheck = async ({ clientId = null, title = '', caption = '', imagePath = null }) => {
   const guidelines = await getClientGuidelines(clientId);
   const resolvedImagePath = resolveImagePath(imagePath);
-  const result = await runPythonAICheck({
+  const result = await runRemoteAICheck({
     image_path: resolvedImagePath,
     caption: caption || '',
     title: title || '',
@@ -219,6 +208,7 @@ const runAiCheck = async ({ clientId = null, title = '', caption = '', imagePath
 
 module.exports = {
   getClientGuidelines,
-  runPythonAICheck,
+  runRemoteAICheck,
+  runPythonAICheck: runRemoteAICheck,
   runAiCheck,
 };
