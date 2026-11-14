@@ -4,8 +4,8 @@
   "description": "Social Media Post Approval System Backend (Express + MySQL)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch-path=server.js --watch-path=controllers --watch-path=routes --watch-path=services --watch-path=middleware --watch-path=config server.js",
+    "start": "node init && node server.js",
+    "dev": "node init && node --watch-path=server.js --watch-path=controllers --watch-path=routes --watch-path=services --watch-path=middleware --watch-path=config server.js",
     "test-ai": "node test-ai.js",
     "migrate-python-ai": "node scripts/migrate-python-ai.js"
   },
