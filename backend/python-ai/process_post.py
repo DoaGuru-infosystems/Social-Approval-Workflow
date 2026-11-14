@@ -9,14 +9,25 @@ THREAD_ENV = (
     "OPENCV_NUM_THREADS",
     "VECLIB_MAXIMUM_THREADS",
     "BLIS_NUM_THREADS",
+    "CPU_NUM",
 )
 for variable in THREAD_ENV:
     os.environ[variable] = "1"
 
+os.environ["FLAGS_fraction_of_cpu_memory_to_use"] = "0.5"
+os.environ["PADDLE_DISABLE_TELEMETRY"] = "1"
+
+# Ensure HOME directory points to user directory on A2 Hosting if unset under Passenger
+if "HOME" not in os.environ or not os.environ.get("HOME"):
+    if os.path.exists("/home/siarasys"):
+        os.environ["HOME"] = "/home/siarasys"
+
 
 import json
+import math
 import re
 import sys
+import time
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -128,7 +139,24 @@ def _find_banned_words(text, banned_words):
     return found
 
 
-def process_post(data):
+def load_reader():
+    from paddleocr import PaddleOCR
+
+    return PaddleOCR(
+        use_angle_cls=True,
+        lang="hi",
+        use_gpu=False,
+        show_log=False,
+        enable_mkldnn=False,
+        cpu_threads=1,
+    )
+
+
+def load_dictionaries():
+    return _load_dictionaries()
+
+
+def process_post(data, reader=None, dictionaries=None):
     if not isinstance(data, dict):
         raise ValueError("Input must be a JSON object.")
 
@@ -149,6 +177,9 @@ def process_post(data):
     ocr_text = ""
     ocr_confidence_avg = 0.0
     ocr_reliable = False
+    ocr_inference_ms = 0.0
+    spelling_validation_ms = 0.0
+
     if image_path is not None and not isinstance(image_path, str):
         raise ValueError("image_path must be a string or null.")
     if image_path:
@@ -157,36 +188,48 @@ def process_post(data):
             raise FileNotFoundError(f"Image file does not exist: {resolved_image_path}")
 
         try:
-            import cv2
-
-            cv2.setNumThreads(1)
-            import torch
-
-            torch.set_num_threads(1)
-            torch.set_num_interop_threads(1)
-            import easyocr
-
-            reader = easyocr.Reader(["en", "hi"])
-            detections = reader.readtext(str(resolved_image_path), detail=1)
+            if reader is None:
+                reader = load_reader()
+            t_ocr_start = time.perf_counter()
+            detections = reader.ocr(str(resolved_image_path), cls=True)
+            ocr_inference_ms = (time.perf_counter() - t_ocr_start) * 1000
         except Exception as error:
-            raise RuntimeError(f"EasyOCR could not read the image: {error}") from error
+            raise RuntimeError(f"PaddleOCR could not read the image: {error}") from error
 
         blocks = []
         confidences = []
-        for detection in detections:
-            if len(detection) < 3:
-                continue
-            block_text = str(detection[1]).strip()
-            if block_text:
-                blocks.append(block_text)
-                confidences.append(float(detection[2]))
+        if detections and isinstance(detections, list):
+            for page in detections:
+                if not page or not isinstance(page, list):
+                    continue
+                for line in page:
+                    if not line or not isinstance(line, (list, tuple)) or len(line) < 2:
+                        continue
+                    text_info = line[1]
+                    if isinstance(text_info, (list, tuple)) and len(text_info) >= 2:
+                        detected_text = str(text_info[0]).strip()
+                        if detected_text:
+                            blocks.append(detected_text)
+                            try:
+                                conf = float(text_info[1])
+                                if not math.isfinite(conf) or conf < 0.0:
+                                    conf = 0.0
+                                elif conf > 1.0:
+                                    conf = 1.0
+                            except (ValueError, TypeError):
+                                conf = 0.0
+                            confidences.append(conf)
 
         ocr_text = "\n".join(blocks)
         if confidences:
             ocr_confidence_avg = sum(confidences) / len(confidences)
             ocr_reliable = ocr_confidence_avg >= OCR_CONFIDENCE_THRESHOLD
 
-    english, english_fallback, hindi = _load_dictionaries()
+    t_spell_start = time.perf_counter()
+    if dictionaries is None:
+        english, english_fallback, hindi = load_dictionaries()
+    else:
+        english, english_fallback, hindi = dictionaries
     base_text = f"{title}\n{caption}"
     ocr_issues = (
         _check_spelling(ocr_text, whitelist, english, english_fallback, hindi)
@@ -210,6 +253,7 @@ def process_post(data):
     missing_mandatory_phrases = [
         phrase for phrase in mandatory_phrases if phrase.casefold() not in caption_lower
     ]
+    spelling_validation_ms = (time.perf_counter() - t_spell_start) * 1000
 
     return {
         "ocr_text": ocr_text,
@@ -219,6 +263,10 @@ def process_post(data):
         "ocr_issues": ocr_issues,
         "banned_words_found": _find_banned_words(checked_text, banned_words),
         "missing_mandatory_phrases": missing_mandatory_phrases,
+        "_internal_timings": {
+            "ocr_inference_ms": round(ocr_inference_ms, 2),
+            "spelling_validation_ms": round(spelling_validation_ms, 2),
+        },
     }
 
 

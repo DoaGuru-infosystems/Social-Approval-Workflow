@@ -1,0 +1,19 @@
+# Core Deep Learning Framework (CPU, single-threaded CloudLinux compatible)
+paddlepaddle==2.6.2
+
+# Target PaddleOCR Version (pinned to 2.x stable release; do NOT upgrade to 3.x without code rewrite)
+paddleocr==2.9.1
+
+# Numerical backend (pinned to NumPy 1.x to prevent ABI breakage with PaddlePaddle 2.6.2)
+numpy==1.26.4
+
+# Headless OpenCV (avoids missing libGL.so.1 graphical dependencies on headless shared hosting)
+opencv-python-headless>=4.8.0,<4.11.0
+
+# Geometry and polygon clipping dependencies
+pyclipper>=1.3.0
+shapely>=2.0.0
+
+# Brand compliance and Hunspell dictionary dependencies
+pyspellchecker==0.9.1
+spylls==0.1.7

@@ -198,7 +198,7 @@ const runAiCheck = async ({ clientId = null, title = '', caption = '', imagePath
   return {
     passed,
     summary,
-    engine: 'EasyOCR (English/Hindi) + Hunspell (spylls)',
+    engine: 'PaddleOCR (English/Hindi) + Hunspell (spylls)',
     spelling_issues: spellingIssues,
     ocr_extracted_text: ocrExtractedText,
     ocr_issues: ocrIssues,
