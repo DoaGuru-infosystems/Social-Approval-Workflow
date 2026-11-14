@@ -39,7 +39,7 @@ const ManagerDashboard = () => {
       // Filter for posts pending manager review
       setPosts(list.filter((p) => p.status === 'pending_manager'));
     } catch {
-      showToast('Manager review queue load karne mein samasya aayi.', 'error');
+      showToast('Unable to load the manager review queue.', 'error');
     } finally {
       setLoading(false);
     }
@@ -52,17 +52,17 @@ const ManagerDashboard = () => {
       await postService.managerReview(postId, { action, comment });
 
       if (action === 'approve') {
-        showToast(`Post #${postId} approve ho gaya aur Admin review ke liye bhej diya gaya!`, 'success');
+        showToast(`Post #${postId} was approved and sent to the Admin for review.`, 'success');
       } else if (action === 'reject') {
-        showToast(`Post #${postId} reject karke permanently band kar diya gaya.`, 'warning');
+        showToast(`Post #${postId} was rejected and permanently closed.`, 'warning');
       } else {
-        showToast(`Post #${postId} par changes request SMO ko wapas bhej di gayi hai.`, 'success');
+        showToast(`The change request for post #${postId} was sent back to the SMO.`, 'success');
       }
 
       // Remove from queue
       setPosts((prev) => prev.filter((p) => p.id !== postId));
     } catch (err) {
-      const msg = err.response?.data?.message || 'Review process karne mein samasya aayi. Kripya dobara try karein.';
+      const msg = err.response?.data?.message || 'Unable to process the review. Please try again.';
       showToast(msg, 'error');
     } finally {
       setActiveActionId(null);
@@ -125,9 +125,9 @@ const ManagerDashboard = () => {
             <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 mx-auto flex items-center justify-center mb-4">
               <CheckCircle2 className="w-7 h-7" />
             </div>
-            <h3 className="text-lg font-bold text-[#2B2A27]">Abhi koi post review ke liye pending nahi hai</h3>
+            <h3 className="text-lg font-bold text-[#2B2A27]">No posts are currently pending review</h3>
             <p className="text-xs text-[#6B6A63] mt-1.5 max-w-sm mx-auto">
-              Sabhi submissions process ho chuke hain. Jab bhi koi SMO naya post submit karega, yahan dikhai dega.
+              All submissions have been processed. New posts submitted by an SMO will appear here.
             </p>
           </div>
         ) : (
@@ -206,7 +206,7 @@ const ManagerDashboard = () => {
                           <div className="flex items-center justify-between text-xs font-semibold text-emerald-800">
                             <span className="flex items-center gap-1.5">
                               <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                              Bilingual AI & Brand Rules Check
+                              Hindi and English AI & Brand Rules Check
                             </span>
                             <span className="text-[#6B6A63] font-mono text-[11px]">
                               Rechecks: {post.recheck_count}/3
@@ -265,7 +265,7 @@ const ManagerDashboard = () => {
                           ) : (
                             <p className="text-xs text-emerald-800 flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
                               <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                              <span>Bilingual spelling clean hai.</span>
+                              <span>No Hindi or English spelling issues were found.</span>
                             </p>
                           )}
 
@@ -274,7 +274,7 @@ const ManagerDashboard = () => {
                             <div className="text-xs text-[#6B6A63] pt-2 border-t border-[#E5E2DA]">
                               <span className="font-semibold text-[#2B2A27] flex items-center gap-1 mb-1">
                                 <Quote className="w-3 h-3 text-emerald-600" />
-                                Image OCR Text (Eng + Hin):
+                                Image OCR Text (English + Hindi):
                               </span>
                               <div className="p-2 rounded-xl bg-white border border-[#E5E2DA] font-mono text-[#2B2A27] text-[11px]">
                                 "{ocrText}"
@@ -286,7 +286,7 @@ const ManagerDashboard = () => {
                           {Boolean(post.manual_review_required || post.recheck_count >= 3) && (
                             <div className="flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
                               <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-                              <span>⚠️ AI Recheck Limit Khatam (3/3): SMO ne max attempts le liye hain. Manually dhyan se check karein!</span>
+                              <span>AI recheck limit reached (3/3). The SMO has used all attempts. Review this post manually.</span>
                             </div>
                           )}
                         </div>

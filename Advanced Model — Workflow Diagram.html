@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -34,7 +34,7 @@ line,path{stroke:var(--sub);stroke-width:1.4;}
 <body>
 <div class="wrap">
 <h1>Advanced Model — Workflow Overview</h1>
-<p class="sub">Node par click karke uska role samjho</p>
+<p class="sub">Select a node to learn about its role</p>
 <svg viewBox="0 0 700 820" id="diagram">
 <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="var(--sub)" stroke-width="1.4"/></marker></defs>
 
@@ -69,15 +69,15 @@ line,path{stroke:var(--sub);stroke-width:1.4;}
 
 <g class="n c-teal" data-i="4"><rect x="200" y="382" width="300" height="56" rx="10"/>
 <text x="350" y="404" text-anchor="middle">Central TL / Manager Approval</text>
-<text x="350" y="422" text-anchor="middle" class="sub">Sabhi clients ek hi dashboard</text></g>
+<text x="350" y="422" text-anchor="middle" class="sub">All clients in one dashboard</text></g>
 
 <g class="n c-purple" data-i="5"><rect x="200" y="468" width="300" height="56" rx="10"/>
 <text x="350" y="490" text-anchor="middle">Common Final Reviewer Login</text>
-<text x="350" y="508" text-anchor="middle" class="sub">Shared account, koi bhi authorized</text></g>
+<text x="350" y="508" text-anchor="middle" class="sub">Shared account for authorized users</text></g>
 
 <g class="n c-blue" data-i="6"><rect x="200" y="554" width="300" height="56" rx="10"/>
 <text x="350" y="576" text-anchor="middle">Platform Selection</text>
-<text x="350" y="594" text-anchor="middle" class="sub">Mode ke hisaab se pehle/baad mein</text></g>
+<text x="350" y="594" text-anchor="middle" class="sub">Selected before or after, by workflow mode</text></g>
 
 <g class="n c-amber" data-i="7"><rect x="200" y="640" width="300" height="56" rx="10"/>
 <text x="350" y="662" text-anchor="middle">Publishing Queue</text>
@@ -89,26 +89,26 @@ line,path{stroke:var(--sub);stroke-width:1.4;}
 
 <g class="n c-red" data-i="9"><rect x="380" y="726" width="280" height="56" rx="10"/>
 <text x="520" y="748" text-anchor="middle">Video Upload App</text>
-<text x="520" y="766" text-anchor="middle" class="sub">Alag Node app, shared DB/disk</text></g>
+<text x="520" y="766" text-anchor="middle" class="sub">Separate Node app, shared database/disk</text></g>
 
 <g class="n c-green" data-i="10"><rect x="190" y="782" width="320" height="38" rx="10"/>
 <text x="350" y="804" text-anchor="middle">Live Verification + Completed</text></g>
 </svg>
-<div class="detail" id="detail"><h2>Click a step</h2><p>Kisi bhi box par click karke uska role padho.</p></div>
+<div class="detail" id="detail"><h2>Click a step</h2><p>Select any box to learn about its role.</p></div>
 </div>
 <script>
 const info = [
-["Admin: Client + Account Setup","Admin naya client banata hai, uske brand guidelines set karta hai, Instagram/Facebook/YouTube accounts connect karta hai. Har client ka data isolated rehta hai."],
-["Content Creation","Creator/SMO client select karta hai, image ya video upload karta hai, caption/tagline/hashtags likhta hai. Mode (Recommendation/Full Automation) ke hisaab se platform yahin ya baad mein select hoga."],
-["AI Check (Dual Engine)","Spelling/grammar LanguageTool (primary) + nspell (fallback) se check hota hai. Image ka text Google Vision (primary) + Tesseract.js (fallback) se nikal ke check hota hai. Engine tag report mein dikhta hai."],
-["Suggestions + Recheck Loop","AI jo suggestions deta hai, Creator accept ya edit karta hai. Edit hua toh dobara AI check — lekin max 3-4 baar, uske baad manual review force hota hai."],
-["Central TL / Manager Approval","Ek hi central Creative TL — sabhi clients ki posts isी ek dashboard mein aati hain, client-wise alag assignment nahi."],
-["Common Final Reviewer Login","Ek shared login account (jaise finalreview@yourcompany.com) — koi dedicated employee assign nahi, koi bhi authorized banda is se login karke final approve kar sakta hai."],
-["Platform Selection","Recommendation Mode mein ye Final approval ke baad, SMO manually chunta hai. Full Automation Mode mein ye shuru mein hi client ke saath select ho chuka hota hai."],
-["Publishing Queue","Har destination (platform+account) ka apna job. Failed destination hi retry hota hai, successful ko dobara nahi chhera jata. Retry se pehle actual status reconcile hota hai."],
-["Auto / Image Path","Chhoti files (image) aur Instagram/Facebook ke video_url wale auto-publish seedha Main App se API call karke publish hote hain."],
-["Video Upload App","Bade video (800MB-1GB) ke liye alag Node.js app — A2 ke process-limit ko bachane ke liye. Shared MySQL DB aur shared disk se Main App ke saath indirectly connect."],
-["Live Verification + Completed","Platform se seedha confirm kiya jata hai post live hai ya nahi. Match hua toh Completed, mismatch par Admin/TL ko alert."]
+["Admin: Client + Account Setup","The Admin creates a client, sets its brand guidelines, and connects Instagram/Facebook/YouTube accounts. Each client's data remains isolated."],
+["Content Creation","The Creator/SMO selects a client, uploads an image or video, and writes the caption/tagline/hashtags. The workflow mode (Recommendation/Full Automation) determines whether the platform is selected now or later."],
+["AI Check (Dual Engine)","LanguageTool (primary) + nspell (fallback) check spelling and grammar. Google Vision (primary) + Tesseract.js (fallback) extract and check image text. The report shows which engine was used."],
+["Suggestions + Recheck Loop","The Creator accepts or edits AI suggestions. Edited content is checked again, up to 3–4 times, after which manual review is required."],
+["Central TL / Manager Approval","One central Creative TL reviews posts for all clients in a single dashboard, without separate client assignments."],
+["Common Final Reviewer Login","A shared login account (for example, finalreview@yourcompany.com) is used instead of assigning a dedicated employee. Any authorized person can sign in to give final approval."],
+["Platform Selection","In Recommendation Mode, the SMO selects the platform after final approval. In Full Automation Mode, the platform is selected with the client at the start."],
+["Publishing Queue","Each destination (platform + account) has its own job. Only failed destinations are retried; successful ones are not. Reconcile the actual status before retrying."],
+["Auto / Image Path","Small image files and Instagram/Facebook auto-published videos using video_url are published through direct API calls from the Main App."],
+["Video Upload App","A separate Node.js app handles large videos (800 MB–1 GB) to protect A2's process limits. It connects indirectly to the Main App through a shared MySQL database and disk."],
+["Live Verification + Completed","Confirm directly with the platform that the post is live. Mark it Completed if it matches; alert the Admin/TL if it does not."]
 ];
 document.querySelectorAll('.n').forEach(n=>{
   n.addEventListener('click',()=>{

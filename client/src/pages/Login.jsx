@@ -21,7 +21,7 @@ const Login = () => {
     setError('');
 
     if (!email.trim() || !password.trim()) {
-      const msg = 'Kripya email aur password dono daalein.';
+      const msg = 'Enter both your email address and password.';
       setError(msg);
       showToast(msg, 'warning');
       return;
@@ -32,7 +32,7 @@ const Login = () => {
       const data = await login({ email: email.trim(), password });
       const userRole = data?.user?.role;
 
-      showToast(`Swagat hai, ${data?.user?.name || 'User'}! Login safal raha.`, 'success');
+      showToast(`Welcome, ${data?.user?.name || 'User'}! You are signed in.`, 'success');
 
       // Strict role-based automatic dashboard redirect
       if (userRole === 'admin') {
@@ -43,9 +43,9 @@ const Login = () => {
         navigate('/smo', { replace: true });
       }
     } catch (err) {
-      let friendlyError = 'Email ya password galat hai. Kripya dobara check karein.';
+      let friendlyError = 'The email address or password is incorrect. Please try again.';
       if (!err.response) {
-        friendlyError = 'Server se connection nahi ho pa raha hai. Kripya check karein ki server chal raha hai.';
+        friendlyError = 'Unable to connect to the server. Please check that it is running.';
       } else if (err.response.data?.message) {
         friendlyError = err.response.data.message;
       }

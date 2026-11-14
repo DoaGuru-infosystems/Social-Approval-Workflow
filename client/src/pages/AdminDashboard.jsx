@@ -88,7 +88,7 @@ const AdminDashboard = () => {
       const list = Array.isArray(data) ? data : data?.posts || [];
       setAllPosts(list);
     } catch {
-      showToast('Admin post data load karne mein samasya aayi.', 'error');
+      showToast('Unable to load Admin post data.', 'error');
     } finally {
       setLoadingPosts(false);
     }
@@ -100,7 +100,7 @@ const AdminDashboard = () => {
       const data = await clientService.getClients({ all: 'true' });
       setClients(data?.clients || []);
     } catch {
-      showToast('Clients list load karne mein samasya aayi.', 'error');
+      showToast('Unable to load the client list.', 'error');
     } finally {
       setLoadingClients(false);
     }
@@ -117,7 +117,7 @@ const AdminDashboard = () => {
       setBannedInput((g.banned_words || []).join(', '));
       setMandatoryInput((g.mandatory_phrases || []).join(', '));
     } catch {
-      showToast('Client details load karne mein samasya aayi.', 'error');
+      showToast('Unable to load client details.', 'error');
     } finally {
       setLoadingClientDetail(false);
     }
@@ -126,20 +126,20 @@ const AdminDashboard = () => {
   const handleCreateClient = async (e) => {
     e.preventDefault();
     if (!newClientName.trim()) {
-      showToast('Kripya client ka naam daalein.', 'warning');
+      showToast('Enter a client name.', 'warning');
       return;
     }
 
     setCreatingClient(true);
     try {
       const data = await clientService.createClient({ name: newClientName.trim() });
-      showToast(`Naya client '${data.client.name}' create ho gaya!`, 'success');
+      showToast(`Client '${data.client.name}' was created.`, 'success');
       setNewClientName('');
       setShowAddClientModal(false);
       fetchClients();
       handleSelectClient(data.client.id);
     } catch (err) {
-      showToast(err.response?.data?.message || 'Client create karne mein samasya aayi.', 'error');
+      showToast(err.response?.data?.message || 'Unable to create the client.', 'error');
     } finally {
       setCreatingClient(false);
     }
@@ -156,10 +156,10 @@ const AdminDashboard = () => {
         banned_words: bannedInput,
         mandatory_phrases: mandatoryInput,
       });
-      showToast('Brand guidelines successfully save ho gayi!', 'success');
+      showToast('Brand guidelines saved successfully.', 'success');
       handleSelectClient(selectedClient.client.id);
     } catch (err) {
-      showToast(err.response?.data?.message || 'Brand guidelines save karne mein samasya aayi.', 'error');
+      showToast(err.response?.data?.message || 'Unable to save the brand guidelines.', 'error');
     } finally {
       setSavingGuidelines(false);
     }
@@ -169,7 +169,7 @@ const AdminDashboard = () => {
     e.preventDefault();
     if (!selectedClient?.client?.id) return;
     if (!connectAccountName.trim()) {
-      showToast('Kripya account handle / name daalein.', 'warning');
+      showToast('Enter the account handle or name.', 'warning');
       return;
     }
 
@@ -183,13 +183,13 @@ const AdminDashboard = () => {
         platform_account_id: `${connectPlatform}_${Date.now()}`,
         access_token: `EAAB_live_token_${Date.now()}_${Math.random().toString(36).substring(7)}`,
       });
-      showToast(`${connectPlatform.toUpperCase()} account successfully connect ho gaya!`, 'success');
+      showToast(`${connectPlatform.toUpperCase()} account connected successfully.`, 'success');
       setConnectAccountName('');
       setShowConnectModal(false);
       handleSelectClient(selectedClient.client.id);
       fetchClients();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Social account connect karne mein samasya aayi.', 'error');
+      showToast(err.response?.data?.message || 'Unable to connect the social account.', 'error');
     } finally {
       setConnectingSocial(false);
     }
@@ -197,15 +197,15 @@ const AdminDashboard = () => {
 
   const handleDisconnectSocial = async (accountId) => {
     if (!selectedClient?.client?.id) return;
-    if (!window.confirm('Kya aap sach mein is social account ko disconnect karna chahte hain?')) return;
+    if (!window.confirm('Are you sure you want to disconnect this social account?')) return;
 
     try {
       await clientService.disconnectSocialAccount(selectedClient.client.id, accountId);
-      showToast('Social account disconnect ho gaya.', 'success');
+      showToast('Social account disconnected.', 'success');
       handleSelectClient(selectedClient.client.id);
       fetchClients();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Disconnect karne mein samasya aayi.', 'error');
+      showToast(err.response?.data?.message || 'Unable to disconnect the social account.', 'error');
     }
   };
 
@@ -213,7 +213,7 @@ const AdminDashboard = () => {
     try {
       await clientService.updateClient(client.id, { is_active: !client.is_active });
       showToast(
-        `Client '${client.name}' ab ${!client.is_active ? 'Active' : 'Inactive'} ho gaya hai.`,
+        `Client '${client.name}' is now ${!client.is_active ? 'active' : 'inactive'}.`,
         'success'
       );
       fetchClients();
@@ -221,7 +221,7 @@ const AdminDashboard = () => {
         handleSelectClient(client.id);
       }
     } catch (err) {
-      showToast(err.response?.data?.message || 'Client status update karne mein samasya aayi.', 'error');
+      showToast(err.response?.data?.message || 'Unable to update the client status.', 'error');
     }
   };
 
@@ -234,16 +234,16 @@ const AdminDashboard = () => {
       await postService.adminReview(postId, { action, comment });
 
       if (action === 'approve') {
-        showToast(`Post #${postId} ko final Admin clearance mil gayi! Platform select unlock ho gaya.`, 'success');
+        showToast(`Post #${postId} received final Admin approval. Platform selection is now available.`, 'success');
       } else if (action === 'reject') {
-        showToast(`Post #${postId} reject karke permanently close kar diya gaya.`, 'warning');
+        showToast(`Post #${postId} was rejected and permanently closed.`, 'warning');
       } else {
-        showToast(`Post #${postId} par changes request SMO ko wapas bhej di gayi hai.`, 'success');
+        showToast(`The change request for post #${postId} was sent back to the SMO.`, 'success');
       }
 
       fetchAdminPosts();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Admin action process karne mein samasya aayi.';
+      const msg = err.response?.data?.message || 'Unable to process the Admin action.';
       showToast(msg, 'error');
     } finally {
       setActiveActionId(null);
@@ -367,10 +367,10 @@ const AdminDashboard = () => {
                 <div className="bg-[#FFFFFF] rounded-2xl p-10 border border-[#E5E2DA] text-center max-w-lg mx-auto shadow-xs">
                   <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
                   <p className="text-sm font-semibold text-[#2B2A27]">
-                    Abhi koi post Admin sign-off ke liye pending nahi hai
+                    No posts are currently pending Admin sign-off
                   </p>
                   <p className="text-xs text-[#6B6A63] mt-1">
-                    Manager dwara approve kiye gaye posts yahan final clearance ke liye aayenge.
+                    Posts approved by the Manager will appear here for final review.
                   </p>
                 </div>
               ) : (
@@ -438,7 +438,7 @@ const AdminDashboard = () => {
                                 <div className="flex items-center justify-between">
                                   <span className="font-semibold text-emerald-800 flex items-center gap-1">
                                     <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                                    Bilingual AI & Brand Rules Check
+                                    Hindi and English AI & Brand Rules Check
                                   </span>
                                   <span
                                     className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
@@ -547,7 +547,7 @@ const AdminDashboard = () => {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-base font-bold text-[#2B2A27]">Master Post Audit & Status Log</h2>
-                  <p className="text-xs text-[#6B6A63]">System mein sabhi client posts ki realtime status report</p>
+                  <p className="text-xs text-[#6B6A63]">Real-time status of all client posts</p>
                 </div>
                 <span className="text-xs text-[#6B6A63] font-mono">{allPosts.length} items</span>
               </div>
@@ -571,7 +571,7 @@ const AdminDashboard = () => {
                     {allPosts.length === 0 ? (
                       <tr>
                         <td colSpan={9} className="py-6 text-center text-xs text-[#6B6A63]">
-                          Koi posts available nahi hain.
+                          No posts are available.
                         </td>
                       </tr>
                     ) : (
@@ -629,7 +629,7 @@ const AdminDashboard = () => {
                   <div>
                     <h2 className="text-lg font-bold text-[#2B2A27]">Registered Clients Directory</h2>
                     <p className="text-xs text-[#6B6A63]">
-                      Har client ke Brand Rules (whitelist, banned, mandatory) aur connected social accounts manage karein.
+                      Manage each client's brand rules (whitelist, banned words, and required phrases) and connected social accounts.
                     </p>
                   </div>
                   <Button
@@ -665,7 +665,7 @@ const AdminDashboard = () => {
                       ) : clients.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="py-8 text-center text-xs text-[#6B6A63]">
-                            Koi client registered nahi hai. "Add New Client" par click karke pehla client banayein.
+                            No clients are registered. Select "Add New Client" to create the first one.
                           </td>
                         </tr>
                       ) : (
@@ -805,7 +805,7 @@ const AdminDashboard = () => {
                             Allowed / Whitelist Words (Comma-Separated)
                           </label>
                           <p className="text-xs text-[#6B6A63] mb-2">
-                            Ye brand names ya specific terms hain jinhe spelling check galat nahi manega.
+                            Add brand names or terms that should be accepted by the spelling checker.
                           </p>
                           <textarea
                             rows={3}
@@ -823,7 +823,7 @@ const AdminDashboard = () => {
                             <span>Banned Words (Immediate Red Flag)</span>
                           </label>
                           <p className="text-xs text-[#6B6A63] mb-2">
-                            Agar post ke caption, title ya image OCR mein ye words mile toh AI report turant reject/flag karegi.
+                            If these words appear in a post's caption, title, or image text, the AI report will flag them.
                           </p>
                           <textarea
                             rows={3}
@@ -841,7 +841,7 @@ const AdminDashboard = () => {
                             <span>Mandatory Phrases / Required Disclaimers</span>
                           </label>
                           <p className="text-xs text-[#6B6A63] mb-2">
-                            Agar caption mein ye mandatory hashtags ya disclaimers nahi honge toh warning dikhegi.
+                            A warning will appear if the caption does not include these required hashtags or disclaimers.
                           </p>
                           <textarea
                             rows={2}
@@ -884,17 +884,17 @@ const AdminDashboard = () => {
                       </div>
 
                       <p className="text-xs text-[#6B6A63]">
-                        SMO sirf inhi connected accounts par post publish karne ke liye select kar sakta hai.
+                        The SMO can publish posts only to these connected accounts.
                       </p>
 
                       {selectedClient.social_accounts?.length === 0 ? (
                         <div className="p-6 rounded-2xl bg-[#FAF9F6] border border-[#E5E2DA] text-center space-y-2">
                           <Share2 className="w-8 h-8 text-[#A8A29E] mx-auto" />
                           <p className="text-xs font-semibold text-[#2B2A27]">
-                            Is client ka koi account connected nahi hai
+                            This client has no connected accounts.
                           </p>
                           <p className="text-[11px] text-[#6B6A63]">
-                            Platform selection unlock karne ke liye Instagram ya Facebook connect karein.
+                            Connect an Instagram or Facebook account to enable platform selection.
                           </p>
                           <div className="pt-2 flex justify-center gap-2">
                             <button
@@ -1065,7 +1065,7 @@ const AdminDashboard = () => {
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white"
                   />
                   <p className="text-[11px] text-[#6B6A63] mt-1.5">
-                    Meta Graph API access token ko securely AES-256 se encrypt karke database mein store kiya jayega.
+                    The Meta Graph API access token will be encrypted with AES-256 before it is stored in the database.
                   </p>
                 </div>
 

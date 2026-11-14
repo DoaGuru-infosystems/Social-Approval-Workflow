@@ -13,7 +13,7 @@ const ImageUpload = ({ onImageSelect, previewUrl, onRemove, onError }) => {
     // Check file type: only jpg, jpeg, png
     const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
     if (!allowedTypes.includes(file.type)) {
-      const err = 'Sirf JPG, JPEG ya PNG format ki images allowed hain.';
+      const err = 'Only JPG, JPEG, or PNG images are allowed.';
       setLocalError(err);
       if (onError) onError(err);
       return;
@@ -22,7 +22,7 @@ const ImageUpload = ({ onImageSelect, previewUrl, onRemove, onError }) => {
     // Check size limit: 10MB
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
-      const err = 'Image ka size 10MB se zyada hai. Kripya 10MB se chhoti image chunein.';
+      const err = 'The image must be smaller than 10 MB.';
       setLocalError(err);
       if (onError) onError(err);
       return;
@@ -86,7 +86,7 @@ const ImageUpload = ({ onImageSelect, previewUrl, onRemove, onError }) => {
             type="button"
             onClick={handleClear}
             className="absolute top-3 right-3 p-1.5 rounded-full bg-white/90 hover:bg-rose-600 text-[#6B6A63] hover:text-white transition-colors cursor-pointer shadow-md border border-[#E5E2DA]"
-            title="Image hatayein"
+            title="Remove image"
           >
             <X className="w-4 h-4" />
           </button>

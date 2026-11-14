@@ -1,116 +1,116 @@
 # Advanced Model — Complete Architecture & Analysis
-**Project working name:** Central Post Hub / MultiPost Hub (naam final nahi hai, branding baad mein decide hoga)
+**Project working name:** Central Post Hub / MultiPost Hub (the name is not final; branding will be decided later)
 
-**Is document ka purpose:** Jab Basic (MVP) workflow complete ho jaye, tab isी document ko reference banakar Advanced Model par kaam shuru karna hai. Ye poori discussion ka consolidated nichod hai — zero se lekar full production-ready platform tak.
+**Document purpose:** Once the Basic (MVP) workflow is complete, use this document as the reference for beginning work on the Advanced Model. It consolidates the discussion, from initial planning through a production-ready platform.
 
 ---
 
-## 0. Basic vs Advanced — pehle ye samjho
+## 0. Basic vs Advanced
 
-| | Basic (abhi ban raha hai) | Advanced (ye document) |
+| | Basic (currently in development) | Advanced (this document) |
 |---|---|---|
-| Clients | Single client assume | Multiple clients, isolated data |
-| Posts | Single post, ek baar mein | Multi-post, scale-ready |
-| Media | Sirf image | Image + Video (bade files, alag app) |
-| Platform select | SMO manually ek platform choose karta hai | Multi-destination, platform-specific rules |
-| Workflow | Ek hi seedha path | Do modes: Recommendation aur Full Automation |
-| AI check | Spelling + OCR (single engine) | Dual-engine fallback (primary+backup) dono jagah |
+| Clients | Assumes one client | Multiple clients with isolated data |
+| Posts | One post at a time | Multiple posts, ready to scale |
+| Media | Images only | Images and video (large files handled by a separate app) |
+| Platform selection | SMO manually selects one platform | Multiple destinations with platform-specific rules |
+| Workflow | One linear path | Two modes: Recommendation and Full Automation |
+| AI check | Spelling and OCR (single engine) | Dual-engine fallback for spelling and OCR |
 | Approval | SMO → Admin | Central TL/Manager → Common Final Reviewer login |
-| Publishing | Direct publish/manual | Queue-based, per-destination jobs, retry, reconciliation |
-| Hosting concern | Abhi nazarandaz | A2 shared hosting limits explicitly design mein shamil |
+| Publishing | Direct publishing/manual | Queue-based, per-destination jobs, retries, and reconciliation |
+| Hosting concern | Not yet considered | A2 shared-hosting limits explicitly included in the design |
 
-Basic complete hone ke baad, is document ke har section ko "upgrade task" ki tarah treat karna hai.
+After the Basic workflow is complete, treat each section of this document as an upgrade task.
 
 ---
 
 ## 1. Vision
 
-Ek **agency-grade Social Media Post Approval & Publishing Platform** jo:
-- Multiple clients ko ek hi platform se, isolated tarike se manage kare
-- Har post ko AI-assisted quality check se guzare (spelling, grammar, image text, brand consistency)
-- Multi-level human approval enforce kare bina kisi shortcut ke
-- Instagram, Facebook, YouTube par publish kare — auto ya manual, dono tarike se
-- A2 shared hosting ke andar hi reliably chale, bina VPS move kiye
-- Audit-proof ho — har action, har revision, har approval history mein safe rahe
+An **agency-grade Social Media Post Approval & Publishing Platform** that:
+- Manages multiple clients on one platform while keeping their data isolated
+- Runs AI-assisted quality checks on every post (spelling, grammar, image text, and brand consistency)
+- Enforces multi-level human approval without shortcuts
+- Publishes to Instagram, Facebook, and YouTube, either automatically or manually
+- Runs reliably on A2 shared hosting without moving to a VPS
+- Maintains an audit trail of every action, revision, and approval
 
 ---
 
 ## 2. Multi-Client Architecture
 
-- Agency ke andar N clients ho sakte hain (jaise ABC Hospital, XYZ Real Estate)
-- Har client ka: naam, brand guidelines (tone, restricted words, mandatory rules), connected social accounts (Instagram/Facebook/YouTube), apna poora post/approval history
-- **Data isolation backend-level par enforce hoga** — sirf frontend filtering se nahi. Har API request par `client_id` ownership check middleware mein hoga
-- Client create karte hi uske social accounts connect kiye jate hain (admin action)
-- Brand guidelines versioned rahenge — kis version se post check hua, wo save hoga audit ke liye
+- An agency may have N clients (for example, ABC Hospital and XYZ Real Estate).
+- Each client has a name, brand guidelines (tone, restricted words, and required rules), connected social accounts (Instagram/Facebook/YouTube), and a complete post and approval history.
+- **Enforce data isolation at the backend level**, not only through frontend filtering. Middleware must check `client_id` ownership on every API request.
+- Connect a client's social accounts when the client is created (Admin action).
+- Version brand guidelines and save the version used to check each post for auditing.
 
 ---
 
-## 3. Roles aur Access
+## 3. Roles and Access
 
-| Role | Kaam | Access pattern |
+| Role | Responsibility | Access pattern |
 |---|---|---|
-| Admin | Users/roles manage, clients/accounts connect, poora system monitor | Full access, saare clients |
-| Creator / SMO | Post banata hai, AI suggestions handle karta hai | Authorized clients ke liye post create |
-| Central Creative TL / Manager | Pehla approval — sabhi clients ke posts ek hi dashboard mein | Client-wise alag assignment nahi, central hi hai |
-| Final Reviewer | Aakhri approval, **common login account** (`finalreview@yourcompany.com`) | Koi dedicated employee assign nahi, jo authorized ho wahi login kare |
-| Live Verification | Published post ko verify karta hai | Separate ya Final Reviewer ke saath combine ho sakta hai |
+| Admin | Manages users and roles, connects clients and accounts, monitors the system | Full access to all clients |
+| Creator / SMO | Creates posts and handles AI suggestions | Creates posts for authorized clients |
+| Central Creative TL / Manager | First approval — posts for all clients appear in one dashboard | Centralized, with no separate client assignments |
+| Final Reviewer | Final approval through a **shared login account** (`finalreview@yourcompany.com`) | No dedicated employee; any authorized person can sign in |
+| Live Verification | Verifies published posts | May be separate or combined with the Final Reviewer role |
 
-AI Monitoring Dashboard **sabhi roles ko dikhega**, lekin data visibility role-based filter hogi (Admin: sab clients; Creator: apne posts; TL: sabhi relevant; Final Reviewer: approval-stage posts).
+The AI Monitoring Dashboard is visible to **all roles**, with data filtered by role (Admin: all clients; Creator: own posts; TL: all relevant posts; Final Reviewer: posts awaiting approval).
 
 ---
 
-## 4. Do Workflow Modes
+## 4. Two Workflow Modes
 
-### Mode A — Recommendation Mode (manual-heavy)
+### Mode A — Recommendation Mode (manual workflow)
 ```
-Client select → Creative upload → Caption/tagline/hashtags
-→ AI Check (suggestions) → Creator review/accept/edit (recheck loop, capped)
-→ Submit → Central TL/Manager approval → Final Reviewer (common login) approval
-→ Platform select (SMO manual, approval ke baad) → Publish Now / Schedule / Manual
+Select client → Upload creative → Add caption/tagline/hashtags
+→ AI check (suggestions) → Creator reviews/accepts/edits (limited recheck loop)
+→ Submit → Central TL/Manager approval → Final Reviewer approval (shared login)
+→ SMO selects platform after approval → Publish Now / Schedule / Manual
 → Live Verification
 ```
 
 ### Mode B — Full Automation Mode
 ```
-Client + Platform(s) + Publish method — sab shuru mein hi select
-→ Upload + content → AI Check (mandatory, fail-closed)
-→ Pass → seedha publish/schedule (manual approval chain skip)
-→ Fail → block, reason clearly dikhana, manual review required
+Select client, platforms, and publishing method at the start
+→ Upload media and content → Mandatory AI check (fail-closed)
+→ Pass → Publish or schedule directly (skip the manual approval chain)
+→ Fail → Block, clearly show the reason, and require manual review
 ```
 
-**Important:** Dono modes shared services use karenge (AI service, revision engine, publishing engine) — sirf control-flow alag hoga. Code duplication se bachna hai.
+**Important:** Both modes use shared services (AI service, revision engine, and publishing engine); only the control flow differs. Avoid code duplication.
 
 ---
 
 ## 5. AI Content Checking — Dual Engine Design
 
-| Check | Primary | Fallback | Trigger for fallback |
+| Check | Primary | Fallback | Fallback trigger |
 |---|---|---|---|
-| Spelling/Grammar | LanguageTool API | nspell (local) | API timeout/down/quota khatam |
-| Image text (OCR) | Google Vision API | Tesseract.js (local) | API timeout/down/quota khatam |
+| Spelling/Grammar | LanguageTool API | nspell (local) | API timeout, outage, or quota exhaustion |
+| Image text (OCR) | Google Vision API | Tesseract.js (local) | API timeout, outage, or quota exhaustion |
 
-- Report mein hamesha **engine tag** dikhana hai: "Google Vision" ya "Tesseract (fallback used)"
-- Banned/restricted words: simple DB table match, koi external API nahi
-- **AI recheck loop cap:** Max 3-4 recheck cycles per revision; usके baad "manual review required" force ho jaye (cost aur rate-limit control ke liye)
-- Repeated fallback-trigger (matlab primary API baar-baar down) ho toh Admin ko ek **separate alert** jaye — "OCR/Spelling primary service down check karein"
+- Always show an **engine tag** in the report: "Google Vision" or "Tesseract (fallback used)".
+- Banned/restricted words: simple database table matching; no external API.
+- **AI recheck loop cap:** Limit each revision to 3–4 recheck cycles, then require manual review to control cost and rate limits.
+- Repeated fallback triggers (the primary API repeatedly becomes unavailable) must send the Admin a **separate alert** to check the OCR/spelling service.
 
 ---
 
 ## 6. Content & Revisions
 
-- Har post ka revision number hota hai; content edit hone par **naya revision** bante hai
-- Revisions **immutable** hain (update nahi, sirf naya insert) — audit integrity ke liye
-- Approval hamesha **exact revision** par apply hota hai — purani approval naye revision ke liye invalid
-- Platform-specific caption/title override — agar platform selection content-creation se pehle nahi hui hai (Recommendation Mode), toh ye overrides ek **separate step** honge platform-select ke baad, content-creation step mein nahi
+- Each post has a revision number; editing content creates a **new revision**.
+- Revisions are **immutable** (insert new revisions; do not update existing ones) to preserve audit integrity.
+- Approval always applies to an **exact revision**; approval of an older revision is invalid for a newer one.
+- Platform-specific caption/title overrides: if the platform was not selected before content creation (Recommendation Mode), add overrides in a **separate step** after platform selection, not during content creation.
 
 ---
 
 ## 7. Approval Chain — Detail
 
-1. Central Creative TL/Manager — sabhi clients ki submitted posts ek hi dashboard mein aati hain, client-wise alag assignment ki zaroorat nahi
-2. Common Final Reviewer login — koi dedicated employee nahi, authorized person jo bhi login kare
-3. Creator apna khud ka post approve nahi kar sakta
-4. Final approval ke bina platform-selection aur publishing unlock nahi hoga
+1. Central Creative TL/Manager — submitted posts for all clients appear in one dashboard; separate client assignments are unnecessary.
+2. Common Final Reviewer login — no dedicated employee; any authorized person can sign in.
+3. Creators cannot approve their own posts.
+4. Platform selection and publishing remain locked until final approval.
 
 ---
 
@@ -118,74 +118,74 @@ Client + Platform(s) + Publish method — sab shuru mein hi select
 
 | Platform | Mechanism | Important constraint |
 |---|---|---|
-| Instagram | Meta Graph API — `video_url`/`image_url` based, Meta khud fetch karta hai | Professional account zaroori, app review chahiye |
-| Facebook | Meta Graph API, Page-based | Personal profile publish nahi hota |
-| YouTube | YouTube Data API v3, OAuth | **URL-fetch support nahi** — bytes directly chahiye; bade video (800MB-1GB) ke liye abhi **Manual Publish hi best** |
+| Instagram | Meta Graph API — based on `video_url`/`image_url`; Meta fetches the media | Professional account required; app review required |
+| Facebook | Meta Graph API, Page-based | Personal profiles cannot be used for publishing |
+| YouTube | YouTube Data API v3, OAuth | **URL fetching is not supported** — media bytes are required; **Manual Publish is currently best** for large videos (800 MB–1 GB) |
 
-Har platform ka apna adapter/service — ek platform ki failure doosre ko affect nahi karegi.
+Each platform has its own adapter/service, so a failure on one platform does not affect the others.
 
-**Meta/YouTube app review process parallel mein jaldi shuru karna hai** — dev timeline se independent hai, weeks lag sakte hain.
+**Start the Meta/YouTube app review process early and in parallel** — it is independent of the development timeline and may take weeks.
 
 ---
 
 ## 9. Publishing Engine
 
-- Har **destination** (platform+account) ke liye **separate job** — 1 post, 3 platforms = 3 independent jobs
+- Create a **separate job** for each **destination** (platform + account): one post on three platforms creates three independent jobs.
 - Statuses: Pending, Scheduled, Processing, Published, Failed, Retry Pending, Manual Action Required, Verification Pending, Verified
-- **Retry sirf failed destination ka** — successful pe dobara nahi
-- **Reconcile-before-retry rule:** Agar result uncertain hai (timeout), retry se pehle actual platform state check karo — duplicate publish se bachne ke liye
-- Worker: node-cron based, har minute chalta hai, lightweight rakhna hai (minimal dependencies, poora framework load mat karo)
+- **Retry only failed destinations**; do not retry successful ones.
+- **Reconcile-before-retry rule:** If the result is uncertain (for example, a timeout), check the actual platform state before retrying to avoid duplicate publishing.
+- Worker: node-cron-based, runs every minute, and stays lightweight (minimal dependencies; do not load the entire framework).
 
 ---
 
 ## 10. Media Handling
 
 ### Image (simple)
-- Max size ~10MB, type validation (jpg/png)
-- Normal single-request upload, concurrency control ki zaroorat nahi — halka operation hai
-- Main App ke andar hi handle hota hai
+- Maximum size ~10 MB; validate file type (JPG/PNG).
+- Use a normal single-request upload; concurrency control is unnecessary for this lightweight operation.
+- Handle image uploads in the Main App.
 
-### Video (800MB-1GB — alag architecture)
-**Do separate Node.js apps (same A2 hosting account, cPanel "Setup Node.js App" se):**
+### Video (800 MB–1 GB — separate architecture)
+**Use two separate Node.js apps (same A2 hosting account, configured through cPanel's "Setup Node.js App"):**
 
-- **App 1 (Main App):** Login, images, approvals, dashboards, cron worker, publishing logic
-- **App 2 (Video Upload App):** Sirf bade video intake — upload accept karta hai, disk pe save karta hai, DB mein status likhta hai
+- **App 1 (Main App):** Login, images, approvals, dashboards, cron worker, and publishing logic.
+- **App 2 (Video Upload App):** Accepts large video uploads, saves them to disk, and records their status in the database.
 
-**Connection mechanism:** Dono apps seedha ek-dusre ko call nahi karte — **shared MySQL database + shared disk** ke through indirectly connect hote hain:
+**Connection mechanism:** The apps do not call each other directly; they communicate indirectly through a **shared MySQL database and shared disk**:
 ```
 Browser → Video Upload App → Shared Disk (file save) + Shared DB (status row)
-Main App cron worker → Shared DB polls → Meta API ko video_url bhejta hai
-Meta → Shared Disk se file fetch karta hai (Apache serve karta hai, Node nahi)
-Publish confirm → Main App file delete karta hai + DB update
+Main App cron worker → Polls the shared database → Sends video_url to the Meta API
+Meta → Fetches the file from the shared disk (served by Apache, not Node)
+Publish confirmed → Main App deletes the file and updates the database
 ```
 
-**Kyun alag app:** Agar video-upload wahi Main App mein hota, toh A2 ke limited Passenger processes video-upload mein busy ho jate aur baaki saara app (login, images, approvals) slow/stuck ho jata. Alag app = alag process pool = isolation.
+**Why a separate app:** If video uploads were handled by the Main App, A2's limited Passenger processes could be occupied by uploads, slowing or blocking login, image handling, and approvals. A separate app provides a separate process pool and isolation.
 
-**Video file serving:** Static folder (`public_html/temp-videos/`) se Apache serve karega, Node app se nahi — warna Node process lambe download ke dauraan busy rehta.
+**Video file serving:** Apache serves files from the static folder (`public_html/temp-videos/`), not the Node app, so the Node process is not occupied during long downloads.
 
-**Concurrency control for uploads:** Global upload-slot limit (jaise max 2 ek saath) — DB-based queue table (`upload_sessions`), baaki automatically line mein lagenge, "queue position" frontend ko dikhao.
+**Concurrency control for uploads:** Set a global upload-slot limit (for example, two simultaneous uploads) using a database-backed queue table (`upload_sessions`). Queue other uploads automatically and show their queue position in the frontend.
 
-**Safety cleanup:** Daily cron job jo X ghante se purani orphan temp files delete kare, chahe unka status kuch bhi ho.
+**Safety cleanup:** Run a daily cron job to delete orphaned temporary files older than X hours, regardless of their status.
 
-**Worker Threads:** Sirf tab use karna jab koi genuinely CPU-heavy local operation ho (jaise file hash/checksum calculate karna) — simple save/upload ke liye zaroorat nahi, Node already async handle karta hai. Worker Thread NPROC nahi badhata (same process ke andar), isliye A2 ke liye safe hai jahan zaroorat ho.
+**Worker Threads:** Use only for genuinely CPU-heavy local operations (such as calculating a file hash/checksum). They are unnecessary for simple save/upload operations, which Node already handles asynchronously. A Worker Thread does not increase NPROC because it runs within the same process, so it is safe for A2 when needed.
 
 ---
 
 ## 11. Hosting & Infrastructure Constraints (A2 Shared Hosting)
 
-**Firm decision: Kabhi VPS pe move nahi karna hai — hamesha A2 shared hosting hi, optimized tarike se use karna hai.**
+**Firm decision: Do not move to a VPS. Continue using A2 shared hosting, optimized for this workload.**
 
-Isका matlab: jab bhi limits hit hon, solution hamesha **"kaam ko specialized/external jagah offload karo"** hoga, "bada server lao" nahi.
+This means that when limits are reached, the solution is to **offload work to a specialized or external service**, not to use a larger server.
 
 | Risk | Mitigation |
 |---|---|
-| NPROC/EP caps (limited Passenger processes) | Video upload ko alag app mein isolate karna, static files Apache se serve karna |
-| Cron cold-start overhead | Worker ko lightweight rakhna — minimal dependencies, direct DB client, poora framework load mat karo |
-| Disk/bandwidth | Confirmed unlimited is plan mein (screenshot se verify) — tension nahi, par **inode limit (file count)** dhyan rakhna, temp files cleanup zaroori |
-| Secret/token management | Env file approach — cPanel pe proper KMS/Vault nahi hota, file permissions extra dhyan se set karna |
-| Bade video uploads | Separate Node app + Apache static serving + upload concurrency limit |
+| NPROC/EP caps (limited Passenger processes) | Isolate video uploads in a separate app and serve static files through Apache |
+| Cron cold-start overhead | Keep the worker lightweight: minimal dependencies, direct DB client, and no full-framework loading |
+| Disk/bandwidth | The plan is confirmed unlimited (verified by screenshot), but monitor the **inode limit (file count)** and clean up temporary files |
+| Secret/token management | Use environment files; cPanel does not provide a proper KMS/Vault, so set file permissions carefully |
+| Large video uploads | Separate Node app, Apache static serving, and an upload concurrency limit |
 
-**Sabse pehla implementation step (before heavy feature work):** Ek chhota **hosting stress test** — dummy cron worker + concurrent connections simulate karke dekho A2 kitna handle kar sakta hai, taaki architecture decisions ispar based ho, assumption par nahi.
+**First implementation step (before major feature work):** Run a small **hosting stress test** by simulating a dummy cron worker and concurrent connections. Measure A2's capacity so architecture decisions are based on evidence, not assumptions.
 
 ---
 
@@ -206,18 +206,18 @@ Isका matlab: jab bhi limits hit hon, solution hamesha **"kaam ko specialized
 ## 13. Security
 
 - JWT auth + bcrypt passwords
-- Client-level access check **har relevant API request** par — non-negotiable, security ka foundation
-- OAuth tokens encrypted, kabhi frontend ko expose nahi
-- Creator apna post approve nahi kar sakta
-- Sirf exact approved revision publish ho sakta hai
-- Rate limiting, input validation, file type/size checks
-- Secrets env/config mein, code mein kabhi nahi
+- Check client-level access on **every relevant API request**; this is non-negotiable and foundational to security.
+- Encrypt OAuth tokens; never expose them to the frontend.
+- Creators cannot approve their own posts.
+- Only the exact approved revision can be published.
+- Apply rate limiting, input validation, and file type/size checks.
+- Keep secrets in environment/configuration files, never in code.
 
 ---
 
 ## 14. Notifications
 
-Submit, approve/reject, changes requested, scheduled-due, publish success/failure, token expired, verification mismatch, **AI/OCR provider repeatedly failing** (important, aksar miss hota hai) — in sab par alert. Channel: Email/WhatsApp, admin-configurable (abhi exact channel decide nahi hua).
+Send alerts for submissions, approvals/rejections, requested changes, scheduled posts due, publishing success/failure, expired tokens, verification mismatches, and **repeated AI/OCR provider failures**. Channels: Email/WhatsApp, configurable by Admin (the exact channel has not yet been decided).
 
 ---
 
@@ -240,31 +240,31 @@ Submit, approve/reject, changes requested, scheduled-due, publish success/failur
 
 ## 16. Basic → Advanced: Upgrade Checklist
 
-Jab Basic complete ho jaye, ye list point-by-point dekhni hai:
+After the Basic workflow is complete, review this list point by point:
 
-- [ ] Single-client assumption hatao → multi-client tables + access-check middleware add karo
-- [ ] Single AI engine → dual-engine fallback (dono: spelling, OCR) add karo
-- [ ] SMO manual platform-select ko client ke "connected accounts list" se replace karo
-- [ ] Simple approval (SMO→Admin) ko Central TL + Common Final Reviewer login mein restructure karo
-- [ ] Direct publish ko destination-level job queue mein convert karo (retry/reconciliation ke saath)
-- [ ] Image-only upload mein Video Upload App (alag Node instance) add karo
-- [ ] AI recheck loop cap, fallback-alert, revision-immutability enforce karo
-- [ ] Hosting stress test karo isse pehle ki video/multi-client load aaye
-- [ ] Notifications aur activity-log system build karo
-- [ ] Reports/analytics (sabse last mein, Phase 5+ equivalent)
+- [ ] Replace the single-client assumption with multi-client tables and access-check middleware
+- [ ] Add dual-engine fallback for spelling and OCR
+- [ ] Replace manual platform selection by the SMO with the client's connected accounts list
+- [ ] Restructure simple approval (SMO→Admin) into Central TL + Common Final Reviewer login
+- [ ] Convert direct publishing into a destination-level job queue with retries and reconciliation
+- [ ] Add a Video Upload App (separate Node instance) to image-only uploads
+- [ ] Enforce the AI recheck limit, fallback alerts, and revision immutability
+- [ ] Run a hosting stress test before adding video or multi-client load
+- [ ] Build the notifications and activity-log system
+- [ ] Add reports/analytics (last, equivalent to Phase 5+)
 
 ---
 
-## 17. Open Decisions — Advanced build se pehle confirm karna
+## 17. Open Decisions — Confirm Before the Advanced Build
 
-1. Notification channel final (Email/WhatsApp/dono)?
-2. Ek Manager/Reviewer multiple clients handle karega ya sirf central hi rahega hamesha?
-3. YouTube ke liye future mein browser-direct resumable upload karna hai ya Manual Publish hamesha hi rahega?
-4. Scheduled time change hone par re-approval chahiye ya nahi?
-5. Upload-slot safe limit kya hoga — hosting stress test ke baad hi pata chalega
+1. What is the final notification channel: Email, WhatsApp, or both?
+2. Will one Manager/Reviewer handle multiple clients, or will the role always remain centralized?
+3. Should YouTube support browser-direct resumable uploads in the future, or should publishing remain manual?
+4. Is re-approval required when a scheduled time changes?
+5. What is the safe upload-slot limit? Determine it after the hosting stress test.
 
 ---
 
 ## 18. Naming Note
 
-Working names discuss hue: "MultiPost Hub", "Central Post Hub" — final branding baad mein decide karni hai, architecture ispar depend nahi karta.
+Working names discussed: "MultiPost Hub" and "Central Post Hub". Final branding will be decided later and does not affect the architecture.

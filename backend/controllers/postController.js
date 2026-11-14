@@ -43,6 +43,7 @@ const attachLatestDetails = async (posts) => {
       ...a,
       spelling_issues: typeof a.spelling_issues === 'string' ? JSON.parse(a.spelling_issues) : a.spelling_issues || [],
       ocr_issues: typeof a.ocr_issues === 'string' ? JSON.parse(a.ocr_issues) : a.ocr_issues || [],
+      ocr_unreliable: Boolean(Number(a.ocr_unreliable)),
       banned_words_found: typeof a.banned_words_found === 'string' ? JSON.parse(a.banned_words_found) : a.banned_words_found || [],
       missing_mandatory_phrases: typeof a.missing_mandatory_phrases === 'string' ? JSON.parse(a.missing_mandatory_phrases) : a.missing_mandatory_phrases || [],
     });
@@ -108,23 +109,6 @@ const createPost = async (req, res) => {
     const cleanTitle = title.trim();
     const cleanCaption = caption ? caption.trim() : null;
 
-    // 4. Insert into posts table
-    const [postResult] = await pool.query(
-      `INSERT INTO posts (created_by, client_id, title, caption, image_path, status, recheck_count, manual_review_required)
-       VALUES (?, ?, ?, ?, ?, 'ai_checking', 0, FALSE)`,
-      [req.user.id, client.id, cleanTitle, cleanCaption, imagePath]
-    );
-    const postId = postResult.insertId;
-
-    // 5. Insert Revision 1
-    const [revResult] = await pool.query(
-      `INSERT INTO post_revisions (post_id, revision_number, title, caption, image_path)
-       VALUES (?, 1, ?, ?, ?)`,
-      [postId, cleanTitle, cleanCaption, imagePath]
-    );
-    const revisionId = revResult.insertId;
-
-    // 6. Run AI Check (Bilingual Hindi + English + Client Brand Guidelines)
     const aiResult = await aiService.runAiCheck({
       clientId: client.id,
       title: cleanTitle,
@@ -132,23 +116,41 @@ const createPost = async (req, res) => {
       imagePath: imagePath || null,
     });
 
-    // 7. Save AI Check Result
+    // Insert into posts table
+    const [postResult] = await pool.query(
+      `INSERT INTO posts (created_by, client_id, title, caption, image_path, status, recheck_count, manual_review_required)
+       VALUES (?, ?, ?, ?, ?, 'ai_checking', 0, FALSE)`,
+      [req.user.id, client.id, cleanTitle, cleanCaption, imagePath]
+    );
+    const postId = postResult.insertId;
+
+    // Insert Revision 1
+    const [revResult] = await pool.query(
+      `INSERT INTO post_revisions (post_id, revision_number, title, caption, image_path)
+       VALUES (?, 1, ?, ?, ?)`,
+      [postId, cleanTitle, cleanCaption, imagePath]
+    );
+    const revisionId = revResult.insertId;
+
+    // Save AI Check Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, banned_words_found, missing_mandatory_phrases
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
         JSON.stringify(aiResult.spelling_issues),
         aiResult.ocr_extracted_text || null,
         JSON.stringify(aiResult.ocr_issues),
+        aiResult.ocr_confidence,
+        aiResult.ocr_unreliable,
         JSON.stringify(aiResult.banned_words_found),
         JSON.stringify(aiResult.missing_mandatory_phrases),
       ]
     );
 
-    // 8. Fetch newly created post with client and user details
+    // Fetch newly created post with client and user details
     const [createdPosts] = await pool.query(
       `SELECT p.*, c.name AS client_name, u.name AS smo_name 
        FROM posts p 
@@ -223,7 +225,7 @@ const revisePost = async (req, res) => {
     if (post.recheck_count >= 3 || post.manual_review_required) {
       return res.status(400).json({
         success: false,
-        message: 'Manual review required, aage edit nahi ho sakta (Max 3 recheck attempts reached).',
+        message: 'Manual review is required. This post cannot be edited further (maximum of 3 recheck attempts reached).',
         manual_review_required: true,
       });
     }
@@ -232,26 +234,6 @@ const revisePost = async (req, res) => {
     const newCaption = req.body.caption !== undefined ? req.body.caption.trim() : post.caption;
     const newImagePath = req.file ? `uploads/${req.file.filename}` : post.image_path;
 
-    // Fetch current max revision number
-    const [revRows] = await pool.query(
-      'SELECT COALESCE(MAX(revision_number), 0) AS max_rev FROM post_revisions WHERE post_id = ?',
-      [postId]
-    );
-    const nextRevisionNumber = revRows[0].max_rev + 1;
-
-    // 1. Insert new revision
-    const [revResult] = await pool.query(
-      `INSERT INTO post_revisions (post_id, revision_number, title, caption, image_path)
-       VALUES (?, ?, ?, ?, ?)`,
-      [postId, nextRevisionNumber, newTitle, newCaption, newImagePath]
-    );
-    const revisionId = revResult.insertId;
-
-    // 2. Increment recheck count
-    const updatedRecheckCount = post.recheck_count + 1;
-    const isManualReviewRequired = updatedRecheckCount >= 3;
-
-    // 3. Run AI Check with Client Guidelines
     const aiResult = await aiService.runAiCheck({
       clientId: post.client_id,
       title: newTitle,
@@ -259,23 +241,44 @@ const revisePost = async (req, res) => {
       imagePath: newImagePath || null,
     });
 
-    // 4. Save AI Result
+    // Fetch current max revision number
+    const [revRows] = await pool.query(
+      'SELECT COALESCE(MAX(revision_number), 0) AS max_rev FROM post_revisions WHERE post_id = ?',
+      [postId]
+    );
+    const nextRevisionNumber = revRows[0].max_rev + 1;
+
+    // Insert new revision
+    const [revResult] = await pool.query(
+      `INSERT INTO post_revisions (post_id, revision_number, title, caption, image_path)
+       VALUES (?, ?, ?, ?, ?)`,
+      [postId, nextRevisionNumber, newTitle, newCaption, newImagePath]
+    );
+    const revisionId = revResult.insertId;
+
+    // Increment recheck count
+    const updatedRecheckCount = post.recheck_count + 1;
+    const isManualReviewRequired = updatedRecheckCount >= 3;
+
+    // Save AI Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, banned_words_found, missing_mandatory_phrases
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
         JSON.stringify(aiResult.spelling_issues),
         aiResult.ocr_extracted_text || null,
         JSON.stringify(aiResult.ocr_issues),
+        aiResult.ocr_confidence,
+        aiResult.ocr_unreliable,
         JSON.stringify(aiResult.banned_words_found),
         JSON.stringify(aiResult.missing_mandatory_phrases),
       ]
     );
 
-    // 5. Update Post
+    // Update Post
     await pool.query(
       `UPDATE posts
        SET title = ?, caption = ?, image_path = ?, recheck_count = ?, manual_review_required = ?, status = 'ai_checking'
@@ -582,7 +585,7 @@ const selectPlatform = async (req, res) => {
     if (post.status !== 'admin_approved') {
       return res.status(400).json({
         success: false,
-        message: 'Pehle admin approval zaroori hai (Current status: ' + post.status + ').',
+        message: 'Admin approval is required first (current status: ' + post.status + ').',
       });
     }
 
@@ -595,7 +598,7 @@ const selectPlatform = async (req, res) => {
     if (socialAccounts.length === 0) {
       return res.status(400).json({
         success: false,
-        message: `Is client ka koi ${platform.toUpperCase()} account connect nahi hai, pehle Admin se connect karwayein.`,
+        message: `This client has no connected ${platform.toUpperCase()} account. Ask an Admin to connect one first.`,
       });
     }
 
@@ -787,6 +790,7 @@ const getPostById = async (req, res) => {
       ...r,
       spelling_issues: typeof r.spelling_issues === 'string' ? JSON.parse(r.spelling_issues) : r.spelling_issues || [],
       ocr_issues: typeof r.ocr_issues === 'string' ? JSON.parse(r.ocr_issues) : r.ocr_issues || [],
+      ocr_unreliable: Boolean(Number(r.ocr_unreliable)),
       banned_words_found: typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : r.banned_words_found || [],
       missing_mandatory_phrases: typeof r.missing_mandatory_phrases === 'string' ? JSON.parse(r.missing_mandatory_phrases) : r.missing_mandatory_phrases || [],
     }));
