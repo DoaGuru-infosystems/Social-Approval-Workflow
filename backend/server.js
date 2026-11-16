@@ -95,31 +95,52 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
-app.listen(PORT, async () => {
-  console.log(`===============================================`);
-  console.log(`🚀 Backend server is running on http://localhost:${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`===============================================`);
-
-  // Check database connectivity on boot
-  const dbStatus = await pool.testConnection();
-  if (dbStatus.connected) {
-    console.log(`✅ MySQL Database connected successfully.`);
-  } else {
-    console.warn(`⚠️ MySQL Database connection notice: ${dbStatus.error}`);
-    console.warn(`👉 Please ensure MySQL is running and DB '${process.env.DB_NAME || 'social_approval_db'}' exists.`);
-  }
-
-  // Pre-warm Spellcheck Dictionaries (English nspell + Hindi hunspell-asm)
+// Startup Recovery Hook & Server Startup
+const startServer = async () => {
+  // Reconcile orphaned pending AI checks from previous server run
   try {
-    const spellCheckService = require('./services/spellCheckService');
-    const dictStatus = await spellCheckService.initDictionaries();
-    console.log(`✅ Spellcheck dictionaries pre-warmed into memory (${dictStatus.durationMs} ms).`);
+    const [result] = await pool.query(
+      "UPDATE ai_check_results SET image_status='failed', image_error='Processing interrupted by server restart. Please retry.' WHERE image_status='pending'"
+    );
+    if (result && result.affectedRows > 0) {
+      console.log(`⚠️ Recovered ${result.affectedRows} pending AI check(s) interrupted by server restart.`);
+    }
   } catch (err) {
-    console.warn(`⚠️ Spellcheck dictionary pre-warming notice: ${err.message}`);
+    console.warn(`⚠️ Startup recovery query notice: ${err.message}`);
   }
-});
+
+  const server = app.listen(PORT, async () => {
+    console.log(`===============================================`);
+    console.log(`🚀 Backend server is running on http://localhost:${PORT}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`===============================================`);
+
+    // Check database connectivity on boot
+    const dbStatus = await pool.testConnection();
+    if (dbStatus.connected) {
+      console.log(`✅ MySQL Database connected successfully.`);
+    } else {
+      console.warn(`⚠️ MySQL Database connection notice: ${dbStatus.error}`);
+      console.warn(`👉 Please ensure MySQL is running and DB '${process.env.DB_NAME || 'social_approval_db'}' exists.`);
+    }
+
+    // Pre-warm Spellcheck Dictionaries (English nspell + Hindi hunspell-asm)
+    try {
+      const spellCheckService = require('./services/spellCheckService');
+      const dictStatus = await spellCheckService.initDictionaries();
+      console.log(`✅ Spellcheck dictionaries pre-warmed into memory (${dictStatus.durationMs} ms).`);
+    } catch (err) {
+      console.warn(`⚠️ Spellcheck dictionary pre-warming notice: ${err.message}`);
+    }
+  });
+
+  return server;
+};
+
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;
+app.startServer = startServer;
 

@@ -24,7 +24,10 @@ import {
   Building2,
   AlertOctagon,
   Tag,
+  Phone,
+  MapPin,
 } from 'lucide-react';
+import ImageCheckSkeleton from '../components/ImageCheckSkeleton';
 
 const SMODashboard = () => {
   const { showToast } = useToast();
@@ -54,6 +57,99 @@ const SMODashboard = () => {
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [creatingPost, setCreatingPost] = useState(false);
   const [activeActionId, setActiveActionId] = useState(null);
+  const [retryingPosts, setRetryingPosts] = useState(new Set());
+  const [checkingImageSeconds, setCheckingImageSeconds] = useState(0);
+
+  // Countdown timer for submit button "Checking Image... (X sec)" notice
+  useEffect(() => {
+    if (checkingImageSeconds <= 0) return;
+    const timer = setTimeout(() => {
+      setCheckingImageSeconds((prev) => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [checkingImageSeconds]);
+
+  // Polling hook: Poll GET /api/posts/:id/ai-status every 3 seconds for pending image checks
+  useEffect(() => {
+    const pendingPosts = posts.filter(
+      (p) => p.latest_ai_check?.image_status === 'pending'
+    );
+    if (pendingPosts.length === 0) return;
+
+    const intervalId = setInterval(async () => {
+      for (const p of pendingPosts) {
+        try {
+          const res = await postService.getAiStatus(p.id);
+          if (res && res.image_status && res.image_status !== 'pending') {
+            setPosts((prevPosts) =>
+              prevPosts.map((item) => {
+                if (item.id === p.id) {
+                  return {
+                    ...item,
+                    latest_ai_check: {
+                      ...item.latest_ai_check,
+                      ...res.combined_ai_check,
+                      image_status: res.image_status,
+                      image_error: res.image_error,
+                      ocr_extracted_text: res.ocr_extracted_text,
+                      ocr_confidence: res.ocr_confidence,
+                      ocr_unreliable: res.ocr_unreliable,
+                      spelling_issues: res.spelling_issues,
+                      banned_words_found: res.banned_words_found,
+                      missing_mandatory_phrases: res.missing_mandatory_phrases,
+                      brand_identity_check: res.brand_identity_check,
+                    },
+                  };
+                }
+                return item;
+              })
+            );
+
+            if (res.image_status === 'completed') {
+              showToast(`Image check completed for "${p.title}"!`, 'success');
+            } else if (res.image_status === 'failed') {
+              showToast(`Image check failed for "${p.title}". You can retry.`, 'warning');
+            }
+          }
+        } catch (err) {
+          console.error(`Polling error for post ${p.id}:`, err);
+        }
+      }
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [posts]);
+
+  // Handler to retry image check only without re-running text check
+  const handleRetryImageCheck = async (postId) => {
+    setRetryingPosts((prev) => new Set(prev).add(postId));
+    try {
+      await postService.checkImage(postId);
+      showToast('Retrying image check in background...', 'info');
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                latest_ai_check: {
+                  ...p.latest_ai_check,
+                  image_status: 'pending',
+                  image_error: null,
+                },
+              }
+            : p
+        )
+      );
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Unable to retry image check.', 'error');
+    } finally {
+      setRetryingPosts((prev) => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     fetchPosts();
@@ -150,16 +246,23 @@ const SMODashboard = () => {
       formData.append('caption', caption.trim());
       formData.append('image', selectedFile);
 
-      await postService.createPost(formData);
-      showToast('Post created. Hindi and English spelling and brand checks are complete.', 'success');
+      const response = await postService.createPost(formData);
+      showToast('Text check passed! Poster ka text background mein scan ho raha hai...', 'success');
 
-      // Clear form
+      // Prepend newly created post immediately into active list
+      if (response?.post) {
+        setPosts((prev) => [response.post, ...prev.filter((p) => p.id !== response.post.id)]);
+      } else {
+        fetchPosts();
+      }
+
+      // Clear form inputs keeping form interactive
       setTitle('');
       setCaption('');
       handleRemoveImage();
 
-      // Refresh posts list
-      fetchPosts();
+      // Trigger 15s indicator countdown on submit button
+      setCheckingImageSeconds(15);
     } catch (err) {
       const msg = err.response?.data?.message || 'Unable to create the post. Please try again.';
       showToast(msg, 'error');
@@ -205,15 +308,22 @@ const SMODashboard = () => {
         formData.append('image', reviseFile);
       }
 
-      await postService.revisePost(editingPost.id, formData);
-      showToast('Revision submitted and the AI recheck is complete.', 'success');
+      const response = await postService.revisePost(editingPost.id, formData);
+      showToast('Revision submitted. Text check complete; image check in progress.', 'success');
 
       setEditingPost(null);
       setReviseTitle('');
       setReviseCaption('');
       setReviseFile(null);
       setRevisePreview(null);
-      fetchPosts();
+
+      if (response?.post) {
+        setPosts((prev) =>
+          prev.map((p) => (p.id === response.post.id ? response.post : p))
+        );
+      } else {
+        fetchPosts();
+      }
     } catch (err) {
       const msg = err.response?.data?.message || 'Unable to submit the revision.';
       showToast(msg, 'error');
@@ -395,7 +505,9 @@ const SMODashboard = () => {
                   size="lg"
                   className="w-full !rounded-xl"
                 >
-                  Create & Run AI Quality Check
+                  {checkingImageSeconds > 0
+                    ? `Checking Image... (${checkingImageSeconds} sec)`
+                    : 'Create & Run AI Quality Check'}
                 </Button>
               </form>
             </div>
@@ -548,6 +660,25 @@ const SMODashboard = () => {
                             </div>
                           )}
 
+                          {/* BRAND IDENTITY ALERTS */}
+                          {aiReport.brand_identity_check?.possible_brand_name_error && (
+                            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                              <AlertOctagon className="w-4 h-4 shrink-0 text-rose-600" />
+                              <span>
+                                <strong>Brand Name Mismatch:</strong> {aiReport.brand_identity_check.possible_brand_name_error}
+                              </span>
+                            </div>
+                          )}
+
+                          {aiReport.brand_identity_check?.phone_verification?.filter((p) => p.status !== 'clean').map((pv, idx) => (
+                            <div key={idx} className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                              <Phone className="w-4 h-4 shrink-0 text-rose-600" />
+                              <span>
+                                <strong>Phone Mismatch Alert:</strong> {pv.message}
+                              </span>
+                            </div>
+                          ))}
+
                           {/* SPELLING ISSUES (Devanagari + Latin) */}
                           {spellingIssues.length > 0 ? (
                             <div className="space-y-1.5 pt-1">
@@ -586,16 +717,46 @@ const SMODashboard = () => {
                             </p>
                           )}
 
-                          {/* OCR Extracted Text (Eng + Hin) */}
-                          {ocrText && (
-                            <div className="text-xs text-[#6B6A63] pt-2 border-t border-[#E5E2DA] space-y-1">
-                              <span className="font-semibold text-[#2B2A27] flex items-center gap-1">
-                                <Quote className="w-3 h-3 text-emerald-600" />
-                                Image OCR Text (English + Hindi):
-                              </span>
-                              <div className="p-2.5 rounded-xl bg-white border border-[#E5E2DA] font-mono text-[#2B2A27] text-[11px] leading-relaxed">
-                                "{ocrText}"
-                              </div>
+                          {/* IMAGE CHECK SECTION: SKELETON / RETRY / OCR RESULT */}
+                          {imgSrc && (
+                            <div className="pt-2 border-t border-[#E5E2DA] space-y-2">
+                              {aiReport.image_status === 'pending' ? (
+                                <ImageCheckSkeleton status="pending" />
+                              ) : aiReport.image_status === 'failed' ? (
+                                <ImageCheckSkeleton
+                                  status="failed"
+                                  errorMessage={aiReport.image_error}
+                                  onRetry={() => handleRetryImageCheck(post.id)}
+                                  isRetrying={retryingPosts.has(post.id)}
+                                />
+                              ) : (
+                                <div className="space-y-2 transition-all duration-500 ease-in-out opacity-100">
+                                  {ocrText ? (
+                                    <div className="text-xs text-[#6B6A63] space-y-1">
+                                      <span className="font-semibold text-[#2B2A27] flex items-center gap-1">
+                                        <Quote className="w-3 h-3 text-emerald-600" />
+                                        Image OCR Text (English + Hindi):
+                                      </span>
+                                      <div className="p-2.5 rounded-xl bg-white border border-[#E5E2DA] font-mono text-[#2B2A27] text-[11px] leading-relaxed">
+                                        "{ocrText}"
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-stone-500 italic p-2 rounded-xl bg-stone-50 border border-[#E5E2DA]">
+                                      No readable text detected in this poster.
+                                    </div>
+                                  )}
+
+                                  {aiReport.ocr_unreliable && (
+                                    <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+                                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                                      <span>
+                                        Low OCR Confidence ({Math.round(aiReport.ocr_confidence || 0)}%). Please verify the poster text manually.
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
 

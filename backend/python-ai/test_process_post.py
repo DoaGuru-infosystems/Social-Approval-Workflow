@@ -75,6 +75,24 @@ class ProcessPostTests(unittest.TestCase):
         self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
         self.assertAlmostEqual(result["ocr_confidence_avg"], 0.95, places=2)
 
+    def test_corrupt_image_returns_empty_top7_and_empty_text(self):
+        import tempfile
+        import os
+        corrupt_file = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        corrupt_file.write(b"CORRUPTED_NON_IMAGE_DATA_BYTES")
+        corrupt_file.close()
+
+        try:
+            result = process_post.process_post({"image_path": corrupt_file.name})
+            self.assertEqual(result["ocr_text"], "")
+            self.assertFalse(result["ocr_reliable"])
+            self.assertEqual(result["top7_used"], [])
+            self.assertEqual(result["ocr_blocks_total"], 0)
+            self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
+        finally:
+            if os.path.exists(corrupt_file.name):
+                os.unlink(corrupt_file.name)
+
 
 if __name__ == "__main__":
     unittest.main()

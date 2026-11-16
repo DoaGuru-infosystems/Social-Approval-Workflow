@@ -47,6 +47,9 @@ const attachLatestDetails = async (posts) => {
       banned_words_found: typeof a.banned_words_found === 'string' ? JSON.parse(a.banned_words_found) : a.banned_words_found || [],
       missing_mandatory_phrases: typeof a.missing_mandatory_phrases === 'string' ? JSON.parse(a.missing_mandatory_phrases) : a.missing_mandatory_phrases || [],
       brand_identity_check: typeof a.brand_identity_check === 'string' ? JSON.parse(a.brand_identity_check) : a.brand_identity_check || null,
+      image_status: a.image_status || 'completed',
+      text_status: a.text_status || 'completed',
+      image_error: a.image_error || null,
     });
   });
 
@@ -58,8 +61,70 @@ const attachLatestDetails = async (posts) => {
 };
 
 /**
+ * Background worker for asynchronous Image Quality & Brand Rules Check.
+ */
+const executeBackgroundImageCheck = async ({
+  postId,
+  revisionId,
+  clientId,
+  imagePath,
+  caption,
+  textResult,
+}) => {
+  try {
+    const imageResult = await aiService.runImageCheck({
+      clientId,
+      imagePath,
+      caption: caption || '',
+    });
+
+    const combinedResult = aiService.mergeAiCheckResults(textResult, imageResult);
+
+    await pool.query(
+      `UPDATE ai_check_results
+       SET spelling_issues = ?,
+           ocr_extracted_text = ?,
+           ocr_issues = ?,
+           ocr_confidence = ?,
+           ocr_unreliable = ?,
+           image_status = ?,
+           text_status = 'completed',
+           image_error = ?,
+           banned_words_found = ?,
+           missing_mandatory_phrases = ?,
+           brand_identity_check = ?
+       WHERE post_id = ? AND revision_id = ?`,
+      [
+        JSON.stringify(combinedResult.spelling_issues),
+        combinedResult.ocr_extracted_text || null,
+        JSON.stringify(combinedResult.ocr_issues || []),
+        combinedResult.ocr_confidence,
+        combinedResult.ocr_unreliable,
+        imageResult.image_status,
+        imageResult.image_error || null,
+        JSON.stringify(combinedResult.banned_words_found),
+        JSON.stringify(combinedResult.missing_mandatory_phrases),
+        JSON.stringify(combinedResult.brand_identity_check || null),
+        postId,
+        revisionId,
+      ]
+    );
+  } catch (err) {
+    console.error(`Background image check error for post ${postId}:`, err);
+    await pool.query(
+      `UPDATE ai_check_results
+       SET image_status = 'failed',
+           image_error = ?
+       WHERE post_id = ? AND revision_id = ?`,
+      [err.message || 'Image processing failed', postId, revisionId]
+    );
+  }
+};
+
+/**
  * POST /api/posts
- * SMO creates a new post with required client_id, title, caption, and image
+ * SMO creates a new post with required client_id, title, caption, and image.
+ * Runs Node.js text check immediately (<1-2s) and kicks off Remote OCR in background.
  */
 const createPost = async (req, res) => {
   try {
@@ -110,14 +175,31 @@ const createPost = async (req, res) => {
     const cleanTitle = title.trim();
     const cleanCaption = caption ? caption.trim() : null;
 
-    const aiResult = await aiService.runAiCheck({
+    // 4. Fast Text Check (Title + Caption) in Node.js (<100ms)
+    const textResult = await aiService.runTextCheck({
       clientId: client.id,
       title: cleanTitle,
       caption: cleanCaption || '',
-      imagePath: imagePath || null,
     });
 
-    // Insert into posts table
+    const hasImage = Boolean(imagePath);
+    const initialImageStatus = hasImage ? 'pending' : 'not_applicable';
+
+    // Merged initial report for immediate frontend rendering
+    const initialAiCheck = aiService.mergeAiCheckResults(textResult, {
+      image_status: initialImageStatus,
+      ocr_extracted_text: '',
+      ocr_confidence: 0,
+      ocr_confidence_avg: 0,
+      ocr_reliable: true,
+      ocr_unreliable: false,
+      spelling_issues: [],
+      noise_tokens: [],
+      banned_words_found: [],
+      brand_identity_check: null,
+    });
+
+    // 5. Insert into posts table
     const [postResult] = await pool.query(
       `INSERT INTO posts (created_by, client_id, title, caption, image_path, status, recheck_count, manual_review_required)
        VALUES (?, ?, ?, ?, ?, 'ai_checking', 0, FALSE)`,
@@ -125,7 +207,7 @@ const createPost = async (req, res) => {
     );
     const postId = postResult.insertId;
 
-    // Insert Revision 1
+    // 6. Insert Revision 1
     const [revResult] = await pool.query(
       `INSERT INTO post_revisions (post_id, revision_number, title, caption, image_path)
        VALUES (?, 1, ?, ?, ?)`,
@@ -133,26 +215,44 @@ const createPost = async (req, res) => {
     );
     const revisionId = revResult.insertId;
 
-    // Save AI Check Result
+    // 7. Save initial AI Check Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases, brand_identity_check
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
+         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
-        JSON.stringify(aiResult.spelling_issues),
-        aiResult.ocr_extracted_text || null,
-        JSON.stringify(aiResult.ocr_issues),
-        aiResult.ocr_confidence,
-        aiResult.ocr_unreliable,
-        JSON.stringify(aiResult.banned_words_found),
-        JSON.stringify(aiResult.missing_mandatory_phrases),
-        JSON.stringify(aiResult.brand_identity_check || null),
+        JSON.stringify(initialAiCheck.spelling_issues),
+        null,
+        JSON.stringify([]),
+        0.0,
+        false,
+        initialImageStatus,
+        'completed',
+        null,
+        JSON.stringify(initialAiCheck.banned_words_found),
+        JSON.stringify(initialAiCheck.missing_mandatory_phrases),
+        JSON.stringify(initialAiCheck.brand_identity_check || null),
       ]
     );
 
-    // Fetch newly created post with client and user details
+    // 8. If image exists, kick off background image check immediately (non-blocking)
+    if (hasImage) {
+      setImmediate(() => {
+        executeBackgroundImageCheck({
+          postId,
+          revisionId,
+          clientId: client.id,
+          imagePath,
+          caption: cleanCaption || '',
+          textResult,
+        });
+      });
+    }
+
+    // 9. Fetch newly created post with client and user details
     const [createdPosts] = await pool.query(
       `SELECT p.*, c.name AS client_name, u.name AS smo_name 
        FROM posts p 
@@ -162,18 +262,34 @@ const createPost = async (req, res) => {
       [postId]
     );
 
-    return res.status(201).json({
-      success: true,
-      message: 'Post created and initial AI check completed.',
-      post: createdPosts[0],
-      revision: {
+    const createdPost = {
+      ...createdPosts[0],
+      latest_revision: {
         id: revisionId,
         revision_number: 1,
         title: cleanTitle,
         caption: cleanCaption,
         image_path: imagePath,
       },
-      ai_check: aiResult,
+      latest_ai_check: {
+        ...initialAiCheck,
+        image_status: initialImageStatus,
+        text_status: 'completed',
+        image_error: null,
+      },
+    };
+
+    return res.status(201).json({
+      success: true,
+      message: hasImage
+        ? 'Post created. Text check completed; image check running in background.'
+        : 'Post created and AI check completed.',
+      post: createdPost,
+      revision: createdPost.latest_revision,
+      text_result: textResult,
+      image_status: initialImageStatus,
+      poll_url: `/api/posts/${postId}/ai-status`,
+      ai_check: createdPost.latest_ai_check,
     });
   } catch (error) {
     console.error('Error creating post:', error);
@@ -236,11 +352,27 @@ const revisePost = async (req, res) => {
     const newCaption = req.body.caption !== undefined ? req.body.caption.trim() : post.caption;
     const newImagePath = req.file ? `uploads/${req.file.filename}` : post.image_path;
 
-    const aiResult = await aiService.runAiCheck({
+    // Fast Node.js Text Check
+    const textResult = await aiService.runTextCheck({
       clientId: post.client_id,
       title: newTitle,
       caption: newCaption || '',
-      imagePath: newImagePath || null,
+    });
+
+    const hasImage = Boolean(newImagePath);
+    const initialImageStatus = hasImage ? 'pending' : 'not_applicable';
+
+    const initialAiCheck = aiService.mergeAiCheckResults(textResult, {
+      image_status: initialImageStatus,
+      ocr_extracted_text: '',
+      ocr_confidence: 0,
+      ocr_confidence_avg: 0,
+      ocr_reliable: true,
+      ocr_unreliable: false,
+      spelling_issues: [],
+      noise_tokens: [],
+      banned_words_found: [],
+      brand_identity_check: null,
     });
 
     // Fetch current max revision number
@@ -262,24 +394,42 @@ const revisePost = async (req, res) => {
     const updatedRecheckCount = post.recheck_count + 1;
     const isManualReviewRequired = updatedRecheckCount >= 3;
 
-    // Save AI Result
+    // Save initial AI Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases, brand_identity_check
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
+         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
-        JSON.stringify(aiResult.spelling_issues),
-        aiResult.ocr_extracted_text || null,
-        JSON.stringify(aiResult.ocr_issues),
-        aiResult.ocr_confidence,
-        aiResult.ocr_unreliable,
-        JSON.stringify(aiResult.banned_words_found),
-        JSON.stringify(aiResult.missing_mandatory_phrases),
-        JSON.stringify(aiResult.brand_identity_check || null),
+        JSON.stringify(initialAiCheck.spelling_issues),
+        null,
+        JSON.stringify([]),
+        0.0,
+        false,
+        initialImageStatus,
+        'completed',
+        null,
+        JSON.stringify(initialAiCheck.banned_words_found),
+        JSON.stringify(initialAiCheck.missing_mandatory_phrases),
+        JSON.stringify(initialAiCheck.brand_identity_check || null),
       ]
     );
+
+    // If image exists, run background image check asynchronously
+    if (hasImage) {
+      setImmediate(() => {
+        executeBackgroundImageCheck({
+          postId,
+          revisionId,
+          clientId: post.client_id,
+          imagePath: newImagePath,
+          caption: newCaption || '',
+          textResult,
+        });
+      });
+    }
 
     // Update Post
     await pool.query(
@@ -298,20 +448,34 @@ const revisePost = async (req, res) => {
       [postId]
     );
 
-    return res.status(200).json({
-      success: true,
-      message: isManualReviewRequired
-        ? 'Revision saved. Max 3 rechecks reached: Manual review required flag set.'
-        : `Revision ${nextRevisionNumber} saved and AI rechecked successfully.`,
-      post: updatedPosts[0],
-      revision: {
+    const updatedPost = {
+      ...updatedPosts[0],
+      latest_revision: {
         id: revisionId,
         revision_number: nextRevisionNumber,
         title: newTitle,
         caption: newCaption,
         image_path: newImagePath,
       },
-      ai_check: aiResult,
+      latest_ai_check: {
+        ...initialAiCheck,
+        image_status: initialImageStatus,
+        text_status: 'completed',
+        image_error: null,
+      },
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: isManualReviewRequired
+        ? 'Revision saved. Max 3 rechecks reached: Manual review required flag set.'
+        : `Revision ${nextRevisionNumber} saved. Text check completed; image check running in background.`,
+      post: updatedPost,
+      revision: updatedPost.latest_revision,
+      text_result: textResult,
+      image_status: initialImageStatus,
+      poll_url: `/api/posts/${postId}/ai-status`,
+      ai_check: updatedPost.latest_ai_check,
       manual_review_required: isManualReviewRequired,
     });
   } catch (error) {
@@ -796,6 +960,10 @@ const getPostById = async (req, res) => {
       ocr_unreliable: Boolean(Number(r.ocr_unreliable)),
       banned_words_found: typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : r.banned_words_found || [],
       missing_mandatory_phrases: typeof r.missing_mandatory_phrases === 'string' ? JSON.parse(r.missing_mandatory_phrases) : r.missing_mandatory_phrases || [],
+      brand_identity_check: typeof r.brand_identity_check === 'string' ? JSON.parse(r.brand_identity_check) : r.brand_identity_check || null,
+      image_status: r.image_status || 'completed',
+      text_status: r.text_status || 'completed',
+      image_error: r.image_error || null,
     }));
 
     const [approvals] = await pool.query(
@@ -831,6 +999,236 @@ const getPostById = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/posts/:id/ai-status
+ * Status polling endpoint for background AI checks
+ */
+const getAiStatus = async (req, res) => {
+  try {
+    const postId = parseInt(req.params.id, 10);
+    if (!postId || isNaN(postId)) {
+      return res.status(400).json({ success: false, message: 'Invalid post ID.' });
+    }
+
+    const [posts] = await pool.query('SELECT * FROM posts WHERE id = ?', [postId]);
+    if (posts.length === 0) {
+      return res.status(404).json({ success: false, message: 'Post not found.' });
+    }
+
+    const [aiRows] = await pool.query(
+      'SELECT * FROM ai_check_results WHERE post_id = ? ORDER BY id DESC LIMIT 1',
+      [postId]
+    );
+
+    if (aiRows.length === 0) {
+      return res.json({
+        success: true,
+        post_id: postId,
+        text_status: 'completed',
+        image_status: 'not_applicable',
+        image_error: null,
+        combined_ai_check: null,
+      });
+    }
+
+    const ai = aiRows[0];
+    const spellingIssues = typeof ai.spelling_issues === 'string' ? JSON.parse(ai.spelling_issues) : (ai.spelling_issues || []);
+    const ocrIssues = typeof ai.ocr_issues === 'string' ? JSON.parse(ai.ocr_issues) : (ai.ocr_issues || []);
+    const bannedWords = typeof ai.banned_words_found === 'string' ? JSON.parse(ai.banned_words_found) : (ai.banned_words_found || []);
+    const missingMandatory = typeof ai.missing_mandatory_phrases === 'string' ? JSON.parse(ai.missing_mandatory_phrases) : (ai.missing_mandatory_phrases || []);
+    const brandIdentity = typeof ai.brand_identity_check === 'string' ? JSON.parse(ai.brand_identity_check) : (ai.brand_identity_check || null);
+
+    const imageStatus = ai.image_status || 'completed';
+    const textStatus = ai.text_status || 'completed';
+    const isImageCompleted = imageStatus === 'completed';
+    const isImagePending = imageStatus === 'pending';
+    const isImageFailed = imageStatus === 'failed';
+    const ocrUnreliable = Boolean(Number(ai.ocr_unreliable));
+
+    const combinedAiCheck = {
+      passed:
+        (imageStatus === 'not_applicable' || (isImageCompleted && !ocrUnreliable)) &&
+        spellingIssues.length === 0 &&
+        bannedWords.length === 0 &&
+        missingMandatory.length === 0 &&
+        !brandIdentity?.possible_brand_name_error &&
+        !(brandIdentity?.phone_verification || []).some((p) => p.status === 'mismatch_warning' || p.status === 'unknown_phone'),
+      spelling_issues: spellingIssues,
+      ocr_extracted_text: ai.ocr_extracted_text || '',
+      ocr_issues: ocrIssues,
+      ocr_confidence: Number(ai.ocr_confidence) || 0,
+      ocr_unreliable: ocrUnreliable,
+      ocr_reliable: !ocrUnreliable,
+      image_status: imageStatus,
+      text_status: textStatus,
+      image_error: ai.image_error || null,
+      banned_words_found: bannedWords,
+      missing_mandatory_phrases: missingMandatory,
+      brand_identity_check: brandIdentity,
+    };
+
+    return res.json({
+      success: true,
+      post_id: postId,
+      text_status: textStatus,
+      image_status: imageStatus,
+      image_error: ai.image_error || null,
+      ocr_extracted_text: ai.ocr_extracted_text || '',
+      ocr_confidence: Number(ai.ocr_confidence) || 0,
+      ocr_unreliable: ocrUnreliable,
+      spelling_issues: spellingIssues,
+      banned_words_found: bannedWords,
+      missing_mandatory_phrases: missingMandatory,
+      brand_identity_check: brandIdentity,
+      combined_ai_check: combinedAiCheck,
+    });
+  } catch (error) {
+    console.error('Error fetching AI status:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve AI check status.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * POST /api/posts/:id/check-image
+ * Retry / re-run only image check asynchronously
+ */
+const checkImage = async (req, res) => {
+  try {
+    const postId = parseInt(req.params.id, 10);
+    const [posts] = await pool.query('SELECT * FROM posts WHERE id = ?', [postId]);
+    if (posts.length === 0) {
+      return res.status(404).json({ success: false, message: 'Post not found.' });
+    }
+    const post = posts[0];
+
+    // Fetch latest revision
+    const [revs] = await pool.query(
+      'SELECT * FROM post_revisions WHERE post_id = ? ORDER BY revision_number DESC LIMIT 1',
+      [postId]
+    );
+    const revision = revs.length > 0 ? revs[0] : null;
+    const targetImagePath = revision?.image_path || post.image_path;
+    const targetCaption = revision?.caption || post.caption || '';
+    const targetTitle = revision?.title || post.title || '';
+
+    if (!targetImagePath) {
+      return res.status(400).json({ success: false, message: 'This post does not have an image to check.' });
+    }
+
+    // Set image_status to 'pending' in latest ai_check_results row
+    const [aiRows] = await pool.query(
+      'SELECT id, revision_id FROM ai_check_results WHERE post_id = ? ORDER BY id DESC LIMIT 1',
+      [postId]
+    );
+
+    if (aiRows.length > 0) {
+      await pool.query(
+        'UPDATE ai_check_results SET image_status = ?, image_error = NULL WHERE id = ?',
+        ['pending', aiRows[0].id]
+      );
+    }
+
+    // Get current text check
+    const textResult = await aiService.runTextCheck({
+      clientId: post.client_id,
+      title: targetTitle,
+      caption: targetCaption,
+    });
+
+    // Spawn background image check
+    setImmediate(() => {
+      executeBackgroundImageCheck({
+        postId,
+        revisionId: revision ? revision.id : (aiRows[0]?.revision_id || 0),
+        clientId: post.client_id,
+        imagePath: targetImagePath,
+        caption: targetCaption,
+        textResult,
+      });
+    });
+
+    return res.json({
+      success: true,
+      message: 'Image check restarted in background.',
+      image_status: 'pending',
+      poll_url: `/api/posts/${postId}/ai-status`,
+    });
+  } catch (error) {
+    console.error('Error restarting image check:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to restart image check.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * POST /api/posts/:id/check-text
+ * Re-run text check on demand
+ */
+const checkText = async (req, res) => {
+  try {
+    const postId = parseInt(req.params.id, 10);
+    const [posts] = await pool.query('SELECT * FROM posts WHERE id = ?', [postId]);
+    if (posts.length === 0) {
+      return res.status(404).json({ success: false, message: 'Post not found.' });
+    }
+    const post = posts[0];
+
+    const [revs] = await pool.query(
+      'SELECT * FROM post_revisions WHERE post_id = ? ORDER BY revision_number DESC LIMIT 1',
+      [postId]
+    );
+    const revision = revs.length > 0 ? revs[0] : null;
+    const targetTitle = revision?.title || post.title || '';
+    const targetCaption = revision?.caption || post.caption || '';
+
+    const textResult = await aiService.runTextCheck({
+      clientId: post.client_id,
+      title: targetTitle,
+      caption: targetCaption,
+    });
+
+    // Update latest ai_check_results with updated text results
+    const [aiRows] = await pool.query(
+      'SELECT id FROM ai_check_results WHERE post_id = ? ORDER BY id DESC LIMIT 1',
+      [postId]
+    );
+    if (aiRows.length > 0) {
+      await pool.query(
+        `UPDATE ai_check_results 
+         SET spelling_issues = ?, banned_words_found = ?, missing_mandatory_phrases = ?, text_status = 'completed'
+         WHERE id = ?`,
+        [
+          JSON.stringify(textResult.spelling_issues),
+          JSON.stringify(textResult.banned_words_found),
+          JSON.stringify(textResult.missing_mandatory_phrases),
+          aiRows[0].id,
+        ]
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: 'Text check re-run successfully.',
+      text_status: 'completed',
+      text_result: textResult,
+    });
+  } catch (error) {
+    console.error('Error running text check:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to execute text check.',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createPost,
   revisePost,
@@ -841,4 +1239,7 @@ module.exports = {
   updatePublishUrl,
   getPosts,
   getPostById,
+  getAiStatus,
+  checkImage,
+  checkText,
 };

@@ -22,3 +22,19 @@ input:-webkit-autofill:active {
   caret-color: #2B2A27 !important;
   transition: background-color 5000s ease-in-out 0s;
 }
+
+/* Shimmer Loading Animation for Image Check Skeleton */
+@keyframes shimmerAnimation {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, #ece9e1 25%, #d8d3c5 50%, #ece9e1 75%);
+  background-size: 200% 100%;
+  animation: shimmerAnimation 1.8s infinite linear;
+}

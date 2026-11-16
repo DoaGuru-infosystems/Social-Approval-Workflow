@@ -61,6 +61,21 @@ export const postService = {
     const response = await api.put(`/posts/${id}/publish-url`, { manual_publish_url });
     return response.data;
   },
+
+  getAiStatus: async (id) => {
+    const response = await api.get(`/posts/${id}/ai-status`);
+    return response.data;
+  },
+
+  checkImage: async (id) => {
+    const response = await api.post(`/posts/${id}/check-image`);
+    return response.data;
+  },
+
+  checkText: async (id) => {
+    const response = await api.post(`/posts/${id}/check-text`);
+    return response.data;
+  },
 };
 
 export default postService;

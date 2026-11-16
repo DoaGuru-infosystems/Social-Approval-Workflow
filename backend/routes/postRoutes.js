@@ -27,7 +27,26 @@ const handleUpload = (req, res, next) => {
 // 1. GET /api/posts — Role-based filtered posts list
 router.get('/', authMiddleware, postController.getPosts);
 
-// 2. GET /api/posts/:id — Full post details with revisions, AI reports & approvals
+// 2. GET /api/posts/:id/ai-status — Check current AI text & image status
+router.get('/:id/ai-status', authMiddleware, postController.getAiStatus);
+
+// 3. POST /api/posts/:id/check-image — Re-run / retry only image check
+router.post(
+  '/:id/check-image',
+  authMiddleware,
+  roleMiddleware(['smo', 'admin']),
+  postController.checkImage
+);
+
+// 4. POST /api/posts/:id/check-text — Re-run only text check
+router.post(
+  '/:id/check-text',
+  authMiddleware,
+  roleMiddleware(['smo', 'admin']),
+  postController.checkText
+);
+
+// 5. GET /api/posts/:id — Full post details with revisions, AI reports & approvals
 router.get('/:id', authMiddleware, postController.getPostById);
 
 // 3. POST /api/posts — SMO creates new post + initial AI check

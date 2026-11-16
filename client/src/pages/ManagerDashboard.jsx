@@ -18,6 +18,8 @@ import {
   AlertTriangle,
   Building2,
   AlertOctagon,
+  Phone,
+  MapPin,
 } from 'lucide-react';
 
 const ManagerDashboard = () => {
@@ -232,6 +234,25 @@ const ManagerDashboard = () => {
                               </span>
                             </div>
                           )}
+
+                          {/* BRAND IDENTITY ALERTS */}
+                          {aiReport.brand_identity_check?.possible_brand_name_error && (
+                            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                              <AlertOctagon className="w-4 h-4 shrink-0 text-rose-600" />
+                              <span>
+                                <strong>Brand Name Mismatch:</strong> {aiReport.brand_identity_check.possible_brand_name_error}
+                              </span>
+                            </div>
+                          )}
+
+                          {aiReport.brand_identity_check?.phone_verification?.filter((p) => p.status !== 'clean').map((pv, idx) => (
+                            <div key={idx} className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                              <Phone className="w-4 h-4 shrink-0 text-rose-600" />
+                              <span>
+                                <strong>Phone Mismatch Alert:</strong> {pv.message}
+                              </span>
+                            </div>
+                          ))}
 
                           {/* Misspelled list */}
                           {spellingIssues.length > 0 ? (

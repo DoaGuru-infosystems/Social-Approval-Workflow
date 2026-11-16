@@ -37,11 +37,11 @@ VALID_JPEG_BYTES = (
     b"\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9"
 )
 
-# 1x1 PNG bytes starting with \x89PNG\r\n\x1a\n
+# Valid PNG fixture bytes starting with \x89PNG\r\n\x1a\n (2x2 RGB)
 VALID_PNG_BYTES = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?"
-    b"\x03\x00\x08\xfc\x02\xfe\xa7\x9a\xa0\xa0\x00\x00\x00\x00IEND\xaeB`\x82"
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x02\x00\x00\x00\x02"
+    b"\x08\x02\x00\x00\x00\xfd\xd4\x9as\x00\x00\x00\x0fIDAT\x08\x1dcd\x00\x03"
+    b"F\x060\x00\x00\x00#\x00\x033\xf3\x90\xa7\x00\x00\x00\x00IEND\xaeB`\x82"
 )
 
 
@@ -610,6 +610,24 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         self.assertAlmostEqual(result["ocr_confidence_avg"], 0.93, places=2)
         self.assertEqual(result["ocr_blocks_total"], 2)
         self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
+
+    def test_corrupt_image_returns_empty_top7_and_empty_text(self):
+        # Write corrupted/non-image bytes to temporary file
+        import tempfile
+        corrupt_file = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+        corrupt_file.write(b"CORRUPTED_NON_IMAGE_DATA_BYTES")
+        corrupt_file.close()
+
+        try:
+            result = process_post.process_post({"image_path": corrupt_file.name})
+            self.assertEqual(result["ocr_text"], "")
+            self.assertFalse(result["ocr_reliable"])
+            self.assertEqual(result["top7_used"], [])
+            self.assertEqual(result["ocr_blocks_total"], 0)
+            self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
+        finally:
+            if os.path.exists(corrupt_file.name):
+                os.unlink(corrupt_file.name)
 
     def test_load_reader_paddleocr_configuration(self):
         fake_paddle_cls = MagicMock()
