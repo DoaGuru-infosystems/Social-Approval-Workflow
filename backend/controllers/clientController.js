@@ -24,7 +24,7 @@ const parseCleanList = (input) => {
  */
 const createClient = async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, primary_phone, alternate_phone, address } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
@@ -33,11 +33,14 @@ const createClient = async (req, res) => {
     }
 
     const trimmedName = name.trim();
+    const cleanPrimaryPhone = primary_phone ? String(primary_phone).trim() : null;
+    const cleanAlternatePhone = alternate_phone ? String(alternate_phone).trim() : null;
+    const cleanAddress = address ? String(address).trim() : null;
     const adminId = req.user.id;
 
     const [result] = await pool.query(
-      'INSERT INTO clients (name, created_by_admin_id, is_active) VALUES (?, ?, TRUE)',
-      [trimmedName, adminId]
+      'INSERT INTO clients (name, primary_phone, alternate_phone, address, created_by_admin_id, is_active) VALUES (?, ?, ?, ?, ?, TRUE)',
+      [trimmedName, cleanPrimaryPhone, cleanAlternatePhone, cleanAddress, adminId]
     );
 
     const clientId = result.insertId;
@@ -180,7 +183,7 @@ const getClientById = async (req, res) => {
 const updateClient = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, is_active } = req.body;
+    const { name, primary_phone, alternate_phone, address, is_active } = req.body;
 
     const updates = [];
     const values = [];
@@ -188,6 +191,21 @@ const updateClient = async (req, res) => {
     if (name !== undefined) {
       updates.push('name = ?');
       values.push(name.trim());
+    }
+
+    if (primary_phone !== undefined) {
+      updates.push('primary_phone = ?');
+      values.push(primary_phone ? String(primary_phone).trim() : null);
+    }
+
+    if (alternate_phone !== undefined) {
+      updates.push('alternate_phone = ?');
+      values.push(alternate_phone ? String(alternate_phone).trim() : null);
+    }
+
+    if (address !== undefined) {
+      updates.push('address = ?');
+      values.push(address ? String(address).trim() : null);
     }
 
     if (is_active !== undefined) {

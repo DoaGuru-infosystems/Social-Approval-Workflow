@@ -46,6 +46,7 @@ const attachLatestDetails = async (posts) => {
       ocr_unreliable: Boolean(Number(a.ocr_unreliable)),
       banned_words_found: typeof a.banned_words_found === 'string' ? JSON.parse(a.banned_words_found) : a.banned_words_found || [],
       missing_mandatory_phrases: typeof a.missing_mandatory_phrases === 'string' ? JSON.parse(a.missing_mandatory_phrases) : a.missing_mandatory_phrases || [],
+      brand_identity_check: typeof a.brand_identity_check === 'string' ? JSON.parse(a.brand_identity_check) : a.brand_identity_check || null,
     });
   });
 
@@ -135,8 +136,8 @@ const createPost = async (req, res) => {
     // Save AI Check Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases, brand_identity_check
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
@@ -147,6 +148,7 @@ const createPost = async (req, res) => {
         aiResult.ocr_unreliable,
         JSON.stringify(aiResult.banned_words_found),
         JSON.stringify(aiResult.missing_mandatory_phrases),
+        JSON.stringify(aiResult.brand_identity_check || null),
       ]
     );
 
@@ -263,8 +265,8 @@ const revisePost = async (req, res) => {
     // Save AI Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable, banned_words_found, missing_mandatory_phrases, brand_identity_check
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
@@ -275,6 +277,7 @@ const revisePost = async (req, res) => {
         aiResult.ocr_unreliable,
         JSON.stringify(aiResult.banned_words_found),
         JSON.stringify(aiResult.missing_mandatory_phrases),
+        JSON.stringify(aiResult.brand_identity_check || null),
       ]
     );
 

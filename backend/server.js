@@ -110,6 +110,15 @@ app.listen(PORT, async () => {
     console.warn(`⚠️ MySQL Database connection notice: ${dbStatus.error}`);
     console.warn(`👉 Please ensure MySQL is running and DB '${process.env.DB_NAME || 'social_approval_db'}' exists.`);
   }
+
+  // Pre-warm Spellcheck Dictionaries (English nspell + Hindi hunspell-asm)
+  try {
+    const spellCheckService = require('./services/spellCheckService');
+    const dictStatus = await spellCheckService.initDictionaries();
+    console.log(`✅ Spellcheck dictionaries pre-warmed into memory (${dictStatus.durationMs} ms).`);
+  } catch (err) {
+    console.warn(`⚠️ Spellcheck dictionary pre-warming notice: ${err.message}`);
+  }
 });
 
 module.exports = app;

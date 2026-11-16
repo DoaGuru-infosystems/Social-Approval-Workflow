@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS `users` (
 CREATE TABLE IF NOT EXISTS `clients` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(150) NOT NULL,
+  `primary_phone` VARCHAR(30) NULL,
+  `alternate_phone` VARCHAR(30) NULL,
+  `address` TEXT NULL,
   `created_by_admin_id` INT NOT NULL,
   `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -139,6 +142,7 @@ CREATE TABLE IF NOT EXISTS `ai_check_results` (
   `ocr_unreliable` BOOLEAN NOT NULL DEFAULT FALSE,
   `banned_words_found` JSON NULL,
   `missing_mandatory_phrases` JSON NULL,
+  `brand_identity_check` JSON NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`post_id`) REFERENCES `posts`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`revision_id`) REFERENCES `post_revisions`(`id`) ON DELETE SET NULL,

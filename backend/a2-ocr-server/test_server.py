@@ -8,6 +8,7 @@ local PaddleOCR, PaddlePaddle, or PyTorch execution.
 import base64
 import io
 import json
+import math
 import os
 import sys
 import unittest
@@ -44,27 +45,6 @@ VALID_PNG_BYTES = (
 )
 
 
-class MockHunspellDict:
-    """Mock dictionary implementing Hunspell lookup and suggest interface."""
-
-    def __init__(self, correct_words=None):
-        self.correct_words = {w.casefold() for w in (correct_words or [])}
-
-    def lookup(self, word):
-        return word.casefold() in self.correct_words
-
-    def suggest(self, word):
-        return [f"fix_{word}"]
-
-
-def make_mock_dictionaries():
-    return (
-        MockHunspellDict(["apex", "health", "wellness", "workshop", "good", "consult", "physician", "before", "starting"]),
-        None,
-        MockHunspellDict(["नमस्ते", "स्वास्थ्य", "कार्यशाला"]),
-    )
-
-
 def make_wsgi_request(wsgi_app, method="GET", path="/", headers=None, body=b""):
     """
     Simulates a standard PEP 3333 WSGI request and returns (status_code, headers, parsed_json_or_text).
@@ -99,37 +79,41 @@ def make_wsgi_request(wsgi_app, method="GET", path="/", headers=None, body=b""):
 
     def start_response(status_str, header_tuples):
         nonlocal resp_status, resp_headers
-        resp_status = int(status_str.split()[0])
-        resp_headers = dict(header_tuples)
+        resp_status = int(status_str.split(" ", 1)[0])
+        resp_headers = {k.lower(): v for k, v in header_tuples}
 
-    result_iterable = wsgi_app(env, start_response)
-    raw_body = b"".join(result_iterable)
+    response_iter = wsgi_app(env, start_response)
+    raw_body = b"".join(response_iter)
 
-    try:
-        parsed_body = json.loads(raw_body.decode("utf-8"))
-    except Exception:
-        parsed_body = raw_body.decode("utf-8")
+    parsed_body = raw_body.decode("utf-8")
+    content_type = resp_headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            parsed_body = json.loads(parsed_body)
+        except json.JSONDecodeError:
+            pass
 
     return resp_status, resp_headers, parsed_body
 
 
-class TestA2OcrServer(unittest.TestCase):
+class TestWSGIRoutesAndSecurity(unittest.TestCase):
     def setUp(self):
-        self.app = app.application
-        self.test_api_key = "test_secret_a2_key_xyz_123"
+        self.test_api_key = "test_secret_key_12345"
         os.environ["A2_OCR_API_KEY"] = self.test_api_key
+        self.app = app.application
 
     def tearDown(self):
         if "A2_OCR_API_KEY" in os.environ:
             del os.environ["A2_OCR_API_KEY"]
 
-    # 1. Health Endpoint Tests
-    def test_health_endpoint_direct(self):
+    # 1. Route Dispatching Tests
+    def test_health_endpoint(self):
         status, headers, body = make_wsgi_request(self.app, method="GET", path="/health")
         self.assertEqual(status, 200)
         self.assertEqual(body.get("status"), "ok")
         self.assertEqual(body.get("service"), "A2 Hosting PaddleOCR API")
-        self.assertEqual(body.get("engine"), "PaddleOCR (Hindi/English) + Hunspell (spylls)")
+        self.assertEqual(body.get("engine"), "PaddleOCR (Hindi/English)")
+        self.assertIn("models_cached", body)
 
     def test_health_root_path(self):
         status, headers, body = make_wsgi_request(self.app, method="GET", path="/")
@@ -137,7 +121,6 @@ class TestA2OcrServer(unittest.TestCase):
         self.assertEqual(body.get("status"), "ok")
 
     def test_health_mount_path_ocr_test(self):
-        # Simulates Passenger delivering /ocr-test or /ocr-test/health
         status, headers, body = make_wsgi_request(self.app, method="GET", path="/ocr-test/health")
         self.assertEqual(status, 200)
         self.assertEqual(body.get("status"), "ok")
@@ -256,12 +239,28 @@ class TestA2OcrServer(unittest.TestCase):
             body=payload,
         )
         self.assertEqual(status, 400)
-        self.assertIn("Only JPEG and PNG", body.get("error", ""))
+        self.assertIn("Unsupported image format", body.get("error", ""))
 
-    def test_oversized_image_limit(self):
-        big_image = VALID_PNG_BYTES + (b"\x00" * (10 * 1024 * 1024 + 100))
-        big_b64 = base64.b64encode(big_image).decode("ascii")
-        payload = json.dumps({"title": "Test", "image_base64": big_b64}).encode("utf-8")
+    def test_payload_exceeds_max_request_bytes(self):
+        fake_content_length = app.MAX_REQUEST_BYTES + 1024
+        status, headers, body = make_wsgi_request(
+            self.app,
+            method="POST",
+            path="/check-post",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(fake_content_length),
+                "X-API-Key": self.test_api_key,
+            },
+            body=b"{}",
+        )
+        self.assertEqual(status, 413)
+        self.assertIn("Payload Too Large", body.get("error", ""))
+
+    def test_decoded_image_exceeds_max_image_bytes(self):
+        huge_fake_jpeg = b"\xff\xd8\xff" + b"A" * (app.MAX_IMAGE_BYTES + 1024)
+        huge_b64 = base64.b64encode(huge_fake_jpeg).decode("ascii")
+        payload = json.dumps({"title": "Huge Image", "image_base64": huge_b64}).encode("utf-8")
         status, headers, body = make_wsgi_request(
             self.app,
             method="POST",
@@ -270,30 +269,24 @@ class TestA2OcrServer(unittest.TestCase):
             body=payload,
         )
         self.assertEqual(status, 400)
-        self.assertIn("exceeds maximum limit of 10 MB", body.get("error", ""))
+        self.assertIn("exceeds maximum limit", body.get("error", ""))
 
-    # 4. Processing Lifecycle & Temporary File Tests (with Mocked ML layers)
-    @patch("app.get_cached_dictionaries", return_value=(None, None, None))
-    @patch("app.get_cached_reader", return_value=None)
+    # 4. Processing Lifecycle & Cleanup Tests
     @patch("process_post.process_post")
-    def test_check_post_without_image(self, mock_process_post, mock_reader, mock_dicts):
+    def test_check_post_without_image_returns_empty_ocr(self, mock_process_post):
         mock_process_post.return_value = {
             "ocr_text": "",
             "ocr_reliable": False,
             "ocr_confidence_avg": 0.0,
-            "spelling_issues": [],
-            "ocr_issues": [],
-            "banned_words_found": [],
-            "missing_mandatory_phrases": [],
+            "ocr_blocks_total": 0,
+            "ocr_blocks_excluded_low_confidence": 0,
         }
 
         payload = json.dumps(
             {
                 "title": "Healthy Routine",
-                "caption": "Consult physician before starting #ApexHealth",
-                "whitelist_words": ["ApexHealth"],
-                "banned_words": ["cure-all"],
-                "mandatory_phrases": ["#ApexHealth"],
+                "caption": "Consult physician before starting new exercises.",
+                "image_base64": None,
             }
         ).encode("utf-8")
 
@@ -311,21 +304,19 @@ class TestA2OcrServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body.get("ocr_text"), "")
         self.assertFalse(body.get("ocr_reliable"))
-        self.assertEqual(body.get("spelling_issues"), [])
-        self.assertEqual(body.get("missing_mandatory_phrases"), [])
+        self.assertEqual(body.get("ocr_blocks_total"), 0)
+        self.assertEqual(body.get("ocr_blocks_excluded_low_confidence"), 0)
 
         mock_process_post.assert_called_once()
         passed_data = mock_process_post.call_args[0][0]
         self.assertIsNone(passed_data.get("image_path"))
-        self.assertEqual(passed_data.get("title"), "Healthy Routine")
 
-    @patch("app.get_cached_dictionaries", return_value=(None, None, None))
     @patch("app.get_cached_reader", return_value=MagicMock())
     @patch("process_post.process_post")
-    def test_check_post_with_jpeg_image_lifecycle(self, mock_process_post, mock_reader, mock_dicts):
+    def test_check_post_with_jpeg_image_lifecycle(self, mock_process_post, mock_reader):
         captured_temp_path = None
 
-        def fake_process(data, reader=None, dictionaries=None):
+        def fake_process(data, reader=None):
             nonlocal captured_temp_path
             captured_temp_path = data.get("image_path")
             if not captured_temp_path or not os.path.exists(captured_temp_path):
@@ -334,10 +325,8 @@ class TestA2OcrServer(unittest.TestCase):
                 "ocr_text": "APEX HEALTH",
                 "ocr_reliable": True,
                 "ocr_confidence_avg": 0.94,
-                "spelling_issues": [],
-                "ocr_issues": [],
-                "banned_words_found": [],
-                "missing_mandatory_phrases": [],
+                "ocr_blocks_total": 1,
+                "ocr_blocks_excluded_low_confidence": 0,
             }
 
         mock_process_post.side_effect = fake_process
@@ -349,9 +338,6 @@ class TestA2OcrServer(unittest.TestCase):
                 "caption": "Stay active",
                 "image_base64": jpeg_b64,
                 "image_filename": "poster.jpg",
-                "whitelist_words": ["APEX"],
-                "banned_words": [],
-                "mandatory_phrases": [],
             }
         ).encode("utf-8")
 
@@ -367,6 +353,8 @@ class TestA2OcrServer(unittest.TestCase):
         self.assertEqual(body.get("ocr_text"), "APEX HEALTH")
         self.assertTrue(body.get("ocr_reliable"))
         self.assertEqual(body.get("ocr_confidence_avg"), 0.94)
+        self.assertEqual(body.get("ocr_blocks_total"), 1)
+        self.assertEqual(body.get("ocr_blocks_excluded_low_confidence"), 0)
 
         # Check timings breakdown object
         self.assertIn("timings", body)
@@ -377,9 +365,6 @@ class TestA2OcrServer(unittest.TestCase):
         self.assertIn("reader_cached", timings)
         self.assertIn("reader_init_ms", timings)
         self.assertIn("ocr_inference_ms", timings)
-        self.assertIn("dictionaries_cached", timings)
-        self.assertIn("dictionaries_init_ms", timings)
-        self.assertIn("spelling_validation_ms", timings)
         self.assertIn("worker_pid", timings)
         self.assertIn("worker_requests_served", timings)
         self.assertGreaterEqual(timings["worker_requests_served"], 1)
@@ -391,13 +376,12 @@ class TestA2OcrServer(unittest.TestCase):
             f"Temporary file {captured_temp_path} was NOT deleted after request completion!",
         )
 
-    @patch("app.get_cached_dictionaries", return_value=(None, None, None))
     @patch("app.get_cached_reader", return_value=MagicMock())
     @patch("process_post.process_post")
-    def test_check_post_temp_file_deleted_even_on_exception(self, mock_process_post, mock_reader, mock_dicts):
+    def test_check_post_temp_file_deleted_even_on_exception(self, mock_process_post, mock_reader):
         captured_temp_path = None
 
-        def crash_process(data, reader=None, dictionaries=None):
+        def crash_process(data, reader=None):
             nonlocal captured_temp_path
             captured_temp_path = data.get("image_path")
             raise RuntimeError("Simulated internal ML exception during OCR")
@@ -448,14 +432,7 @@ class TestA2OcrServer(unittest.TestCase):
 
 
 class TestPaddleOCRProcessing(unittest.TestCase):
-    """
-    Direct tests for PaddleOCR result parsing, Hindi, English, confidence
-    and compliance validation in process_post.py.
-    """
-
     def setUp(self):
-        self.dictionaries = make_mock_dictionaries()
-        # Create a real dummy image file for resolved_image_path check
         import tempfile
         self.temp_img = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
         self.temp_img.write(VALID_PNG_BYTES)
@@ -467,8 +444,6 @@ class TestPaddleOCRProcessing(unittest.TestCase):
             os.unlink(self.img_path)
 
     def test_paddleocr_english_text_extraction(self):
-        # Mock PaddleOCR return format:
-        # [ [ [box_points, (text, confidence)], ... ] ]
         mock_reader = MagicMock()
         mock_reader.ocr.return_value = [
             [
@@ -478,23 +453,16 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         ]
 
         result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Healthy Living",
-                "caption": "Join us today",
-                "whitelist_words": ["APEX"],
-                "banned_words": [],
-                "mandatory_phrases": [],
-            },
+            {"image_path": self.img_path},
             reader=mock_reader,
-            dictionaries=self.dictionaries,
         )
 
         self.assertEqual(result["ocr_text"], "APEX HEALTH\nWELLNESS WORKSHOP")
         self.assertTrue(result["ocr_reliable"])
         self.assertAlmostEqual(result["ocr_confidence_avg"], 0.944, places=3)
+        self.assertEqual(result["ocr_blocks_total"], 2)
+        self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
         self.assertIn("ocr_inference_ms", result["_internal_timings"])
-        self.assertIn("spelling_validation_ms", result["_internal_timings"])
 
     def test_paddleocr_hindi_text_extraction(self):
         mock_reader = MagicMock()
@@ -506,21 +474,15 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         ]
 
         result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Hindi Post",
-                "caption": "Hindi caption",
-                "whitelist_words": [],
-                "banned_words": [],
-                "mandatory_phrases": [],
-            },
+            {"image_path": self.img_path},
             reader=mock_reader,
-            dictionaries=self.dictionaries,
         )
 
         self.assertEqual(result["ocr_text"], "नमस्ते\nस्वास्थ्य")
         self.assertTrue(result["ocr_reliable"])
         self.assertAlmostEqual(result["ocr_confidence_avg"], 0.9625, places=3)
+        self.assertEqual(result["ocr_blocks_total"], 2)
+        self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
 
     def test_paddleocr_mixed_hindi_english_numeric(self):
         mock_reader = MagicMock()
@@ -531,20 +493,14 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         ]
 
         result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Mixed",
-                "caption": "Mixed",
-                "whitelist_words": ["Apex"],
-                "banned_words": [],
-                "mandatory_phrases": [],
-            },
+            {"image_path": self.img_path},
             reader=mock_reader,
-            dictionaries=self.dictionaries,
         )
 
         self.assertEqual(result["ocr_text"], "नमस्ते Apex 2026")
         self.assertTrue(result["ocr_reliable"])
+        self.assertEqual(result["ocr_blocks_total"], 1)
+        self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
 
     def test_paddleocr_low_confidence_marks_unreliable(self):
         mock_reader = MagicMock()
@@ -555,24 +511,15 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         ]
 
         result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Good Post",
-                "caption": "Good post caption",
-                "whitelist_words": [],
-                "banned_words": ["cure-all", "scam"],
-                "mandatory_phrases": [],
-            },
+            {"image_path": self.img_path},
             reader=mock_reader,
-            dictionaries=self.dictionaries,
         )
 
         self.assertEqual(result["ocr_text"], "")
         self.assertFalse(result["ocr_reliable"])
         self.assertEqual(result["ocr_confidence_avg"], 0.35)
-        # Banned words from OCR text should NOT be flagged when OCR is unreliable
-        self.assertEqual(result["banned_words_found"], [])
-        self.assertEqual(result["ocr_issues"], [])
+        self.assertEqual(result["ocr_blocks_total"], 1)
+        self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 1)
 
     def test_paddleocr_per_block_confidence_filtering(self):
         mock_reader = MagicMock()
@@ -584,75 +531,35 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         ]
 
         result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Good Post",
-                "caption": "Good post caption",
-                "whitelist_words": ["APEX"],
-                "banned_words": ["BackgroundNoise"],
-                "mandatory_phrases": [],
-            },
+            {"image_path": self.img_path},
             reader=mock_reader,
-            dictionaries=self.dictionaries,
         )
 
         self.assertIn("APEX HEALTH", result["ocr_text"])
         self.assertNotIn("BackgroundNoise", result["ocr_text"])
         self.assertTrue(result["ocr_reliable"])
         self.assertEqual(result["ocr_confidence_avg"], 0.94)
-        self.assertEqual(result["banned_words_found"], [])
-
-    def test_paddleocr_banned_words_flagged_when_reliable(self):
-        mock_reader = MagicMock()
-        mock_reader.ocr.return_value = [
-            [
-                [[[10, 10], [100, 10], [100, 30], [10, 30]], ("guaranteed cure-all product", 0.88)],
-            ]
-        ]
-
-        result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Apex Post",
-                "caption": "Stay healthy",
-                "whitelist_words": [],
-                "banned_words": ["cure-all", "guaranteed"],
-                "mandatory_phrases": [],
-            },
-            reader=mock_reader,
-            dictionaries=self.dictionaries,
-        )
-
-        self.assertTrue(result["ocr_reliable"])
-        self.assertIn("cure-all", result["banned_words_found"])
-        self.assertIn("guaranteed", result["banned_words_found"])
+        self.assertEqual(result["ocr_blocks_total"], 2)
+        self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 1)
 
     def test_paddleocr_empty_and_none_results(self):
         mock_reader = MagicMock()
-        # Test various representations of empty PaddleOCR results
         empty_cases = [None, [], [None], [[]]]
 
         for case in empty_cases:
             mock_reader.ocr.return_value = case
             result = process_post.process_post(
-                {
-                    "image_path": self.img_path,
-                    "title": "Empty Test",
-                    "caption": "Caption",
-                    "whitelist_words": [],
-                    "banned_words": [],
-                    "mandatory_phrases": [],
-                },
+                {"image_path": self.img_path},
                 reader=mock_reader,
-                dictionaries=self.dictionaries,
             )
             self.assertEqual(result["ocr_text"], "")
             self.assertFalse(result["ocr_reliable"])
             self.assertEqual(result["ocr_confidence_avg"], 0.0)
+            self.assertEqual(result["ocr_blocks_total"], 0)
+            self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
 
     def test_paddleocr_handles_nan_and_irregular_confidences(self):
         mock_reader = MagicMock()
-        # Test NaN, Inf, and out-of-range confidence scores
         mock_reader.ocr.return_value = [
             [
                 [[[0, 0]], ("Line One", float("nan"))],
@@ -664,32 +571,21 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         ]
 
         result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Conf Test",
-                "caption": "Caption",
-                "whitelist_words": [],
-                "banned_words": [],
-                "mandatory_phrases": [],
-            },
+            {"image_path": self.img_path},
             reader=mock_reader,
-            dictionaries=self.dictionaries,
         )
 
         self.assertIn("Line Three", result["ocr_text"])
         self.assertNotIn("Line One", result["ocr_text"])
-        import math
         self.assertTrue(math.isfinite(result["ocr_confidence_avg"]))
         self.assertGreaterEqual(result["ocr_confidence_avg"], 0.0)
         self.assertLessEqual(result["ocr_confidence_avg"], 1.0)
-        # Ensure json serialization succeeds without error
         json_output = json.dumps(result)
         self.assertNotIn("NaN", json_output)
         self.assertNotIn("Infinity", json_output)
 
     def test_paddleocr_handles_multipage_and_irregular_lines(self):
         mock_reader = MagicMock()
-        # Simulates multi-page detections with irregular/corrupt entries
         mock_reader.ocr.return_value = [
             [
                 None,
@@ -700,26 +596,20 @@ class TestPaddleOCRProcessing(unittest.TestCase):
             None,
             [
                 [[[0, 0]], ("Page 2 Line 1", 0.91)],
-                [[[0, 0]], ("", 0.99)],  # Empty text should be ignored
+                [[[0, 0]], ("", 0.99)],
             ]
         ]
 
         result = process_post.process_post(
-            {
-                "image_path": self.img_path,
-                "title": "Multipage Test",
-                "caption": "Caption",
-                "whitelist_words": [],
-                "banned_words": [],
-                "mandatory_phrases": [],
-            },
+            {"image_path": self.img_path},
             reader=mock_reader,
-            dictionaries=self.dictionaries,
         )
 
         self.assertEqual(result["ocr_text"], "Page 1 Line 1\nPage 2 Line 1")
         self.assertTrue(result["ocr_reliable"])
         self.assertAlmostEqual(result["ocr_confidence_avg"], 0.93, places=2)
+        self.assertEqual(result["ocr_blocks_total"], 2)
+        self.assertEqual(result["ocr_blocks_excluded_low_confidence"], 0)
 
     def test_load_reader_paddleocr_configuration(self):
         fake_paddle_cls = MagicMock()

@@ -51,10 +51,9 @@ import process_post
 MAX_REQUEST_BYTES = 16 * 1024 * 1024   # 16 MB HTTP request body
 MAX_IMAGE_BYTES = 10 * 1024 * 1024     # 10 MB decoded image binary
 
-# 4. In-memory model and dictionary singletons (Thread-safe caching)
+# 4. In-memory model singleton (Thread-safe caching)
 _MODEL_LOCK = threading.Lock()
 _CACHED_READER = None
-_CACHED_DICTIONARIES = None
 _WORKER_LOCK = threading.Lock()
 _WORKER_REQUESTS = 0
 
@@ -69,22 +68,11 @@ def get_cached_reader():
     return _CACHED_READER
 
 
-def get_cached_dictionaries():
-    """Returns the persistent Hunspell/spylls dictionaries singleton."""
-    global _CACHED_DICTIONARIES
-    if _CACHED_DICTIONARIES is None:
-        with _MODEL_LOCK:
-            if _CACHED_DICTIONARIES is None:
-                _CACHED_DICTIONARIES = process_post.load_dictionaries()
-    return _CACHED_DICTIONARIES
-
-
 def try_prewarm_models():
     """Optional pre-warming called at WSGI startup; ignores failures until first request."""
     try:
         get_cached_reader()
-        get_cached_dictionaries()
-        print("[A2-OCR] PaddleOCR Reader and Hunspell dictionaries successfully pre-warmed.", file=sys.stderr)
+        print("[A2-OCR] PaddleOCR Reader successfully pre-warmed.", file=sys.stderr)
     except Exception as exc:
         print(f"[A2-OCR] Pre-warming notice: Deferred to first request ({exc}).", file=sys.stderr)
 
@@ -194,10 +182,9 @@ def handle_health(environ, start_response):
         {
             "status": "ok",
             "service": "A2 Hosting PaddleOCR API",
-            "version": "1.0.0",
-            "engine": "PaddleOCR (Hindi/English) + Hunspell (spylls)",
+            "version": "1.1.0",
+            "engine": "PaddleOCR (Hindi/English)",
             "models_cached": _CACHED_READER is not None,
-            "dictionaries_cached": _CACHED_DICTIONARIES is not None,
             "worker_pid": os.getpid(),
             "worker_requests_served": _WORKER_REQUESTS,
         },
@@ -275,9 +262,6 @@ def handle_check_post(environ, start_response):
     # 6. Extract fields
     title = data.get("title", "")
     caption = data.get("caption", "")
-    whitelist_words = data.get("whitelist_words") or []
-    banned_words = data.get("banned_words") or []
-    mandatory_phrases = data.get("mandatory_phrases") or []
     image_base64 = data.get("image_base64")
     per_block_confidence_threshold = data.get("per_block_confidence_threshold")
 
@@ -337,7 +321,7 @@ def handle_check_post(environ, start_response):
             except Exception as exc:
                 return json_response(start_response, 500, {"error": "Failed to create secure temporary image file."})
 
-    # 8. Execute OCR & Post Validation (guarantee temporary file deletion in finally block)
+    # 8. Execute OCR Processing (guarantee temporary file deletion in finally block)
     try:
         reader_cached = _CACHED_READER is not None
         reader_init_ms = 0.0
@@ -348,27 +332,18 @@ def handle_check_post(environ, start_response):
         else:
             reader = None
 
-        dictionaries_cached = _CACHED_DICTIONARIES is not None
-        t0 = time.perf_counter()
-        dictionaries = get_cached_dictionaries()
-        dictionaries_init_ms = (time.perf_counter() - t0) * 1000 if not dictionaries_cached else 0.0
-
         post_input = {
             "title": title,
             "caption": caption,
             "image_path": temp_image_path,
-            "whitelist_words": whitelist_words,
-            "banned_words": banned_words,
-            "mandatory_phrases": mandatory_phrases,
             "per_block_confidence_threshold": per_block_confidence_threshold,
         }
 
-        result = process_post.process_post(post_input, reader=reader, dictionaries=dictionaries)
+        result = process_post.process_post(post_input, reader=reader)
 
         # Extract engine timings and attach comprehensive performance metrics
         internal_timings = result.pop("_internal_timings", {})
         ocr_inference_ms = internal_timings.get("ocr_inference_ms", 0.0)
-        spelling_validation_ms = internal_timings.get("spelling_validation_ms", 0.0)
         total_ms = (time.perf_counter() - request_start_time) * 1000
 
         result["timings"] = {
@@ -378,9 +353,6 @@ def handle_check_post(environ, start_response):
             "reader_cached": reader_cached,
             "reader_init_ms": round(reader_init_ms, 2),
             "ocr_inference_ms": round(ocr_inference_ms, 2),
-            "dictionaries_cached": dictionaries_cached,
-            "dictionaries_init_ms": round(dictionaries_init_ms, 2),
-            "spelling_validation_ms": round(spelling_validation_ms, 2),
             "worker_pid": os.getpid(),
             "worker_requests_served": current_request_num,
         }

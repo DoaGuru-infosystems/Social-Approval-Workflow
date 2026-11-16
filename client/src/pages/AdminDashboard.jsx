@@ -25,6 +25,8 @@ import {
   Tag,
   AlertOctagon,
   FileText,
+  Phone,
+  MapPin,
 } from 'lucide-react';
 
 const InstagramIcon = ({ className = 'w-5 h-5' }) => (
@@ -62,7 +64,17 @@ const AdminDashboard = () => {
   // New Client Modal
   const [showAddClientModal, setShowAddClientModal] = useState(false);
   const [newClientName, setNewClientName] = useState('');
+  const [newPrimaryPhone, setNewPrimaryPhone] = useState('');
+  const [newAlternatePhone, setNewAlternatePhone] = useState('');
+  const [newAddress, setNewAddress] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
+
+  // Client Official Identity State (for selectedClient)
+  const [identityName, setIdentityName] = useState('');
+  const [identityPrimaryPhone, setIdentityPrimaryPhone] = useState('');
+  const [identityAlternatePhone, setIdentityAlternatePhone] = useState('');
+  const [identityAddress, setIdentityAddress] = useState('');
+  const [savingIdentity, setSavingIdentity] = useState(false);
 
   // Brand Guidelines State
   const [whitelistInput, setWhitelistInput] = useState('');
@@ -112,6 +124,12 @@ const AdminDashboard = () => {
       const data = await clientService.getClientById(clientId);
       setSelectedClient(data);
 
+      const c = data?.client || {};
+      setIdentityName(c.name || '');
+      setIdentityPrimaryPhone(c.primary_phone || '');
+      setIdentityAlternatePhone(c.alternate_phone || '');
+      setIdentityAddress(c.address || '');
+
       const g = data?.brand_guidelines || {};
       setWhitelistInput((g.whitelist_words || []).join(', '));
       setBannedInput((g.banned_words || []).join(', '));
@@ -129,12 +147,25 @@ const AdminDashboard = () => {
       showToast('Enter a client name.', 'warning');
       return;
     }
+    const cleanPhone = newPrimaryPhone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 10) {
+      showToast('Enter a valid 10-digit primary phone number.', 'warning');
+      return;
+    }
 
     setCreatingClient(true);
     try {
-      const data = await clientService.createClient({ name: newClientName.trim() });
+      const data = await clientService.createClient({
+        name: newClientName.trim(),
+        primary_phone: newPrimaryPhone.trim(),
+        alternate_phone: newAlternatePhone.trim() || null,
+        address: newAddress.trim() || null,
+      });
       showToast(`Client '${data.client.name}' was created.`, 'success');
       setNewClientName('');
+      setNewPrimaryPhone('');
+      setNewAlternatePhone('');
+      setNewAddress('');
       setShowAddClientModal(false);
       fetchClients();
       handleSelectClient(data.client.id);
@@ -142,6 +173,37 @@ const AdminDashboard = () => {
       showToast(err.response?.data?.message || 'Unable to create the client.', 'error');
     } finally {
       setCreatingClient(false);
+    }
+  };
+
+  const handleSaveClientIdentity = async (e) => {
+    e.preventDefault();
+    if (!selectedClient?.client?.id) return;
+    if (!identityName.trim()) {
+      showToast('Client name is required.', 'warning');
+      return;
+    }
+    const cleanPhone = identityPrimaryPhone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 10) {
+      showToast('Enter a valid 10-digit primary phone number.', 'warning');
+      return;
+    }
+
+    setSavingIdentity(true);
+    try {
+      await clientService.updateClient(selectedClient.client.id, {
+        name: identityName.trim(),
+        primary_phone: identityPrimaryPhone.trim() || null,
+        alternate_phone: identityAlternatePhone.trim() || null,
+        address: identityAddress.trim() || null,
+      });
+      showToast('Client official identity updated successfully.', 'success');
+      fetchClients();
+      handleSelectClient(selectedClient.client.id);
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Unable to update client identity.', 'error');
+    } finally {
+      setSavingIdentity(false);
     }
   };
 
@@ -473,6 +535,37 @@ const AdminDashboard = () => {
                                   </div>
                                 )}
 
+                                {/* Brand Identity: Possible Brand Name Error */}
+                                {aiReport.brand_identity_check?.possible_brand_name_error && (
+                                  <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-1.5">
+                                    <AlertOctagon className="w-4 h-4 shrink-0 text-rose-600" />
+                                    <span>
+                                      <strong>Brand Identity Mismatch:</strong>{' '}
+                                      {aiReport.brand_identity_check.possible_brand_name_error}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Brand Identity: Phone Verification Warnings */}
+                                {aiReport.brand_identity_check?.phone_verification?.filter((p) => p.status !== 'clean').map((pv, idx) => (
+                                  <div key={idx} className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-1.5">
+                                    <Phone className="w-4 h-4 shrink-0 text-rose-600" />
+                                    <span>
+                                      <strong>Phone Check Alert:</strong> {pv.message}
+                                    </span>
+                                  </div>
+                                ))}
+
+                                {/* Brand Identity: Address Warning */}
+                                {aiReport.brand_identity_check?.address_warning && (
+                                  <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-1.5">
+                                    <MapPin className="w-4 h-4 shrink-0 text-amber-600" />
+                                    <span>
+                                      <strong>Address Alert:</strong> {aiReport.brand_identity_check.address_warning}
+                                    </span>
+                                  </div>
+                                )}
+
                                 <p className="text-[#6B6A63] text-[11px]">
                                   Spelling Issues: {aiReport.spelling_issues?.length || 0} | OCR Text:{' '}
                                   {aiReport.ocr_extracted_text ? `"${aiReport.ocr_extracted_text.slice(0, 40)}..."` : 'None'}
@@ -785,8 +878,93 @@ const AdminDashboard = () => {
 
                 {/* Grid: Brand Guidelines & Connected Accounts */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  {/* BRAND GUIDELINES (7 Cols) */}
-                  <div className="lg:col-span-7">
+                  {/* BRAND GUIDELINES & OFFICIAL IDENTITY (7 Cols) */}
+                  <div className="lg:col-span-7 space-y-6">
+                    {/* OFFICIAL CLIENT IDENTITY */}
+                    <div className="bg-[#FFFFFF] p-6 rounded-3xl border border-[#E5E2DA] shadow-xs space-y-5">
+                      <div className="flex items-center gap-2 pb-3 border-b border-[#E5E2DA]">
+                        <Building2 className="w-5 h-5 text-emerald-600" />
+                        <div>
+                          <h3 className="text-base font-bold text-[#2B2A27]">Official Client Identity</h3>
+                          <p className="text-xs text-[#6B6A63]">
+                            Ground-truth identity used by AI to verify brand names, phone numbers, and addresses.
+                          </p>
+                        </div>
+                      </div>
+
+                      <form onSubmit={handleSaveClientIdentity} className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5">
+                            Official Organization / Brand Name
+                          </label>
+                          <input
+                            type="text"
+                            value={identityName}
+                            onChange={(e) => setIdentityName(e.target.value)}
+                            placeholder="e.g. Balgopal Children's Neuro Clinic"
+                            required
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                              <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Primary Phone (Required)</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={identityPrimaryPhone}
+                              onChange={(e) => setIdentityPrimaryPhone(e.target.value)}
+                              placeholder="e.g. 8989590477"
+                              required
+                              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                              <Phone className="w-3.5 h-3.5 text-[#6B6A63]" />
+                              <span>Alternate Phone (Optional)</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={identityAlternatePhone}
+                              onChange={(e) => setIdentityAlternatePhone(e.target.value)}
+                              placeholder="e.g. 8447096306"
+                              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                            <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Registered Official Address</span>
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={identityAddress}
+                            onChange={(e) => setIdentityAddress(e.target.value)}
+                            placeholder="e.g. 1063, near Jan Jyoti Hospital, Gole Bazar, Wright Town, Jabalpur, Madhya Pradesh"
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white resize-y"
+                          />
+                        </div>
+
+                        <Button
+                          type="submit"
+                          variant="primary"
+                          size="md"
+                          loading={savingIdentity}
+                          className="w-full !rounded-xl"
+                        >
+                          Save Client Identity
+                        </Button>
+                      </form>
+                    </div>
+
+                    {/* BRAND GUIDELINES (Linguistic Rules) */}
                     <div className="bg-[#FFFFFF] p-6 rounded-3xl border border-[#E5E2DA] shadow-xs space-y-5">
                       <div className="flex items-center gap-2 pb-3 border-b border-[#E5E2DA]">
                         <Tag className="w-5 h-5 text-emerald-600" />
@@ -986,16 +1164,61 @@ const AdminDashboard = () => {
 
               <form onSubmit={handleCreateClient} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-2">
-                    Client / Company Name
+                  <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5">
+                    Client / Company Name *
                   </label>
                   <input
                     type="text"
                     value={newClientName}
                     onChange={(e) => setNewClientName(e.target.value)}
-                    placeholder="e.g. Apex Health & Fitness"
+                    placeholder="e.g. Balgopal Children's Neuro Clinic"
                     required
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Primary Phone *</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newPrimaryPhone}
+                      onChange={(e) => setNewPrimaryPhone(e.target.value)}
+                      placeholder="e.g. 8989590477"
+                      required
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                      <Phone className="w-3.5 h-3.5 text-[#6B6A63]" />
+                      <span>Alternate Phone</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newAlternatePhone}
+                      onChange={(e) => setNewAlternatePhone(e.target.value)}
+                      placeholder="e.g. 8447096306"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Registered Address</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={newAddress}
+                    onChange={(e) => setNewAddress(e.target.value)}
+                    placeholder="e.g. 1063, near Jan Jyoti Hospital, Gole Bazar, Wright Town, Jabalpur"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white resize-y"
                   />
                 </div>
 
