@@ -91,9 +91,9 @@ const verifyBrandNamePresence = (ocrText, officialName) => {
     };
   }
 
-  // Extract core brand name (e.g. without trailing category suffixes like "Neuro Clinic", "Hospital", etc.)
+  // Extract core brand name (e.g. without trailing legal or business suffixes)
   const coreBrandName = cleanOfficial
-    .replace(/\s+(neuro\s+clinic|clinic|hospital|centre|center|pvt\s+ltd|ltd|organics)\b/gi, '')
+    .replace(/\s+(pvt\s+ltd|ltd|llc|inc|corp|co|organization|services|enterprises)\b/gi, '')
     .trim();
 
   let bestMatch = {
@@ -157,7 +157,7 @@ const verifyBrandNamePresence = (ocrText, officialName) => {
 
   // If primary brand word is present but has an error (similarity 55-94%):
   if (cleanPrimary.length >= 3 && bestPrimarySim >= 55 && bestPrimarySim < 95) {
-    const errorMsg = `Poster me hi brand name galat likha hai: '${bestPrimaryCandidate}' vs official '${primaryWord}' (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
+    const errorMsg = `Poster me brand name galat likha hai: '${bestPrimaryCandidate}' vs official '${primaryWord}' (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer ko bolo: Poster me ${bestPrimaryCandidate} ki jagah '${primaryWord}' likho.`;
     return {
       verified: true,
       brand_name_correct: false,
@@ -196,7 +196,7 @@ const verifyBrandNamePresence = (ocrText, officialName) => {
   const effectiveText = reportedMatch.windowStr;
 
   if (effectiveScore >= 55) {
-    const errorMsg = `Poster me hi brand name galat likha hai: '${effectiveText}' vs official '${cleanOfficial}' (${effectiveScore}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
+    const errorMsg = `Poster me brand name galat likha hai: '${effectiveText}' vs official '${cleanOfficial}' (${effectiveScore}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
     return {
       verified: true,
       brand_name_correct: false,

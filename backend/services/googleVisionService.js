@@ -83,8 +83,8 @@ const runGoogleVisionOCR = async ({ imagePath, imageBase64, mimeType = 'image/jp
 
   const systemInstruction = `You are an expert Optical Character Recognition (OCR) engine specialized in bilingual (Hindi / English) Indian posters.
 Your task is to accurately transcribe all visible text in the image into structured JSON format.
-CRITICAL: Transcribe characters EXACTLY as they appear visually on the poster. Do NOT autocorrect typos or misspellings in brand names or logos (e.g. if the logo text visually reads 'BAL-COPAL' or 'COPAL' with a 'C', transcribe it faithfully as 'BAL-COPAL' or 'COPAL', do NOT correct it to GOPAL).
-Preserve exact spellings and ligatures in Devanagari (e.g. 'बाल दिवस', 'स्वस्थ बचपन', 'जनज्योति हॉस्पिटल').
+CRITICAL: Transcribe characters EXACTLY as they appear visually on the poster. Do NOT autocorrect any typos, misspellings, or unusual character sequences in brand names, titles, or logos (e.g. if a logo or word has an unusual spelling or typo, transcribe it faithfully character-by-character as printed, do NOT auto-fix or guess intended words).
+Preserve exact spellings, diacritics, and ligatures in both Latin and Devanagari scripts.
 
 Return STRICT JSON matching this schema:
 {

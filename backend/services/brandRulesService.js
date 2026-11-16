@@ -119,7 +119,7 @@ const fuzzyMatchWhitelist = (word, whitelistList, threshold = 80) => {
       return true;
     }
 
-    // Direct token check if entry is multi-word (e.g. "Jan Jyoti" contains "jyoti")
+    // Direct token check if entry is multi-word (e.g. "Acme Corp" contains "acme")
     if (cleanEntry.includes(' ') || cleanEntry.includes('-')) {
       const parts = cleanEntry.split(/[\s\-]+/).filter(Boolean);
       for (const p of parts) {

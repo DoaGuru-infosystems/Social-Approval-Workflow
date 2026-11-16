@@ -85,8 +85,10 @@ const getClientGuidelines = async (clientId) => {
     });
   }
   if (clientInfo?.name) {
+    const fullOrg = clientInfo.name.trim();
+    if (!whitelist.includes(fullOrg)) whitelist.push(fullOrg);
     clientInfo.name.split(/[\s,.-]+/).forEach((t) => {
-      if (t.length >= 2 && !whitelist.includes(t)) whitelist.push(t);
+      if (t.length >= 3 && !whitelist.includes(t)) whitelist.push(t);
     });
   }
 
@@ -201,6 +203,26 @@ const resolveImagePath = (imagePath) => {
 };
 
 /**
+ * Helper to identify if a word is an erroneous distortion of the client's official brand name.
+ * Brand distortions are handled as Brand Identity Errors, not regular dictionary typos.
+ */
+const isBrandCandidateError = (word, orgName) => {
+  if (!word || !orgName) return false;
+  const cleanW = String(word).trim().toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+  if (cleanW.length < 3) return false;
+  const orgWords = orgName.trim().toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+  for (const ow of orgWords) {
+    const cleanOw = ow.replace(/[^\w\u0900-\u097f]/g, '');
+    if (!cleanOw || cleanOw.length < 3) continue;
+    const sim = fuzzball.ratio(cleanW, cleanOw);
+    if (sim >= 50 && sim < 95) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
  * Fast Native Node.js Text Quality & Brand Compliance Check (Title + Caption).
  * Runs synchronously in ~50-100ms.
  * 
@@ -235,7 +257,12 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     // 1. PRIMARY: Gemini AI for Hindi Spelling + Grammar
     let geminiOut = [];
     if (combinedText.trim()) {
-      geminiOut = await grammarService.checkGrammar(combinedText, 'hi', guidelines.whitelist);
+      geminiOut = await grammarService.checkGrammar(
+        combinedText,
+        'hi',
+        guidelines.whitelist,
+        guidelines.organization_name
+      );
     }
 
     const hasGeminiKeyError = geminiOut.some((i) => i.type === 'grammar_error' || i.key_error);
@@ -253,12 +280,14 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
         : [];
       spellingIssues = rawSpelling.filter((issue) => {
+        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
     } else if (geminiOut.length === 0 && combinedText.trim()) {
       // If Gemini returned empty array, verify against Dictionary fallback
       const rawSpelling = await spellCheckService.checkText(combinedText, guidelines.whitelist);
       const dictIssues = rawSpelling.filter((issue) => {
+        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
       if (dictIssues.length > 0) {
@@ -288,29 +317,83 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
 
     // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
+      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     grammarSuggestions = grammarSuggestions.filter((item) => {
       return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
     });
   } else {
-    // English System: UNTOUCHED
-    const rawSpellingIssues = combinedText.trim()
-      ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
-      : [];
-
-    spellingIssues = rawSpellingIssues.filter((issue) => {
-      const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
-        issue.word,
+    // English System: Gemini AI PRIMARY for both Spelling & Grammar
+    let geminiOut = [];
+    if (combinedText.trim()) {
+      geminiOut = await grammarService.checkGrammar(
+        combinedText,
+        'en',
         guidelines.whitelist,
-        80
+        guidelines.organization_name
       );
-      return !isFuzzyWhitelisted;
-    });
+    }
 
-    grammarSuggestions = combinedText.trim()
-      ? await grammarService.checkGrammar(combinedText, 'en')
-      : [];
+    const hasGeminiKeyError = geminiOut.some((i) => i.type === 'grammar_error' || i.key_error);
+
+    if (hasGeminiKeyError) {
+      // Gemini failed (401 / 403 / key expired / error) -> FALLBACK to Node Dictionary (nspell)
+      const errItem = geminiOut.find((i) => i.key_error);
+      keyError = errItem?.key_error || {
+        service: 'gemini',
+        code: 'GEMINI_FALLBACK',
+        user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+      };
+
+      const rawSpellingIssues = combinedText.trim()
+        ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
+        : [];
+
+      spellingIssues = rawSpellingIssues.filter((issue) => {
+        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+      });
+    } else if (geminiOut.length === 0 && combinedText.trim()) {
+      // If Gemini returned empty array, verify against Dictionary fallback
+      const rawSpellingIssues = await spellCheckService.checkText(combinedText, guidelines.whitelist);
+      const dictIssues = rawSpellingIssues.filter((issue) => {
+        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+      });
+      if (dictIssues.length > 0) {
+        spellingIssues = dictIssues;
+        keyError = {
+          service: 'gemini',
+          code: 'GEMINI_FALLBACK',
+          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+        };
+      } else {
+        spellingIssues = [];
+      }
+    } else {
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      spellingIssues = geminiOut
+        .filter((item) => item.type === 'spelling')
+        .map((item) => ({
+          word: item.original,
+          script: 'english',
+          suggestion: item.suggestion,
+          suggestions: [item.suggestion],
+          reason: item.reason,
+          source: 'gemini_ai',
+        }));
+      grammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
+    }
+
+    // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
+    spellingIssues = spellingIssues.filter((issue) => {
+      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+      return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+    });
+    grammarSuggestions = grammarSuggestions.filter((item) => {
+      return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
+    });
   }
 
   // 3. Brand Compliance: Banned Words Check (against combinedText in Node)
@@ -623,9 +706,9 @@ const buildAnnotatedPosterBoxes = ({
       const cleanBoxText = text.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
       const fullOrgSim = fuzzball.ratio(cleanBoxText, cleanOrgFull);
 
-      if (cleanPrimary.length >= 3 && bestPrimarySim >= 80 && bestPrimarySim < 95) {
+      if (cleanPrimary.length >= 3 && bestPrimarySim >= 55 && bestPrimarySim < 95) {
         hasBrandNameError = true;
-        brandErrorReason = `Poster me hi brand name galat likha hai: "${bestPrimaryCandidate}" vs official "${primaryWord}" (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
+        brandErrorReason = `Poster me hi brand name galat likha hai: "${bestPrimaryCandidate}" vs official "${primaryWord}" (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer ko bolo: Poster me ${bestPrimaryCandidate} ki jagah ${primaryWord} likho.`;
       } else if (bestPrimarySim >= 95 || fullOrgSim >= 95) {
         isBrandExact = true;
       }
@@ -962,7 +1045,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       geminiOut = await grammarService.checkGrammar(
         cleanedOcrText || rawOcrText,
         'hi',
-        guidelines.whitelist
+        guidelines.whitelist,
+        guidelines.organization_name
       );
     }
 
@@ -980,28 +1064,16 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       if (ocrReliable && cleanedOcrText.trim()) {
         const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
         spellingIssues = rawSpelling.filter((issue) => {
-          const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
-            issue.word,
-            guidelines.whitelist,
-            80
-          );
-          if (isFuzzyWhitelisted) return false;
-          if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
-          return true;
+          if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+          return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
         });
       }
     } else if (geminiOut.length === 0 && ocrReliable && cleanedOcrText.trim()) {
       // If Gemini returned empty array, run Dictionary fallback as safety check
       const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
       const dictIssues = rawSpelling.filter((issue) => {
-        const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
-          issue.word,
-          guidelines.whitelist,
-          80
-        );
-        if (isFuzzyWhitelisted) return false;
-        if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
-        return true;
+        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
       if (dictIssues.length > 0) {
         spellingIssues = dictIssues;
@@ -1030,14 +1102,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
 
     // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
-      const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
-        issue.word,
-        guidelines.whitelist,
-        80
-      );
-      if (isFuzzyWhitelisted) return false;
-      if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
-      return true;
+      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+      return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     imageGrammarSuggestions = imageGrammarSuggestions.filter((item) => {
       return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
@@ -1047,26 +1113,79 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       bannedWordsFound = brandRulesService.findBannedWords(cleanedOcrText, guidelines.banned);
     }
   } else {
-    // English System: UNTOUCHED
-    if (ocrReliable && cleanedOcrText.trim()) {
-      const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
-      spellingIssues = rawSpelling.filter((issue) => {
-        const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
-          issue.word,
-          guidelines.whitelist,
-          80
-        );
-        if (isFuzzyWhitelisted) return false;
-        if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
-        return true;
-      });
-
-      bannedWordsFound = brandRulesService.findBannedWords(cleanedOcrText, guidelines.banned);
+    // English System: Gemini AI PRIMARY for both Spelling & Grammar on OCR text
+    let geminiOut = [];
+    if (ocrReliable && (cleanedOcrText || rawOcrText).trim()) {
+      geminiOut = await grammarService.checkGrammar(
+        cleanedOcrText || rawOcrText,
+        'en',
+        guidelines.whitelist,
+        guidelines.organization_name
+      );
     }
 
-    imageGrammarSuggestions = (ocrReliable && (cleanedOcrText || rawOcrText).trim())
-      ? await grammarService.checkGrammar(cleanedOcrText || rawOcrText, 'en')
-      : [];
+    const hasGeminiKeyError = geminiOut.some((i) => i.type === 'grammar_error' || i.key_error);
+
+    if (hasGeminiKeyError) {
+      // Gemini failed -> FALLBACK to Node Dictionary (nspell)
+      const errItem = geminiOut.find((i) => i.key_error);
+      imageKeyError = imageKeyError || errItem?.key_error || {
+        service: 'gemini',
+        code: 'GEMINI_FALLBACK',
+        user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+      };
+
+      if (ocrReliable && cleanedOcrText.trim()) {
+        const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
+        spellingIssues = rawSpelling.filter((issue) => {
+          if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+          return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+        });
+      }
+    } else if (geminiOut.length === 0 && ocrReliable && cleanedOcrText.trim()) {
+      // If Gemini returned empty array, run Dictionary fallback as safety check
+      const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
+      const dictIssues = rawSpelling.filter((issue) => {
+        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+      });
+      if (dictIssues.length > 0) {
+        spellingIssues = dictIssues;
+        imageKeyError = imageKeyError || {
+          service: 'gemini',
+          code: 'GEMINI_FALLBACK',
+          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+        };
+      } else {
+        spellingIssues = [];
+      }
+    } else {
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      spellingIssues = geminiOut
+        .filter((item) => item.type === 'spelling')
+        .map((item) => ({
+          word: item.original,
+          script: 'english',
+          suggestion: item.suggestion,
+          suggestions: [item.suggestion],
+          reason: item.reason,
+          source: 'gemini_ai',
+        }));
+      imageGrammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
+    }
+
+    // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
+    spellingIssues = spellingIssues.filter((issue) => {
+      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+      return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+    });
+    imageGrammarSuggestions = imageGrammarSuggestions.filter((item) => {
+      return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
+    });
+
+    if (ocrReliable && cleanedOcrText.trim()) {
+      bannedWordsFound = brandRulesService.findBannedWords(cleanedOcrText, guidelines.banned);
+    }
   }
 
   // Official Brand Identity Verification against OCR

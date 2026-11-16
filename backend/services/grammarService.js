@@ -23,14 +23,16 @@ const detectTextLanguage = (text) => {
 /**
  * Check grammar and spelling of caption, title, or poster OCR text using Google Gemini API.
  * For Hindi: Acts as the PRIMARY language engine for BOTH spelling & grammar.
- * For English: Retains focused grammar & syntax checking.
+ * For English: Acts as the PRIMARY language engine for BOTH spelling & grammar.
+ * Fully dynamic: Client brand name and whitelist are loaded dynamically.
  *
  * @param {string} text
  * @param {string} [language] 'en', 'hi', or 'auto'
  * @param {Array<string>} [whitelist] Whitelist words to never flag as errors
+ * @param {string} [brandName] Official brand name from DB
  * @returns {Promise<Array<{ original: string, suggestion: string, reason: string, type: 'grammar'|'spelling'|'grammar_error' }>>}
  */
-const checkGrammar = async (text, language = 'auto', whitelist = []) => {
+const checkGrammar = async (text, language = 'auto', whitelist = [], brandName = '') => {
   if (!text || typeof text !== 'string' || text.trim().length < 5) {
     return [];
   }
@@ -40,7 +42,8 @@ const checkGrammar = async (text, language = 'auto', whitelist = []) => {
   const validWhitelist = Array.isArray(whitelist)
     ? whitelist.map((w) => String(w).trim()).filter(Boolean)
     : [];
-  const cacheKey = `${lang}:${validWhitelist.slice(0, 5).join(',')}:${cleanText.slice(0, 200)}`;
+  const cleanBrand = (brandName || '').trim();
+  const cacheKey = `${lang}:${cleanBrand}:${validWhitelist.slice(0, 5).join(',')}:${cleanText.slice(0, 200)}`;
 
   if (grammarCache.has(cacheKey)) {
     return grammarCache.get(cacheKey);
@@ -72,17 +75,22 @@ const checkGrammar = async (text, language = 'auto', whitelist = []) => {
         ? `\nIMPORTANT WHITELIST (ये शब्द आधिकारिक और सही हैं, इनको कभी अशुद्ध / गलत मत बोलना): ${validWhitelist.join(', ')}`
         : '';
 
+      const brandClause = cleanBrand
+        ? `\n- "${cleanBrand}" आधिकारिक ब्रांड नाम है। इसे कभी अशुद्ध मत बोलना और न ही अलग-अलग शब्दों में तोड़ना।`
+        : '';
+
       prompt = `You are an expert Hindi copy editor and language (वर्तनी एवं व्याकरण) validator for professional marketing copy.
 Critically evaluate the following Hindi text for BOTH:
 1. Spelling Errors (वर्तनी / हिज्जे की अशुद्धियाँ): Misspelled Hindi words, missing or wrong matras (मात्रा दोष), missing or misplaced anuswar/chandrabindu (अनुस्वार / अनुनासिक). Mark "type": "spelling".
 2. Grammar & Punctuation (व्याकरण एवं विराम-चिह्न):
-   - Missing comma (अल्पविराम ',') after introductory clauses (e.g. "इस बाल दिवस,"), proper viram-chinh (पूर्णविराम '।'), spacing around punctuation.
-   - Word Order (पदक्रम): Standard Hindi SOV word order (e.g., "स्वास्थ्य का रखें विशेष ध्यान" must be corrected to "स्वास्थ्य का विशेष ध्यान रखें" because the verb 'रखें' must come at the end of the clause).
+   - Missing comma (अल्पविराम ',') after introductory clauses, proper viram-chinh (पूर्णविराम '।'), spacing around punctuation.
+   - Word Order (पदक्रम): Standard Hindi SOV word order (clause verb must come at the end of the clause).
    Mark "type": "grammar".
 
-RULES TO STRICTLY FOLLOW:${whitelistClause}
-- Do NOT flag brand names, proper nouns, clinic names, doctor names, or valid hashtags if they match whitelist words.
+RULES TO STRICTLY FOLLOW:${brandClause}
+- Do NOT flag brand names, proper nouns, business/clinic names, doctor/specialist names, or valid hashtags as spelling errors; brand discrepancies are evaluated separately.
 - Do NOT flag phone numbers, numbers, pin codes, or addresses.
+${whitelistClause}
 - If there are NO errors, return strictly [].
 
 Input Text: "${cleanText.replace(/"/g, '\\"')}"
@@ -98,9 +106,24 @@ Return STRICT JSON as an array of objects matching this exact schema:
 ]
 If there are no issues at all, return []`;
     } else {
-      prompt = `You are an expert copy editor and grammar checker.
-Analyze the following text for grammatical errors, punctuation flaws, awkward phrasing, or improper capitalization.
-Do NOT flag pure spelling errors (like simple typos). Focus specifically on grammar, syntax, punctuation, subject-verb agreement, and capitalization conventions (e.g., 'a Healthy Childhood' should be 'a healthy childhood' because common nouns in running sentences should not be capitalized mid-sentence).
+      const whitelistClause = validWhitelist.length > 0
+        ? `\nIMPORTANT WHITELIST (these words are official and correct, do NOT flag them as spelling errors): ${validWhitelist.join(', ')}`
+        : '';
+
+      const brandClause = cleanBrand
+        ? `\n- "${cleanBrand}" is the official client brand name. Do NOT split it into separate words or flag it as an error.`
+        : '';
+
+      prompt = `You are an expert copy editor and English language validator (Spelling, Grammar, Capitalization, and Syntax) for professional marketing copy.
+Critically evaluate the following English text for BOTH:
+1. Spelling Errors (pure spelling typos, e.g. "childern" -> "children", "healty" -> "healthy", "tommorow" -> "tomorrow"). Mark "type": "spelling".
+2. Grammar, Punctuation & Capitalization (syntax flaws, improper mid-sentence capitalization like 'a Healthy Childhood' -> 'a healthy childhood', missing punctuation, subject-verb agreement). Mark "type": "grammar".
+
+CRITICAL RULES TO FOLLOW:${brandClause}
+- Do NOT flag official brand names, registered company names, or logos as simple spelling errors; any brand name or logo discrepancy is checked by an independent brand verification engine.
+- Do NOT flag proper nouns, registered abbreviations/acronyms, doctor/specialist names, hashtags, phone numbers, or addresses as spelling errors.
+${whitelistClause}
+- If there are NO errors, return strictly [].
 
 Input Text: "${cleanText.replace(/"/g, '\\"')}"
 Language: English
@@ -108,13 +131,13 @@ Language: English
 Return STRICT JSON as an array of objects matching this exact schema:
 [
   {
-    "original": "the exact faulty phrase or word from the input",
-    "suggestion": "the grammatically corrected version",
-    "reason": "clear concise explanation of the grammatical issue",
-    "type": "grammar"
+    "original": "the exact misspelled or faulty word/phrase from the input",
+    "suggestion": "the grammatically / orthographically corrected version",
+    "reason": "clear concise explanation of the spelling or grammatical issue",
+    "type": "spelling" | "grammar"
   }
 ]
-If there are no grammar issues, return an empty array: []`;
+If there are no issues at all, return []`;
     }
 
     const controller = new AbortController();
@@ -189,7 +212,7 @@ If there are no grammar issues, return an empty array: []`;
         original: String(item.original || '').trim(),
         suggestion: String(item.suggestion || '').trim(),
         reason: String(item.reason || (item.type === 'spelling' ? 'Spelling correction' : 'Grammar correction')).trim(),
-        type: (lang === 'hi' && item.type === 'spelling') ? 'spelling' : 'grammar',
+        type: item.type === 'spelling' ? 'spelling' : 'grammar',
       }));
 
     grammarCache.set(cacheKey, normalized);
