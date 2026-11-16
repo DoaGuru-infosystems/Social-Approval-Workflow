@@ -5,4 +5,7 @@ __pycache__/
 *.py[cod]
 uploads/*
 !uploads/.gitkeep
+tests/
+test/
+test-*.js
 

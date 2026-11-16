@@ -277,6 +277,48 @@ def _build_all_variants(source):
     }
 
 
+def get_top10_variants(bgr_image):
+    """
+    Returns the exact 10 diverse families requested for A2 OCR:
+    1. Original, 2. Grayscale, 3. CLAHE Soft, 4. CLAHE Enhanced, 5. CLAHE Strong,
+    6. Retinex, 7. Contrast Normalized, 8. Otsu Threshold, 9. Adaptive Threshold, 10. Sharpened
+    """
+    if bgr_image is None:
+        raise ValueError("bgr_image is None")
+    h, w = bgr_image.shape[:2]
+    if max(h, w) > MAX_SIDE_BEFORE_PREPROCESS:
+        scale = MAX_SIDE_BEFORE_PREPROCESS / max(h, w)
+        bgr_image = cv2.resize(bgr_image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    variants = _build_all_variants(bgr_image)
+    
+    top10_mapping = [
+        ("Original", "Original"),
+        ("Grayscale", "Grayscale"),
+        ("CLAHE Soft", "CLAHE Soft (1.5)"),
+        ("CLAHE Enhanced", "CLAHE Enhanced (LAB L-channel)"),
+        ("CLAHE Strong", "CLAHE Strong (3.5)"),
+        ("Retinex", "MSRCR / Retinex"),
+        ("Contrast Normalized", "Contrast Normalized (2-98%)"),
+        ("Otsu", "Otsu Threshold"),
+        ("Adaptive", "Adaptive Threshold Gaussian"),
+        ("Sharpened", "Sharpened"),
+    ]
+    
+    top10 = []
+    top10_names = []
+    for short_name, v_key in top10_mapping:
+        if v_key in variants:
+            top10.append((short_name, variants[v_key]))
+            top10_names.append(short_name)
+        elif "Original" in variants:
+            top10.append((short_name, variants["Original"]))
+            top10_names.append(short_name)
+            
+    scores = _score_variants(variants)
+    return top10, scores, top10_names
+
+
 def get_top7_variants(bgr_image):
     """
     MAIN ENTRY - Node agent isi ko call karega.

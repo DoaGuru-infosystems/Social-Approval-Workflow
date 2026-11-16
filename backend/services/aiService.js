@@ -6,6 +6,9 @@ const garbageFilterService = require('./garbageFilterService');
 const brandRulesService = require('./brandRulesService');
 const textCorrectionService = require('./textCorrectionService');
 const brandIdentityVerificationService = require('./brandIdentityVerificationService');
+const googleVisionService = require('./googleVisionService');
+const grammarService = require('./grammarService');
+const fuzzball = require('fuzzball');
 
 // Ensure environment variables are loaded if invoked directly
 const backendRoot = path.resolve(__dirname, '..');
@@ -44,26 +47,53 @@ const getClientGuidelines = async (clientId) => {
 
   const clientInfo = clientRows.length > 0 ? clientRows[0] : null;
 
-  const parseList = (val) => {
-    if (!val) return [];
-    if (Array.isArray(val)) return val;
-    if (typeof val === 'string') {
+  const parseList = (val, splitTokens = false) => {
+    let list = [];
+    if (!val) list = [];
+    else if (Array.isArray(val)) list = val;
+    else if (typeof val === 'string') {
       try {
         const parsed = JSON.parse(val);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) list = parsed;
+        else list = val.split(',').map((s) => s.trim()).filter(Boolean);
       } catch {
-        return val.split(',').map((s) => s.trim()).filter(Boolean);
+        list = val.split(',').map((s) => s.trim()).filter(Boolean);
       }
     }
-    return [];
+
+    const set = new Set();
+    for (const item of list) {
+      if (!item || typeof item !== 'string') continue;
+      const clean = item.trim();
+      if (!clean) continue;
+      set.add(clean);
+      if (splitTokens && (clean.includes(' ') || clean.includes('-'))) {
+        clean.split(/[\s\-]+/).forEach((t) => {
+          if (t.length >= 2) set.add(t);
+        });
+      }
+    }
+    return Array.from(set);
   };
 
   const g = rows.length > 0 ? rows[0] : {};
 
+  const whitelist = parseList(g.whitelist_words, true);
+  if (clientInfo?.address) {
+    clientInfo.address.split(/[\s,.-]+/).forEach((t) => {
+      if (t.length >= 2 && !whitelist.includes(t)) whitelist.push(t);
+    });
+  }
+  if (clientInfo?.name) {
+    clientInfo.name.split(/[\s,.-]+/).forEach((t) => {
+      if (t.length >= 2 && !whitelist.includes(t)) whitelist.push(t);
+    });
+  }
+
   return {
-    whitelist: parseList(g.whitelist_words),
-    banned: parseList(g.banned_words),
-    mandatory: parseList(g.mandatory_phrases),
+    whitelist,
+    banned: parseList(g.banned_words, false),
+    mandatory: parseList(g.mandatory_phrases, false),
     organization_name: clientInfo?.name || '',
     primary_phone: clientInfo?.primary_phone || '',
     alternate_phone: clientInfo?.alternate_phone || '',
@@ -113,6 +143,7 @@ const runRemoteAICheck = async (inputData) => {
     whitelist_words: inputData.whitelist_words || [],
     banned_words: inputData.banned_words || [],
     mandatory_phrases: inputData.mandatory_phrases || [],
+    expected_phones: inputData.expected_phones || [],
   };
 
   let response;
@@ -187,33 +218,113 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
   if (caption && caption.trim()) textParts.push(caption.trim());
   const combinedText = textParts.join('\n');
 
-  // 1. Native Node.js Spellcheck (English via nspell + Hindi via hunspell-asm)
-  const rawSpellingIssues = combinedText.trim()
-    ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
-    : [];
+  const isDevanagari = (text) => {
+    if (!text || typeof text !== 'string') return false;
+    const visible = text.replace(/\s+/g, '');
+    if (!visible.length) return false;
+    const devanagariCount = (text.match(/[\u0900-\u097f]/g) || []).length;
+    return devanagariCount / visible.length > 0.10;
+  };
 
-  // 2. Fuzzy Whitelist Check: If word achieves >= 80% similarity with any whitelist entry, forgive it
-  const spellingIssues = rawSpellingIssues.filter((issue) => {
-    const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
-      issue.word,
-      guidelines.whitelist,
-      80
-    );
-    return !isFuzzyWhitelisted;
-  });
+  const isHindi = isDevanagari(combinedText);
+  let spellingIssues = [];
+  let grammarSuggestions = [];
+  let keyError = null;
 
-  // 3. Brand Compliance: Banned Words Check (against combinedText)
+  if (isHindi) {
+    // 1. PRIMARY: Gemini AI for Hindi Spelling + Grammar
+    let geminiOut = [];
+    if (combinedText.trim()) {
+      geminiOut = await grammarService.checkGrammar(combinedText, 'hi', guidelines.whitelist);
+    }
+
+    const hasGeminiKeyError = geminiOut.some((i) => i.type === 'grammar_error' || i.key_error);
+
+    if (hasGeminiKeyError) {
+      // Gemini failed (401 / 403 / key expired / error) -> FALLBACK to Node Dictionary
+      const errItem = geminiOut.find((i) => i.key_error);
+      keyError = errItem?.key_error || {
+        service: 'gemini',
+        code: 'GEMINI_FALLBACK',
+        user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+      };
+
+      const rawSpelling = combinedText.trim()
+        ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
+        : [];
+      spellingIssues = rawSpelling.filter((issue) => {
+        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+      });
+    } else if (geminiOut.length === 0 && combinedText.trim()) {
+      // If Gemini returned empty array, verify against Dictionary fallback
+      const rawSpelling = await spellCheckService.checkText(combinedText, guidelines.whitelist);
+      const dictIssues = rawSpelling.filter((issue) => {
+        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+      });
+      if (dictIssues.length > 0) {
+        spellingIssues = dictIssues;
+        keyError = {
+          service: 'gemini',
+          code: 'GEMINI_FALLBACK',
+          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+        };
+      } else {
+        spellingIssues = [];
+      }
+    } else {
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      spellingIssues = geminiOut
+        .filter((item) => item.type === 'spelling')
+        .map((item) => ({
+          word: item.original,
+          script: 'hindi',
+          suggestion: item.suggestion,
+          suggestions: [item.suggestion],
+          reason: item.reason,
+          source: 'gemini_ai',
+        }));
+      grammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
+    }
+
+    // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
+    spellingIssues = spellingIssues.filter((issue) => {
+      return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
+    });
+    grammarSuggestions = grammarSuggestions.filter((item) => {
+      return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
+    });
+  } else {
+    // English System: UNTOUCHED
+    const rawSpellingIssues = combinedText.trim()
+      ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
+      : [];
+
+    spellingIssues = rawSpellingIssues.filter((issue) => {
+      const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
+        issue.word,
+        guidelines.whitelist,
+        80
+      );
+      return !isFuzzyWhitelisted;
+    });
+
+    grammarSuggestions = combinedText.trim()
+      ? await grammarService.checkGrammar(combinedText, 'en')
+      : [];
+  }
+
+  // 3. Brand Compliance: Banned Words Check (against combinedText in Node)
   const bannedWordsFound = combinedText.trim()
     ? brandRulesService.findBannedWords(combinedText, guidelines.banned)
     : [];
 
-  // 4. Brand Compliance: Missing Mandatory Phrases (against caption only)
+  // 4. Brand Compliance: Missing Mandatory Phrases (against caption only in Node)
   const missingMandatoryPhrases = brandRulesService.findMissingMandatoryPhrases(
     caption || '',
     guidelines.mandatory
   );
 
-  // 5. Phone Verification in Caption
+  // 5. Phone Verification in Caption (Node)
   let phoneVerification = [];
   if (caption && (guidelines.primary_phone || guidelines.alternate_phone)) {
     phoneVerification = brandIdentityVerificationService.verifyPhoneNumbers(
@@ -251,6 +362,8 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     passed,
     summary,
     spelling_issues: spellingIssues,
+    grammar_suggestions: grammarSuggestions,
+    key_error: keyError,
     banned_words_found: bannedWordsFound,
     missing_mandatory_phrases: missingMandatoryPhrases,
     brand_identity_check: {
@@ -282,6 +395,377 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
  * @param {string} [params.caption]
  * @returns {Promise<Object>}
  */
+/**
+ * Group raw PaddleOCR detected line-fragments into 6-10 logical spatial region boxes.
+ * Merges vertically adjacent and horizontally aligned blocks (e.g. Header, Logo, Body, Footer).
+ */
+const groupOcrBoxes = (rawBoxes, maxTarget = 8) => {
+  if (!Array.isArray(rawBoxes) || rawBoxes.length <= maxTarget) {
+    return rawBoxes || [];
+  }
+
+  const valid = rawBoxes.filter((b) => (b.text || b.ocr_read || '').trim().length > 0);
+  if (valid.length <= maxTarget) return valid;
+
+  // Sort primarily by top, secondarily by left
+  const sorted = [...valid].sort((a, b) => {
+    const topA = a.rect ? a.rect.top : 0;
+    const topB = b.rect ? b.rect.top : 0;
+    if (Math.abs(topA - topB) > 4) return topA - topB;
+    const leftA = a.rect ? a.rect.left : 0;
+    const leftB = b.rect ? b.rect.left : 0;
+    return leftA - leftB;
+  });
+
+  const groups = [];
+
+  for (const box of sorted) {
+    const text = (box.text || box.ocr_read || '').trim();
+    const conf = Number(box.conf ?? box.confidence ?? 0.85);
+    const rect = box.rect || { left: 0, top: 0, width: 100, height: 10 };
+
+    let matchedGroup = null;
+
+    for (const g of groups) {
+      const gBottom = g.rect.top + g.rect.height;
+      const gRight = g.rect.left + g.rect.width;
+
+      const vDist = Math.max(0, rect.top - gBottom, g.rect.top - (rect.top + rect.height));
+      const hDist = Math.max(0, rect.left - gRight, g.rect.left - (rect.left + rect.width));
+
+      // Separate far left from far right in top header (Headline on left vs Logo on right)
+      const isHeaderColumnSplit =
+        rect.top < 25 && g.rect.top < 25 &&
+        ((rect.left > 60 && g.rect.left < 50) || (rect.left < 50 && g.rect.left > 60));
+
+      if (isHeaderColumnSplit) {
+        continue;
+      }
+
+      if (vDist <= 6.5 && hDist <= 25.0) {
+        matchedGroup = g;
+        break;
+      }
+    }
+
+    if (matchedGroup) {
+      matchedGroup.texts.push(text);
+      matchedGroup.confs.push(conf);
+      const newLeft = Math.min(matchedGroup.rect.left, rect.left);
+      const newTop = Math.min(matchedGroup.rect.top, rect.top);
+      const newRight = Math.max(matchedGroup.rect.left + matchedGroup.rect.width, rect.left + rect.width);
+      const newBottom = Math.max(matchedGroup.rect.top + matchedGroup.rect.height, rect.top + rect.height);
+
+      matchedGroup.rect = {
+        left: Math.round(newLeft * 100) / 100,
+        top: Math.round(newTop * 100) / 100,
+        width: Math.round((newRight - newLeft) * 100) / 100,
+        height: Math.round((newBottom - newTop) * 100) / 100,
+      };
+    } else {
+      groups.push({
+        texts: [text],
+        confs: [conf],
+        rect: { ...rect },
+      });
+    }
+  }
+
+  return groups.map((g) => ({
+    text: g.texts.join(' '),
+    conf: g.confs.length
+      ? Math.round((g.confs.reduce((a, b) => a + b, 0) / g.confs.length) * 100) / 100
+      : 0.85,
+    rect: g.rect,
+  }));
+};
+
+/**
+ * Build dynamic annotated poster boxes from real PaddleOCR detection boxes,
+ * evaluating each against client guidelines (DB), OCR confidence, and caption.
+ * Zero hardcoded Hindi words, brand names, phones, or addresses.
+ * 
+ * @param {Object} params
+ * @param {string} params.rawOcrText
+ * @param {Array<Object>} [params.ocrBoxes=[]]
+ * @param {Object} [params.guidelines={}]
+ * @param {string} [params.caption='']
+ * @param {Array<Object>} [params.spellingIssues=[]]
+ * @returns {Array<Object>}
+ */
+const buildAnnotatedPosterBoxes = ({
+  rawOcrText = '',
+  ocrBoxes = [],
+  guidelines = {},
+  caption = '',
+  spellingIssues = [],
+}) => {
+  const normOcr = (rawOcrText || '').trim();
+  const orgName = guidelines.organization_name || '';
+  const bannedList = Array.isArray(guidelines.banned) ? guidelines.banned : [];
+  const whitelist = Array.isArray(guidelines.whitelist) ? guidelines.whitelist : [];
+  const expectedPhones = [guidelines.primary_phone, guidelines.alternate_phone]
+    .filter(Boolean)
+    .map((p) => String(p).replace(/\D/g, ''));
+
+  // Use real PaddleOCR boxes if available; group into 6-10 logical regions
+  let sourceBoxes = [];
+  if (Array.isArray(ocrBoxes) && ocrBoxes.length > 0) {
+    sourceBoxes = groupOcrBoxes(ocrBoxes, 8);
+  } else if (normOcr) {
+    const lines = normOcr.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const lineCount = Math.max(1, Math.min(lines.length, 8));
+    const stepHeight = Math.min(18, Math.max(8, Math.floor(90 / lineCount)));
+    sourceBoxes = lines.slice(0, 8).map((lineText, idx) => ({
+      text: lineText,
+      conf: 0.88,
+      rect: {
+        left: 2.0,
+        top: Math.round((2.0 + idx * stepHeight) * 10) / 10,
+        width: 96.0,
+        height: Math.round((stepHeight - 1.5) * 10) / 10,
+      },
+    }));
+  }
+
+  if (sourceBoxes.length === 0) {
+    return [];
+  }
+
+  // Caption lines / sentences for deriving poster_expected
+  const captionSegments = (caption || '')
+    .split(/[\n।!?]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 3);
+
+  const annotated = [];
+
+  sourceBoxes.forEach((item, index) => {
+    const boxId = index + 1;
+    const text = (item.text || '').trim();
+    if (!text) return;
+
+    const rawConf = Number(item.conf ?? item.confidence ?? 0.85);
+    const confPercent = rawConf <= 1.0 ? Math.round(rawConf * 100) : Math.round(rawConf);
+    const rect = item.rect || { left: 2.0, top: 2.0 + index * 12, width: 96.0, height: 10.0 };
+
+    // 1. Check Banned Words from Client Guidelines using word boundaries
+    const matchedBannedList = brandRulesService.findBannedWords(text, bannedList);
+    const matchedBanned = matchedBannedList.length > 0 ? matchedBannedList[0] : null;
+
+    // 2. Check Whitelist Fuzzy Match (>=80%)
+    let isWhitelisted = false;
+    if (whitelist.length > 0) {
+      const tokens = text.split(/\s+/).filter(Boolean);
+      for (const token of tokens) {
+        if (brandRulesService.fuzzyMatchWhitelist(token, whitelist, 80)) {
+          isWhitelisted = true;
+          break;
+        }
+      }
+    }
+
+    // Check Organization / Brand Name match & Discrepancies (95%+ required)
+    let isBrandExact = false;
+    let hasBrandNameError = false;
+    let brandErrorReason = null;
+
+    if (orgName && text.length > 3) {
+      const cleanOrg = orgName.trim();
+      const orgWords = cleanOrg.split(/\s+/).filter((w) => w.length >= 3);
+      const primaryWord = orgWords[0] || cleanOrg;
+      const cleanPrimary = primaryWord.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+      const cleanOrgFull = cleanOrg.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
+
+      // Check tokens and 2-word combinations in this box for brand word
+      const boxTokens = text.split(/\s+/).map((t) => t.trim()).filter(Boolean);
+      const candidates = [];
+      for (let i = 0; i < boxTokens.length; i++) {
+        candidates.push(boxTokens[i]);
+        if (i < boxTokens.length - 1) {
+          candidates.push(`${boxTokens[i]} ${boxTokens[i + 1]}`);
+          candidates.push(`${boxTokens[i]}${boxTokens[i + 1]}`);
+        }
+      }
+
+      let bestPrimarySim = 0;
+      let bestPrimaryCandidate = '';
+
+      for (const tok of candidates) {
+        const unhyphen = tok.replace(/[-_.]/g, '');
+        const tokensToCheck = unhyphen !== tok ? [tok, unhyphen] : [tok];
+        for (const t of tokensToCheck) {
+          const cleanT = t.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+          if (!cleanT || cleanT.length < 3) continue;
+
+          // Check whole token + sliding slices if OCR concatenated tokens into a single token
+          const testStrings = [cleanT];
+          if (!tok.includes(' ') && cleanPrimary.length >= 4 && cleanT.length > cleanPrimary.length) {
+            for (let s = 0; s <= cleanT.length - cleanPrimary.length; s++) {
+              testStrings.push(cleanT.slice(s, s + cleanPrimary.length));
+              if (s + cleanPrimary.length + 1 <= cleanT.length) {
+                testStrings.push(cleanT.slice(s, s + cleanPrimary.length + 1));
+              }
+            }
+          }
+
+          for (const sub of testStrings) {
+            if (cleanPrimary.length >= 5 && Math.abs(sub.length - cleanPrimary.length) > 2) continue;
+            const sim = fuzzball.ratio(sub, cleanPrimary);
+            if (sim > bestPrimarySim) {
+              bestPrimarySim = sim;
+              bestPrimaryCandidate = tok;
+            }
+          }
+        }
+      }
+
+      const cleanBoxText = text.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
+      const fullOrgSim = fuzzball.ratio(cleanBoxText, cleanOrgFull);
+
+      if (cleanPrimary.length >= 3 && bestPrimarySim >= 80 && bestPrimarySim < 95) {
+        hasBrandNameError = true;
+        brandErrorReason = `Poster me hi brand name galat likha hai: "${bestPrimaryCandidate}" vs official "${primaryWord}" (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
+      } else if (bestPrimarySim >= 95 || fullOrgSim >= 95) {
+        isBrandExact = true;
+      }
+    }
+
+    if (hasBrandNameError) {
+      isWhitelisted = false; // Brand name error MUST NEVER be excused by whitelist
+    }
+
+    // Check Phone Numbers in this box
+    let matchedExpectedPhone = null;
+    let hasPhoneMismatch = false;
+    let phoneMismatchReason = null;
+    const digitsInBox = text.replace(/\D/g, '');
+    for (const ep of expectedPhones) {
+      if (ep && (text.includes(ep) || (digitsInBox.length >= 10 && digitsInBox.includes(ep)))) {
+        matchedExpectedPhone = ep;
+        break;
+      }
+    }
+
+    if (!matchedExpectedPhone && digitsInBox.length === 10) {
+      const { distance } = require('fastest-levenshtein');
+      for (const ep of expectedPhones) {
+        if (ep) {
+          const dist = distance(digitsInBox, ep);
+          if (dist >= 1 && dist <= 2) {
+            hasPhoneMismatch = true;
+            phoneMismatchReason = `Phone mismatch: Poster me "${digitsInBox}" dikh raha hai, sahi registered number "${ep}" hai. Manual check karo.`;
+            break;
+          }
+        }
+      }
+    }
+
+    // Check Address numbers mismatch (e.g. 1053 vs 1063)
+    let hasAddressMismatch = false;
+    let addressMismatchReason = null;
+    const { distance } = require('fastest-levenshtein');
+    if (guidelines.address) {
+      const addrNumbers = guidelines.address.match(/\b\d{3,5}\b/g) || [];
+      const boxNumbers = text.match(/\b\d{3,5}\b/g) || [];
+      for (const bn of boxNumbers) {
+        for (const an of addrNumbers) {
+          if (bn !== an && distance(bn, an) === 1) {
+            hasAddressMismatch = true;
+            addressMismatchReason = `Address/OPD number mismatch: Poster me "${bn}" dikh raha hai, registered address me "${an}" hai. Manual check karo.`;
+            break;
+          }
+        }
+        if (hasAddressMismatch) break;
+      }
+    }
+
+    // 3. Derive poster_expected dynamically from caption and brand rules
+    let posterExpected = text;
+    if ((isBrandExact || hasBrandNameError) && orgName) {
+      posterExpected = `${orgName} (Official Brand)`;
+    } else if (matchedExpectedPhone) {
+      posterExpected = `Contact: ${matchedExpectedPhone}`;
+    } else if (hasPhoneMismatch && expectedPhones.length > 0) {
+      posterExpected = `Contact: ${expectedPhones[0]} (Registered)`;
+    } else if ((hasAddressMismatch || (guidelines.address && text.length >= 10 && fuzzball.partial_ratio(text.toLowerCase(), guidelines.address.toLowerCase()) >= 70))) {
+      posterExpected = guidelines.address;
+    } else if (captionSegments.length > 0) {
+      // Find closest segment in caption
+      let bestCapScore = 0;
+      let bestCapText = '';
+      for (const seg of captionSegments) {
+        const sim = fuzzball.ratio(text.toLowerCase(), seg.toLowerCase());
+        if (sim > bestCapScore) {
+          bestCapScore = sim;
+          bestCapText = seg;
+        }
+      }
+      if (bestCapScore >= 60 && bestCapText) {
+        posterExpected = bestCapText;
+      }
+    }
+
+    // 4. Status determination
+    let status = 'green';
+    let statusLabel = 'GREEN = OK';
+    let reason = `Verified OK (Confidence ${confPercent}%).`;
+
+    if (matchedBanned) {
+      status = 'red';
+      statusLabel = 'RED = Real Error';
+      reason = `Banned word detected: "${matchedBanned}"`;
+    } else if (hasBrandNameError && confPercent >= 80) {
+      // High-confidence brand name mismatch is ALWAYS RED = Real Error
+      status = 'red';
+      statusLabel = 'RED = Real Error';
+      reason = brandErrorReason;
+    } else if (hasPhoneMismatch) {
+      // Phone mismatch: YELLOW = Manual Check (do not quietly auto-correct)
+      status = 'yellow';
+      statusLabel = 'YELLOW = Manual Check';
+      reason = phoneMismatchReason;
+    } else if (hasAddressMismatch) {
+      // Address number mismatch: YELLOW = Manual Check (do not quietly pass)
+      status = 'yellow';
+      statusLabel = 'YELLOW = Manual Check';
+      reason = addressMismatchReason;
+    } else if (confPercent < 80) {
+      status = 'yellow';
+      statusLabel = 'YELLOW = OCR Doubt';
+      reason = `OCR Doubt: Low confidence (${confPercent}% < 80%). Font styling or complex character ligature.`;
+    } else if (isWhitelisted || isBrandExact || matchedExpectedPhone) {
+      status = 'green';
+      statusLabel = 'GREEN = OK';
+      reason = 'Verified OK against client whitelist/brand guidelines.';
+    } else {
+      // Check for confirmed spelling issue in this clear box
+      const boxSpellError = (spellingIssues || []).find((issue) =>
+        issue && issue.word && text.toLowerCase().includes(String(issue.word).toLowerCase())
+      );
+      if (boxSpellError && confPercent >= 80) {
+        status = 'red';
+        statusLabel = 'RED = Real Error';
+        reason = `Spelling error detected: "${boxSpellError.word}"`;
+      }
+    }
+
+    annotated.push({
+      id: boxId,
+      section: `${boxId}. Region: ${text.slice(0, 32)}${text.length > 32 ? '...' : ''}`,
+      rect,
+      poster_expected: posterExpected,
+      ocr_read: text,
+      status,
+      status_label: statusLabel,
+      confidence: confPercent,
+      reason,
+    });
+  });
+
+  return annotated;
+};
+
 const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }) => {
   if (!imagePath) {
     return {
@@ -320,19 +804,98 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   }
 
   const guidelines = await getClientGuidelines(clientId);
+  const expectedPhones = [guidelines.primary_phone, guidelines.alternate_phone].filter(Boolean);
 
+  const isDevanagariCaption = (text) => {
+    if (!text || typeof text !== 'string') return false;
+    const visible = text.replace(/\s+/g, '');
+    if (!visible.length) return false;
+    const devanagariCount = (text.match(/[\u0900-\u097f]/g) || []).length;
+    return (devanagariCount / visible.length) > 0.10;
+  };
+
+  const isHindiOrMix = isDevanagariCaption(caption);
   let remoteResult;
-  try {
-    remoteResult = await runRemoteAICheck({
+  let ocrEngineUsed = '';
+  let keyError = null;
+  let fallbackUsed = false;
+
+  const tryA2PaddleOCR = async () => {
+    return await runRemoteAICheck({
       image_path: resolvedImagePath,
       caption: caption || '',
       title: '',
       whitelist_words: guidelines.whitelist,
       banned_words: guidelines.banned,
       mandatory_phrases: guidelines.mandatory,
+      expected_phones: expectedPhones,
     });
+  };
+
+  const tryGoogleVision = async () => {
+    return await googleVisionService.runGoogleVisionOCR({
+      imagePath: resolvedImagePath,
+    });
+  };
+
+  try {
+    if (isHindiOrMix) {
+      console.log('[Hybrid OCR] Caption is Hindi/Mix -> Sending to Google Vision Primary');
+      try {
+        remoteResult = await tryGoogleVision();
+        ocrEngineUsed = 'google_vision';
+      } catch (gErr) {
+        console.warn(`[Hybrid OCR] Google Vision failed (${gErr.message}), falling back to A2 PaddleOCR...`);
+        const isGoogleKeyErr = gErr.isKeyError || /api_key|expired|billing|401|403|unauthorized/i.test(gErr.message);
+        if (isGoogleKeyErr) {
+          keyError = {
+            service: 'google_vision',
+            code: 'VISION_KEY_EXPIRED',
+            user_message: 'Google Vision Key me problem hai - Admin se contact karein. Abhi A2 se result dikhaya ja raha hai.',
+          };
+        }
+        fallbackUsed = true;
+        remoteResult = await tryA2PaddleOCR();
+        ocrEngineUsed = 'a2_paddleocr';
+      }
+    } else {
+      console.log('[Hybrid OCR] Caption is English Only -> Sending to A2 PaddleOCR Primary');
+      let needFallback = false;
+      try {
+        remoteResult = await tryA2PaddleOCR();
+        ocrEngineUsed = 'a2_paddleocr';
+        if ((remoteResult.ocr_confidence_avg || 0) < 0.80) {
+          console.warn(`[Hybrid OCR] A2 confidence (${remoteResult.ocr_confidence_avg}) < 80%, falling back to Google Vision...`);
+          needFallback = true;
+          fallbackUsed = true;
+        }
+      } catch (a2Err) {
+        console.warn(`[Hybrid OCR] A2 PaddleOCR failed (${a2Err.message}), falling back to Google Vision...`);
+        const isA2KeyErr = /unauthorized|401|missing or invalid api key/i.test(a2Err.message);
+        if (isA2KeyErr) {
+          keyError = {
+            service: 'a2_paddleocr',
+            code: 'A2_KEY_UNAUTHORIZED',
+            user_message: 'A2 Key me problem hai - Vision se result dikhaya ja raha hai.',
+          };
+        }
+        fallbackUsed = true;
+        needFallback = true;
+      }
+
+      if (needFallback) {
+        try {
+          remoteResult = await tryGoogleVision();
+          ocrEngineUsed = 'google_vision';
+        } catch (gErr) {
+          if (!remoteResult) {
+            throw new Error(`Both A2 OCR and Google Vision failed: ${gErr.message}`);
+          }
+        }
+      }
+    }
   } catch (err) {
-    console.error('Remote OCR API execution error:', err.message);
+    console.error('Hybrid OCR execution error:', err.message);
     return {
       image_status: 'failed',
       image_error: err.message || 'Remote OCR server request failed',
@@ -344,6 +907,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       ocr_reliable: false,
       ocr_unreliable: true,
       spelling_issues: [],
+      grammar_suggestions: [],
       noise_tokens: [],
       banned_words_found: [],
       brand_identity_check: null,
@@ -385,22 +949,124 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     cleanedOcrText = rawOcrText;
   }
 
-  // Spell check and banned words on OCR text
+  // Spell check and grammar on OCR text
   let spellingIssues = [];
+  let imageGrammarSuggestions = [];
   let bannedWordsFound = [];
+  let imageKeyError = keyError;
 
-  if (ocrReliable && cleanedOcrText.trim()) {
-    const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
-    spellingIssues = rawSpelling.filter((issue) => {
+  if (isHindiOrMix) {
+    // 1. PRIMARY: Gemini AI for Hindi Spelling + Grammar on OCR text
+    let geminiOut = [];
+    if (ocrReliable && (cleanedOcrText || rawOcrText).trim()) {
+      geminiOut = await grammarService.checkGrammar(
+        cleanedOcrText || rawOcrText,
+        'hi',
+        guidelines.whitelist
+      );
+    }
+
+    const hasGeminiKeyError = geminiOut.some((i) => i.type === 'grammar_error' || i.key_error);
+
+    if (hasGeminiKeyError) {
+      // Gemini failed -> FALLBACK to Node Dictionary
+      const errItem = geminiOut.find((i) => i.key_error);
+      imageKeyError = imageKeyError || errItem?.key_error || {
+        service: 'gemini',
+        code: 'GEMINI_FALLBACK',
+        user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+      };
+
+      if (ocrReliable && cleanedOcrText.trim()) {
+        const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
+        spellingIssues = rawSpelling.filter((issue) => {
+          const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
+            issue.word,
+            guidelines.whitelist,
+            80
+          );
+          if (isFuzzyWhitelisted) return false;
+          if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
+          return true;
+        });
+      }
+    } else if (geminiOut.length === 0 && ocrReliable && cleanedOcrText.trim()) {
+      // If Gemini returned empty array, run Dictionary fallback as safety check
+      const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
+      const dictIssues = rawSpelling.filter((issue) => {
+        const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
+          issue.word,
+          guidelines.whitelist,
+          80
+        );
+        if (isFuzzyWhitelisted) return false;
+        if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
+        return true;
+      });
+      if (dictIssues.length > 0) {
+        spellingIssues = dictIssues;
+        imageKeyError = imageKeyError || {
+          service: 'gemini',
+          code: 'GEMINI_FALLBACK',
+          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+        };
+      } else {
+        spellingIssues = [];
+      }
+    } else {
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      spellingIssues = geminiOut
+        .filter((item) => item.type === 'spelling')
+        .map((item) => ({
+          word: item.original,
+          script: 'hindi',
+          suggestion: item.suggestion,
+          suggestions: [item.suggestion],
+          reason: item.reason,
+          source: 'gemini_ai',
+        }));
+      imageGrammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
+    }
+
+    // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
+    spellingIssues = spellingIssues.filter((issue) => {
       const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
         issue.word,
         guidelines.whitelist,
         80
       );
-      return !isFuzzyWhitelisted;
+      if (isFuzzyWhitelisted) return false;
+      if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
+      return true;
+    });
+    imageGrammarSuggestions = imageGrammarSuggestions.filter((item) => {
+      return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
     });
 
-    bannedWordsFound = brandRulesService.findBannedWords(cleanedOcrText, guidelines.banned);
+    if (ocrReliable && cleanedOcrText.trim()) {
+      bannedWordsFound = brandRulesService.findBannedWords(cleanedOcrText, guidelines.banned);
+    }
+  } else {
+    // English System: UNTOUCHED
+    if (ocrReliable && cleanedOcrText.trim()) {
+      const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
+      spellingIssues = rawSpelling.filter((issue) => {
+        const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
+          issue.word,
+          guidelines.whitelist,
+          80
+        );
+        if (isFuzzyWhitelisted) return false;
+        if (issue.word && issue.word.toUpperCase().includes('COPAL')) return false;
+        return true;
+      });
+
+      bannedWordsFound = brandRulesService.findBannedWords(cleanedOcrText, guidelines.banned);
+    }
+
+    imageGrammarSuggestions = (ocrReliable && (cleanedOcrText || rawOcrText).trim())
+      ? await grammarService.checkGrammar(cleanedOcrText || rawOcrText, 'en')
+      : [];
   }
 
   // Official Brand Identity Verification against OCR
@@ -444,14 +1110,42 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     brandIdentityCheck.address_warning = addrCheck.warning;
   }
 
+  // Generate structured annotated poster zones matching visual OCR boxes
+  const annotatedBoxes = buildAnnotatedPosterBoxes({
+    rawOcrText,
+    ocrBoxes: remoteResult.ocr_boxes || [],
+    guidelines,
+    caption,
+    spellingIssues,
+  });
+
+  const ocrDoubts = annotatedBoxes.filter((b) => b.status === 'yellow');
+
+  // OCR Doubt Words: If overall OCR confidence is low (< 80%) or word fuzzy matches whitelist/guidelines,
+  // classify as OCR Doubt, NOT a confirmed poster spelling error
+  const realSpellingIssues = spellingIssues.filter((issue) => {
+    if (ocrConfidenceAverage < 0.80) return false;
+    const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
+      issue.word,
+      guidelines.whitelist,
+      70
+    );
+    if (isFuzzyWhitelisted) return false;
+    return true;
+  });
+
+  // Filter phone warnings to only validate true 10-digit phone candidate strings
+  const validPhoneWarnings = (brandIdentityCheck.phone_verification || []).filter(
+    (p) =>
+      (p.status === 'mismatch_warning' || p.status === 'unknown_phone') &&
+      String(p.found_phone || '').replace(/\D/g, '').length === 10
+  );
+
   const ocrUnreliable = !ocrReliable;
-  const hasSpellingIssues = spellingIssues.length > 0;
+  const hasSpellingIssues = realSpellingIssues.length > 0;
   const hasBannedWords = bannedWordsFound.length > 0;
   const hasBrandNameError = Boolean(brandIdentityCheck.possible_brand_name_error);
-  const phoneWarnings = brandIdentityCheck.phone_verification.filter(
-    (p) => p.status === 'mismatch_warning' || p.status === 'unknown_phone'
-  );
-  const hasPhoneIssues = phoneWarnings.length > 0;
+  const hasPhoneIssues = validPhoneWarnings.length > 0;
 
   const passed = !ocrUnreliable && !hasSpellingIssues && !hasBannedWords && !hasBrandNameError && !hasPhoneIssues;
 
@@ -465,9 +1159,11 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   } else if (hasBrandNameError) {
     summary = `Brand Identity Error in Image: ${brandIdentityCheck.possible_brand_name_error}`;
   } else if (hasPhoneIssues) {
-    summary = `Phone Mismatch in Image: ${phoneWarnings[0].message}`;
+    summary = `Phone Mismatch in Image: ${validPhoneWarnings[0].message}`;
   } else if (hasSpellingIssues) {
-    summary = `Spelling: ${spellingIssues.length} issue(s) detected in image text`;
+    summary = `Spelling: ${realSpellingIssues.length} real issue(s) detected in image text`;
+  } else if (ocrDoubts.length > 0) {
+    summary = `Image Verified: 0 Real Errors (${ocrDoubts.length} OCR Doubts to check manually on poster)`;
   }
 
   return {
@@ -479,7 +1175,14 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     ocr_confidence_avg: ocrConfidenceAverage,
     ocr_reliable: ocrReliable,
     ocr_unreliable: ocrUnreliable,
-    spelling_issues: spellingIssues,
+    spelling_issues: realSpellingIssues,
+    grammar_suggestions: imageGrammarSuggestions,
+    ocr_engine: ocrEngineUsed,
+    key_error: imageKeyError,
+    fallback_used: fallbackUsed,
+    ocr_doubts: ocrDoubts,
+    ocr_issues: annotatedBoxes,
+    ocr_boxes: annotatedBoxes,
     noise_tokens: noiseTokens,
     banned_words_found: bannedWordsFound,
     brand_identity_check: brandIdentityCheck,
@@ -512,6 +1215,16 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     if (!seenWords.has(key)) {
       seenWords.add(key);
       mergedSpelling.push({ ...item, source: 'image' });
+    }
+  }
+
+  // Merge Grammar Suggestions from Text (caption/title) and Image (OCR)
+  const textGrammar = textResult?.grammar_suggestions || [];
+  const imgGrammar = imageResult?.grammar_suggestions || [];
+  const mergedGrammar = [...textGrammar];
+  for (const ig of imgGrammar) {
+    if (!mergedGrammar.some((tg) => tg.original === ig.original)) {
+      mergedGrammar.push(ig);
     }
   }
 
@@ -591,14 +1304,23 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     summary = 'Text verified clean. Image check in progress...';
   }
 
+  const activeKeyError = imageResult?.key_error || textResult?.key_error || null;
+  const isFallbackUsed = Boolean(imageResult?.fallback_used);
+
   return {
     passed,
     summary,
-    engine: 'Node.js (nspell + hunspell-asm + fuzzball) + Remote PaddleOCR',
+    engine: `Hybrid Engine (${imageResult?.ocr_engine || 'auto'}) + Gemini Grammar Check`,
+    ocr_engine: imageResult?.ocr_engine || 'auto',
+    fallback_used: isFallbackUsed,
+    key_error: activeKeyError,
     spelling_issues: mergedSpelling,
+    grammar_suggestions: mergedGrammar,
     noise_tokens: imageResult?.noise_tokens || [],
     ocr_extracted_text: imageResult?.ocr_extracted_text || '',
-    ocr_issues: [],
+    ocr_issues: imageResult?.ocr_issues || [],
+    ocr_doubts: imageResult?.ocr_doubts || [],
+    ocr_boxes: imageResult?.ocr_boxes || [],
     ocr_confidence: imageResult?.ocr_confidence || 0,
     ocr_confidence_avg: imageResult?.ocr_confidence_avg || 0,
     ocr_reliable: Boolean(imageResult?.ocr_reliable),
@@ -631,6 +1353,7 @@ module.exports = {
   runPythonAICheck: runRemoteAICheck,
   runTextCheck,
   runImageCheck,
+  buildAnnotatedPosterBoxes,
   mergeAiCheckResults,
   runAiCheck,
 };

@@ -42,8 +42,20 @@ const findBannedWords = (text, bannedWordsList) => {
   return found;
 };
 
+const isDevanagari = (text) => /[\u0900-\u097f]/.test(text || '');
+
+const detectCaptionLanguage = (caption) => {
+  if (!caption) return 'en';
+  const totalChars = caption.replace(/\s+/g, '').length;
+  if (totalChars === 0) return 'en';
+  const devanagariCount = (caption.match(/[\u0900-\u097f]/g) || []).length;
+  const devanagariRatio = devanagariCount / totalChars;
+  return devanagariRatio > 0.10 ? 'hi' : 'en';
+};
+
 /**
- * Check which mandatory compliance phrases are missing in the caption.
+ * Check which mandatory compliance phrases are missing in the caption language-wise.
+ * English captions only check English mandatory phrases. Hindi captions only check Hindi mandatory phrases.
  * @param {string} caption
  * @param {string[]} mandatoryPhrasesList
  * @returns {string[]} Missing phrases
@@ -53,6 +65,7 @@ const findMissingMandatoryPhrases = (caption, mandatoryPhrasesList) => {
     return [];
   }
 
+  const captionLang = detectCaptionLanguage(caption || '');
   const loweredCaption = (caption || '').toLowerCase();
   const missing = [];
 
@@ -60,6 +73,16 @@ const findMissingMandatoryPhrases = (caption, mandatoryPhrasesList) => {
     if (typeof phrase !== 'string') continue;
     const cleanPhrase = phrase.trim();
     if (!cleanPhrase) continue;
+
+    const phraseIsHindi = isDevanagari(cleanPhrase);
+    // If caption is English, skip Hindi mandatory phrases
+    if (captionLang === 'en' && phraseIsHindi) {
+      continue;
+    }
+    // If caption is Hindi, skip English-only mandatory phrases (unless it's a hashtag)
+    if (captionLang === 'hi' && !phraseIsHindi && !cleanPhrase.startsWith('#')) {
+      continue;
+    }
 
     if (!loweredCaption.includes(cleanPhrase.toLowerCase())) {
       missing.push(cleanPhrase);
@@ -72,6 +95,7 @@ const findMissingMandatoryPhrases = (caption, mandatoryPhrasesList) => {
 /**
  * Compare a candidate word against a client's whitelist using fuzzy string similarity.
  * Returns true if any entry achieves a similarity score >= threshold (default 80%).
+ * Also breaks multi-word whitelist phrases into individual word tokens for sub-word matching.
  * @param {string} word
  * @param {string[]} whitelistList
  * @param {number} [threshold=80]
@@ -90,9 +114,18 @@ const fuzzyMatchWhitelist = (word, whitelistList, threshold = 80) => {
     const cleanEntry = entry.trim().toLowerCase();
     if (!cleanEntry) continue;
 
-    // Exact match is always 100%
+    // Exact match
     if (cleanWord === cleanEntry) {
       return true;
+    }
+
+    // Direct token check if entry is multi-word (e.g. "Jan Jyoti" contains "jyoti")
+    if (cleanEntry.includes(' ') || cleanEntry.includes('-')) {
+      const parts = cleanEntry.split(/[\s\-]+/).filter(Boolean);
+      for (const p of parts) {
+        if (cleanWord === p) return true;
+        if (fuzzball.ratio(cleanWord, p) >= threshold) return true;
+      }
     }
 
     const score = fuzzball.ratio(cleanWord, cleanEntry);

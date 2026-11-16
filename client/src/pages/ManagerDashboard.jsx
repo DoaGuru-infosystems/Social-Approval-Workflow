@@ -5,9 +5,11 @@ import postService from '../services/postService';
 import { SERVER_URL } from '../utils/constants';
 import { formatDate } from '../utils/helpers';
 import { useToast } from '../context/ToastContext';
+import AnnotatedPosterOCR from '../components/AnnotatedPosterOCR';
 import {
   ShieldCheck,
   CheckCircle2,
+  AlertCircle,
   RefreshCw,
   XCircle,
   RotateCcw,
@@ -215,6 +217,79 @@ const ManagerDashboard = () => {
                             </span>
                           </div>
 
+                          {/* KEY ERROR / FALLBACK NOTIFICATION BANNER */}
+                          {aiReport.key_error && (
+                            <div className="p-3 bg-amber-50 border-l-4 border-amber-500 rounded-xl text-amber-900 text-xs flex items-start justify-between gap-2 shadow-sm">
+                              <div className="flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                                <div>
+                                  <p className="font-semibold text-amber-900">
+                                    ⚠️ {aiReport.key_error.user_message}
+                                  </p>
+                                  <p className="text-[11px] text-amber-700 mt-0.5">
+                                    Service: {aiReport.key_error.service} | Status: Fallback Active
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-200 text-amber-900 font-mono font-bold whitespace-nowrap">
+                                {aiReport.key_error.code}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* GEMINI KEY EXPIRED / ERROR RED CHIP */}
+                          {aiReport.grammar_suggestions && aiReport.grammar_suggestions.some((g) => g.type === 'grammar_error') && (
+                            <div className="p-2.5 rounded-xl border border-rose-300 bg-rose-50 text-rose-800 text-xs flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                                <span><strong>Grammar Check unavailable:</strong> Gemini Key expired / invalid</span>
+                              </div>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-rose-200 text-rose-900 font-mono font-bold">
+                                GEMINI_KEY_EXPIRED
+                              </span>
+                            </div>
+                          )}
+
+                          {/* GRAMMAR SUGGESTIONS CHIP (Gemini Powered) */}
+                          {aiReport.grammar_suggestions && aiReport.grammar_suggestions.filter((g) => g.type !== 'grammar_error').length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-purple-800 bg-purple-100 border border-purple-200 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
+                                  <Sparkles className="w-3 h-3 text-purple-600" />
+                                  Grammar Suggestion
+                                </span>
+                                <span className="text-[11px] text-purple-700 font-medium">
+                                  Yahan kya sudhar sakte ho:
+                                </span>
+                              </div>
+                              <div className="space-y-1">
+                                {aiReport.grammar_suggestions
+                                  .filter((g) => g.type !== 'grammar_error')
+                                  .map((g, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="text-xs px-3 py-2 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 flex flex-col gap-0.5"
+                                    >
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="line-through text-rose-700 font-mono font-medium">
+                                          {g.original}
+                                        </span>
+                                        <span className="text-purple-600 font-bold">→</span>
+                                        <span className="text-emerald-700 font-semibold font-mono">
+                                          {g.suggestion}
+                                        </span>
+                                      </div>
+                                      {g.reason && (
+                                        <p className="text-[11px] text-purple-800 font-sans mt-0.5">
+                                          {g.reason}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                          )}
+
                           {/* BANNED WORDS ALERT */}
                           {bannedWords.length > 0 && (
                             <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
@@ -290,16 +365,16 @@ const ManagerDashboard = () => {
                             </p>
                           )}
 
-                          {/* OCR Quoted Box */}
-                          {ocrText && (
-                            <div className="text-xs text-[#6B6A63] pt-2 border-t border-[#E5E2DA]">
-                              <span className="font-semibold text-[#2B2A27] flex items-center gap-1 mb-1">
-                                <Quote className="w-3 h-3 text-emerald-600" />
-                                Image OCR Text (English + Hindi):
-                              </span>
-                              <div className="p-2 rounded-xl bg-white border border-[#E5E2DA] font-mono text-[#2B2A27] text-[11px]">
-                                "{ocrText}"
-                              </div>
+                          {/* PaddleOCR Annotated Poster Box */}
+                          {imgSrc && (
+                            <div className="pt-2 border-t border-[#E5E2DA]">
+                              <AnnotatedPosterOCR
+                                imgSrc={imgSrc}
+                                boxes={aiReport.ocr_issues || []}
+                                ocrConfidence={aiReport.ocr_confidence}
+                                rawOcrText={ocrText}
+                                realErrors={spellingIssues.filter((s) => s.source === 'image')}
+                              />
                             </div>
                           )}
 

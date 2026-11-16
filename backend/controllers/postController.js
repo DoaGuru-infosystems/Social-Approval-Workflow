@@ -42,6 +42,8 @@ const attachLatestDetails = async (posts) => {
     aiMap.set(a.post_id, {
       ...a,
       spelling_issues: typeof a.spelling_issues === 'string' ? JSON.parse(a.spelling_issues) : a.spelling_issues || [],
+      grammar_suggestions: typeof a.grammar_suggestions === 'string' ? JSON.parse(a.grammar_suggestions) : a.grammar_suggestions || [],
+      key_error: typeof a.key_error === 'string' ? JSON.parse(a.key_error) : a.key_error || null,
       ocr_issues: typeof a.ocr_issues === 'string' ? JSON.parse(a.ocr_issues) : a.ocr_issues || [],
       ocr_unreliable: Boolean(Number(a.ocr_unreliable)),
       banned_words_found: typeof a.banned_words_found === 'string' ? JSON.parse(a.banned_words_found) : a.banned_words_found || [],
@@ -83,6 +85,8 @@ const executeBackgroundImageCheck = async ({
     await pool.query(
       `UPDATE ai_check_results
        SET spelling_issues = ?,
+           grammar_suggestions = ?,
+           key_error = ?,
            ocr_extracted_text = ?,
            ocr_issues = ?,
            ocr_confidence = ?,
@@ -96,6 +100,8 @@ const executeBackgroundImageCheck = async ({
        WHERE post_id = ? AND revision_id = ?`,
       [
         JSON.stringify(combinedResult.spelling_issues),
+        JSON.stringify(combinedResult.grammar_suggestions || []),
+        JSON.stringify(combinedResult.key_error || null),
         combinedResult.ocr_extracted_text || null,
         JSON.stringify(combinedResult.ocr_issues || []),
         combinedResult.ocr_confidence,
@@ -218,13 +224,15 @@ const createPost = async (req, res) => {
     // 7. Save initial AI Check Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
+         post_id, revision_id, spelling_issues, grammar_suggestions, key_error, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
          image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
         JSON.stringify(initialAiCheck.spelling_issues),
+        JSON.stringify(initialAiCheck.grammar_suggestions || []),
+        JSON.stringify(initialAiCheck.key_error || null),
         null,
         JSON.stringify([]),
         0.0,
@@ -397,13 +405,15 @@ const revisePost = async (req, res) => {
     // Save initial AI Result
     await pool.query(
       `INSERT INTO ai_check_results (
-         post_id, revision_id, spelling_issues, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
+         post_id, revision_id, spelling_issues, grammar_suggestions, key_error, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
          image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
         JSON.stringify(initialAiCheck.spelling_issues),
+        JSON.stringify(initialAiCheck.grammar_suggestions || []),
+        JSON.stringify(initialAiCheck.key_error || null),
         null,
         JSON.stringify([]),
         0.0,
@@ -956,6 +966,8 @@ const getPostById = async (req, res) => {
     const parsedAiReports = aiReports.map((r) => ({
       ...r,
       spelling_issues: typeof r.spelling_issues === 'string' ? JSON.parse(r.spelling_issues) : r.spelling_issues || [],
+      grammar_suggestions: typeof r.grammar_suggestions === 'string' ? JSON.parse(r.grammar_suggestions) : r.grammar_suggestions || [],
+      key_error: typeof r.key_error === 'string' ? JSON.parse(r.key_error) : r.key_error || null,
       ocr_issues: typeof r.ocr_issues === 'string' ? JSON.parse(r.ocr_issues) : r.ocr_issues || [],
       ocr_unreliable: Boolean(Number(r.ocr_unreliable)),
       banned_words_found: typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : r.banned_words_found || [],
@@ -1033,6 +1045,8 @@ const getAiStatus = async (req, res) => {
 
     const ai = aiRows[0];
     const spellingIssues = typeof ai.spelling_issues === 'string' ? JSON.parse(ai.spelling_issues) : (ai.spelling_issues || []);
+    const grammarSuggestions = typeof ai.grammar_suggestions === 'string' ? JSON.parse(ai.grammar_suggestions) : (ai.grammar_suggestions || []);
+    const keyError = typeof ai.key_error === 'string' ? JSON.parse(ai.key_error) : (ai.key_error || null);
     const ocrIssues = typeof ai.ocr_issues === 'string' ? JSON.parse(ai.ocr_issues) : (ai.ocr_issues || []);
     const bannedWords = typeof ai.banned_words_found === 'string' ? JSON.parse(ai.banned_words_found) : (ai.banned_words_found || []);
     const missingMandatory = typeof ai.missing_mandatory_phrases === 'string' ? JSON.parse(ai.missing_mandatory_phrases) : (ai.missing_mandatory_phrases || []);
@@ -1054,6 +1068,8 @@ const getAiStatus = async (req, res) => {
         !brandIdentity?.possible_brand_name_error &&
         !(brandIdentity?.phone_verification || []).some((p) => p.status === 'mismatch_warning' || p.status === 'unknown_phone'),
       spelling_issues: spellingIssues,
+      grammar_suggestions: grammarSuggestions,
+      key_error: keyError,
       ocr_extracted_text: ai.ocr_extracted_text || '',
       ocr_issues: ocrIssues,
       ocr_confidence: Number(ai.ocr_confidence) || 0,
@@ -1077,6 +1093,8 @@ const getAiStatus = async (req, res) => {
       ocr_confidence: Number(ai.ocr_confidence) || 0,
       ocr_unreliable: ocrUnreliable,
       spelling_issues: spellingIssues,
+      ocr_issues: ocrIssues,
+      ocr_doubts: Array.isArray(ocrIssues) ? ocrIssues.filter((b) => b.status === 'yellow') : [],
       banned_words_found: bannedWords,
       missing_mandatory_phrases: missingMandatory,
       brand_identity_check: brandIdentity,

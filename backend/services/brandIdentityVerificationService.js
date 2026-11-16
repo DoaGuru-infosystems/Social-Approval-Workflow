@@ -1,25 +1,6 @@
 const fuzz = require('fuzzball');
 
 /**
- * Common Indian city/address transliterations for bilingual keyword matching
- */
-const HINDI_TRANSLITERATION_MAP = {
-  jabalpur: ['जबलपुर'],
-  bazar: ['बाजार', 'बाज़ार'],
-  gole: ['गोल'],
-  wright: ['राइट'],
-  town: ['टाउन'],
-  hospital: ['अस्पताल', 'हॉस्पिटल'],
-  road: ['रोड'],
-  street: ['गली'],
-  madhya: ['मध्य'],
-  pradesh: ['प्रदेश'],
-  katni: ['कटनी'],
-  damoh: ['दमोह'],
-  rewa: ['रीवा'],
-};
-
-/**
  * Calculate Levenshtein edit distance between two strings of identical or near-identical length.
  * @param {string} a
  * @param {string} b
@@ -153,11 +134,47 @@ const verifyBrandNamePresence = (ocrText, officialName) => {
     }
   }
 
-  // Determine classification
+  // Check primary key brand word (e.g. first distinctive word of organization_name)
+  const orgWords = cleanOfficial.split(/\s+/).filter((w) => w.length >= 3);
+  const primaryWord = orgWords[0] || cleanOfficial;
+  const cleanPrimary = primaryWord.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+
+  let bestPrimarySim = 0;
+  let bestPrimaryCandidate = '';
+  for (const tok of rawTokens) {
+    const unhyphen = tok.replace(/[-_]/g, '');
+    const tokensToCheck = unhyphen !== tok ? [tok, unhyphen] : [tok];
+    for (const t of tokensToCheck) {
+      const cleanT = t.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+      if (!cleanT || cleanT.length < 2) continue;
+      const sim = fuzz.ratio(cleanT, cleanPrimary);
+      if (sim > bestPrimarySim) {
+        bestPrimarySim = sim;
+        bestPrimaryCandidate = tok;
+      }
+    }
+  }
+
+  // If primary brand word is present but has an error (similarity 55-94%):
+  if (cleanPrimary.length >= 3 && bestPrimarySim >= 55 && bestPrimarySim < 95) {
+    const errorMsg = `Poster me hi brand name galat likha hai: '${bestPrimaryCandidate}' vs official '${primaryWord}' (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
+    return {
+      verified: true,
+      brand_name_correct: false,
+      possible_brand_name_error: errorMsg,
+      brand_name_not_found: false,
+      score: bestPrimarySim,
+      matched_text: bestPrimaryCandidate,
+      official_name: cleanOfficial,
+      message: errorMsg,
+    };
+  }
+
+  // Classification: Brand Name requires >= 95% similarity
   const isExactMatch = bestMatch.windowStr && normalizedOfficial &&
     (bestMatch.windowStr.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '') === normalizedOfficial);
 
-  if (isExactMatch || (bestMatch.score >= 90 && !/copal|chlldren|chldren/i.test(bestMatch.windowStr))) {
+  if (isExactMatch || bestMatch.score >= 95) {
     return {
       verified: true,
       brand_name_correct: true,
@@ -170,26 +187,20 @@ const verifyBrandNamePresence = (ocrText, officialName) => {
     };
   }
 
-  // If there's an error in the brand name (e.g. "BAL. COPALCHILDREN'S" vs "Balgopal Children's"):
-  // Use the best core match or window match in the 55-89 range
-  const reportedMatch = (bestCoreMatch.score >= 55 && bestCoreMatch.score < 90)
+  // If there's an error or discrepancy in the brand name (score in 55-94% range):
+  const reportedMatch = (bestCoreMatch.score >= 55 && bestCoreMatch.score < 95)
     ? bestCoreMatch
     : bestMatch;
 
-  const effectiveScore = (reportedMatch.score >= 90 && /copal|chlldren|chldren/i.test(reportedMatch.windowStr))
-    ? (bestCoreMatch.score >= 55 ? bestCoreMatch.score : 81)
-    : reportedMatch.score;
-
-  const effectiveText = (reportedMatch.score >= 90 && bestCoreMatch.score >= 55)
-    ? bestCoreMatch.windowStr
-    : reportedMatch.windowStr;
+  const effectiveScore = reportedMatch.score;
+  const effectiveText = reportedMatch.windowStr;
 
   if (effectiveScore >= 55) {
-    const errorMsg = `Logo/text mein possible brand-naam galti: pakda gaya '${effectiveText}' vs official '${cleanOfficial}' (Similarity: ${effectiveScore}%)`;
+    const errorMsg = `Poster me hi brand name galat likha hai: '${effectiveText}' vs official '${cleanOfficial}' (${effectiveScore}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
     return {
       verified: true,
       brand_name_correct: false,
-      possible_brand_name_error: true,
+      possible_brand_name_error: errorMsg,
       brand_name_not_found: false,
       score: effectiveScore,
       matched_text: effectiveText,
@@ -249,7 +260,7 @@ const verifyPhoneNumbers = (ocrText = '', caption = '', primaryPhone = '', alter
     return [];
   }
 
-  // Regex to extract 10-digit phone patterns (with optional spaces/dashes, e.g. "898-959-0477", "8989590477", "898 959 0477")
+  // Regex to extract 10-digit phone patterns (with optional spaces/dashes, e.g. "987-654-3210", "9876543210")
   // Allows optional country code prefix (+91 or 0)
   const phonePattern = /(?:\+?91[\s-]?)?(?:0[\s-]?)?[6-9]\d{2}[\s-]?\d{3}[\s-]?\d{4}|\b[6-9]\d{9}\b/g;
 
@@ -297,8 +308,8 @@ const verifyPhoneNumbers = (ocrText = '', caption = '', primaryPhone = '', alter
         message: `Phone number matches registered ${closestReg.type} number (${closestReg.number}).`,
       });
     } else if (bestDist >= 1 && bestDist <= 2) {
-      // 1-2 digits difference -> FLAG
-      const warningMsg = `Phone number mismatch possible: ${entry.source} mein mila '${entry.raw}', registered number '${closestReg.number}' se ${bestDist} digit(s) alag hai — OCR galti ho sakti hai ya galat number poster mein hai, verify karein`;
+      // 1-2 digits difference -> FLAG as Manual Check
+      const warningMsg = `Poster me '${entry.raw}' dikh raha hai, sahi registered number '${closestReg.number}' hai. Manual check karo.`;
       verificationResults.push({
         found_phone: entry.raw,
         normalized_phone: entry.normalized,
@@ -386,38 +397,22 @@ const verifyAddressMention = (ocrText = '', registeredAddress = '') => {
   const matchedKeywords = [];
 
   for (const kw of keywords) {
-    let isMatched = false;
-
-    // Check direct substring
+    // 1. Direct substring match
     if (ocrLower.includes(kw)) {
-      isMatched = true;
-    } else {
-      // Check transliteration mapping (e.g. jabalpur -> जबलपुर)
-      const translits = HINDI_TRANSLITERATION_MAP[kw] || [];
-      for (const t of translits) {
-        if (ocrLower.includes(t.toLowerCase())) {
-          isMatched = true;
-          break;
-        }
-      }
+      matchedKeywords.push(kw);
+      continue;
     }
 
-    // Also check compound Hindi matching (e.g. wright town -> राइटटाउन)
-    if (!isMatched && (kw === 'wright' || kw === 'town')) {
-      if (ocrLower.includes('राइटटाउन') || ocrLower.includes('राइट टाउन')) {
-        isMatched = true;
-      }
-    }
-
-    if (isMatched) {
+    // 2. Generic fuzzy match for words with length >= 4
+    if (kw.length >= 4 && fuzz.partial_ratio(kw, ocrLower) >= 85) {
       matchedKeywords.push(kw);
     }
   }
 
   const matchPercentage = Math.round((matchedKeywords.length / keywords.length) * 100);
 
-  // Address-like keywords in OCR to check if image actually contains an address block
-  const hasAddressContextInOcr = /बाजार|टाउन|रोड|हॉस्पिटल|hospital|nagar|road|street|bazar|chowk|जबलपुर/i.test(ocrText);
+  // Generic address indicator keywords in OCR (street, road, sector, suite, floor, pin, etc.)
+  const hasAddressContextInOcr = /\b(?:address|location|floor|sector|block|suite|road|street|lane|marg|city|state|pin|\d{6})\b/i.test(ocrLower);
 
   let warning = null;
   if (matchPercentage === 0 && hasAddressContextInOcr) {

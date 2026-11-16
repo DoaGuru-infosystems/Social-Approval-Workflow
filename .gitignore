@@ -1,2 +1,7 @@
 config.bat
 node_modules
+tests/
+test/
+backend/tests/
+backend/test-*.js
+*.log

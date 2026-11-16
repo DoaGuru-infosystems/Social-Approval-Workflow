@@ -63,19 +63,15 @@ const OCR_CORRECTION_RULES = [
     name: 'normalize_phone_hyphens',
     apply: (text) => text.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2'),
   },
-  // 6. Fix known OCR font misrecognition where thin-loop 6 is read as 5 in registered phone
-  {
-    name: 'fix_thin_loop_six_phone',
-    apply: (text) => text.replace(/\b8447095305\b/g, '8447096306'),
-  },
 ];
 
 /**
  * Apply common OCR error corrections to extracted text.
  * @param {string} text
+ * @param {Array<string>} [expectedPhones=[]]
  * @returns {string} Cleaned and corrected text
  */
-const fixCommonOcrErrors = (text) => {
+const fixCommonOcrErrors = (text, expectedPhones = []) => {
   if (!text || typeof text !== 'string') {
     return text || '';
   }

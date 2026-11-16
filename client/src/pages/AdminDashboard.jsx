@@ -901,7 +901,7 @@ const AdminDashboard = () => {
                             type="text"
                             value={identityName}
                             onChange={(e) => setIdentityName(e.target.value)}
-                            placeholder="e.g. Balgopal Children's Neuro Clinic"
+                            placeholder="e.g. Apex Health Clinic"
                             required
                             className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white"
                           />
@@ -917,7 +917,7 @@ const AdminDashboard = () => {
                               type="text"
                               value={identityPrimaryPhone}
                               onChange={(e) => setIdentityPrimaryPhone(e.target.value)}
-                              placeholder="e.g. 8989590477"
+                              placeholder="e.g. 9876543210"
                               required
                               className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
                             />
@@ -932,7 +932,7 @@ const AdminDashboard = () => {
                               type="text"
                               value={identityAlternatePhone}
                               onChange={(e) => setIdentityAlternatePhone(e.target.value)}
-                              placeholder="e.g. 8447096306"
+                              placeholder="e.g. 9123456780"
                               className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
                             />
                           </div>
@@ -1171,7 +1171,7 @@ const AdminDashboard = () => {
                     type="text"
                     value={newClientName}
                     onChange={(e) => setNewClientName(e.target.value)}
-                    placeholder="e.g. Balgopal Children's Neuro Clinic"
+                    placeholder="e.g. Apex Health Clinic"
                     required
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white"
                   />
@@ -1187,7 +1187,7 @@ const AdminDashboard = () => {
                       type="text"
                       value={newPrimaryPhone}
                       onChange={(e) => setNewPrimaryPhone(e.target.value)}
-                      placeholder="e.g. 8989590477"
+                      placeholder="e.g. 9876543210"
                       required
                       className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
                     />
@@ -1202,7 +1202,7 @@ const AdminDashboard = () => {
                       type="text"
                       value={newAlternatePhone}
                       onChange={(e) => setNewAlternatePhone(e.target.value)}
-                      placeholder="e.g. 8447096306"
+                      placeholder="e.g. 9123456780"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
                     />
                   </div>

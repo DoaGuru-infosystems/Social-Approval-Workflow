@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const hunspellAsm = require('hunspell-asm');
+const hindiDictionaryService = require('./hindiDictionaryService');
 
 const DEVANAGARI_REGEX = /[\u0900-\u097f]/;
 const WORD_PATTERN = /[\u0900-\u097f]+|[A-Za-z]+(?:['’][A-Za-z]+)*/g;
@@ -44,27 +44,12 @@ const initDictionaries = async () => {
       const { aff: enAff, dic: enDic } = dictionaryEn;
       cachedEnglishSpell = nspellModule(enAff, enDic);
 
-      // 2. Load Hindi dictionary via hunspell-asm + hi_IN files
-      const affPath = path.resolve(__dirname, '..', 'dictionaries', 'hi_IN', 'hi_IN.aff');
-      const dicPath = path.resolve(__dirname, '..', 'dictionaries', 'hi_IN', 'hi_IN.dic');
-
-      if (!fs.existsSync(affPath) || !fs.existsSync(dicPath)) {
-        throw new Error(
-          `Hindi Hunspell dictionary files not found at: ${affPath} or ${dicPath}`
-        );
-      }
-
-      const affBuffer = fs.readFileSync(affPath);
-      const dicBuffer = fs.readFileSync(dicPath);
-
-      const factory = await hunspellAsm.loadModule();
-      const affFile = factory.mountBuffer(affBuffer, 'hi_IN.aff');
-      const dicFile = factory.mountBuffer(dicBuffer, 'hi_IN.dic');
-      cachedHindiSpell = factory.create(affFile, dicFile);
+      // 2. Load Hindi dictionary via hindiDictionaryService (nspell + hi_IN files)
+      cachedHindiSpell = await hindiDictionaryService.initHindiDictionary();
 
       isInitialized = true;
       const durationMs = Date.now() - startTime;
-      console.log(`[SpellCheckService] Dictionaries initialized in ${durationMs} ms (English: nspell, Hindi: hunspell-asm).`);
+      console.log(`[SpellCheckService] Dictionaries initialized in ${durationMs} ms (English: nspell, Hindi: hindiDictionaryService).`);
       return { englishLoaded: true, hindiLoaded: true, durationMs };
     } catch (error) {
       console.error('[SpellCheckService] Failed to initialize dictionaries:', error.message);
@@ -113,11 +98,11 @@ const checkWord = async (word, whitelist = null) => {
   const isHindi = isDevanagariWord(cleanWord);
 
   if (isHindi) {
-    const isCorrect = cachedHindiSpell.spell(cleanWord);
-    if (isCorrect) {
+    const isOk = hindiDictionaryService.isCorrect(cleanWord, whitelist);
+    if (isOk) {
       return { correct: true, suggestions: [] };
     }
-    const suggestions = (cachedHindiSpell.suggest(cleanWord) || []).slice(0, 5);
+    const suggestions = hindiDictionaryService.suggest(cleanWord, whitelist, 5);
     return { correct: false, suggestions };
   } else {
     // English / Latin check (check exact case and lowercase)
@@ -167,28 +152,44 @@ const checkText = async (text, whitelist = null) => {
   const issues = [];
   const seen = new Set();
 
-  for (const rawWord of matches) {
-    const word = rawWord.trim();
-    if (!word) continue;
+  const brandRulesService = require('./brandRulesService');
+  const whitelistArray = Array.from(whitelistSet);
 
-    const isHindi = isDevanagariWord(word);
+  for (const rawWord of matches) {
+    const cleanWord = rawWord.replace(/[\u0964\u0965।,.;:!?()'"_/-]/g, '').trim();
+    if (!cleanWord || cleanWord.length <= 1) continue;
+
+    // Skip pure numerals (Devanagari or Arabic digits)
+    if (/^[\u0966-\u096f0-9]+$/.test(cleanWord)) continue;
+
+    const isHindi = isDevanagariWord(cleanWord);
+
+    // Skip uppercase Latin acronyms (e.g. OPD, MBBS, DNB, IAP, PDF, NEUROLOGY)
+    if (!isHindi && /^[A-Z]{2,8}$/.test(cleanWord)) continue;
+
+    // Skip OCR detached matra ligature artifacts (e.g. isolated short-i matra)
+    if (isHindi && /^[\u093e-\u094f]/.test(cleanWord)) continue;
+
     const script = isHindi ? 'hindi' : 'english';
-    const key = `${script}:${word.toLowerCase()}`;
+    const key = `${script}:${cleanWord.toLowerCase()}`;
 
     if (seen.has(key)) {
       continue;
     }
     seen.add(key);
 
-    // Whitelist check
-    if (whitelistSet.has(word.toLowerCase())) {
+    // Whitelist check (exact or fuzzy >= 80%)
+    if (whitelistSet.has(cleanWord.toLowerCase())) {
+      continue;
+    }
+    if (whitelistArray.length > 0 && brandRulesService.fuzzyMatchWhitelist(cleanWord, whitelistArray, 80)) {
       continue;
     }
 
-    const result = await checkWord(word, whitelistSet);
+    const result = await checkWord(cleanWord, whitelistSet);
     if (!result.correct) {
       issues.push({
-        word,
+        word: cleanWord,
         script,
         suggestions: result.suggestions || [],
       });
