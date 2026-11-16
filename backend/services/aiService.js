@@ -283,25 +283,8 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
-    } else if (geminiOut.length === 0 && combinedText.trim()) {
-      // If Gemini returned empty array, verify against Dictionary fallback
-      const rawSpelling = await spellCheckService.checkText(combinedText, guidelines.whitelist);
-      const dictIssues = rawSpelling.filter((issue) => {
-        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
-        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
-      });
-      if (dictIssues.length > 0) {
-        spellingIssues = dictIssues;
-        keyError = {
-          service: 'gemini',
-          code: 'GEMINI_FALLBACK',
-          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
-        };
-      } else {
-        spellingIssues = [];
-      }
     } else {
-      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
       spellingIssues = geminiOut
         .filter((item) => item.type === 'spelling')
         .map((item) => ({
@@ -354,25 +337,8 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
-    } else if (geminiOut.length === 0 && combinedText.trim()) {
-      // If Gemini returned empty array, verify against Dictionary fallback
-      const rawSpellingIssues = await spellCheckService.checkText(combinedText, guidelines.whitelist);
-      const dictIssues = rawSpellingIssues.filter((issue) => {
-        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
-        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
-      });
-      if (dictIssues.length > 0) {
-        spellingIssues = dictIssues;
-        keyError = {
-          service: 'gemini',
-          code: 'GEMINI_FALLBACK',
-          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
-        };
-      } else {
-        spellingIssues = [];
-      }
     } else {
-      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
       spellingIssues = geminiOut
         .filter((item) => item.type === 'spelling')
         .map((item) => ({
@@ -755,11 +721,26 @@ const buildAnnotatedPosterBoxes = ({
         for (const an of addrNumbers) {
           if (bn !== an && distance(bn, an) === 1) {
             hasAddressMismatch = true;
-            addressMismatchReason = `Address/OPD number mismatch: Poster me "${bn}" dikh raha hai, registered address me "${an}" hai. Manual check karo.`;
+            addressMismatchReason = `OCR Doubt: Poster me "${bn}" padha gaya hai jabki registered address me "${an}" hai (1 digit farak). OCR font confusion ho sakta hai, poster par check karein.`;
             break;
           }
         }
         if (hasAddressMismatch) break;
+      }
+    }
+
+    // Check if box text contains OCR noise / broken fragments (e.g. './६.', '!८', 'b?')
+    let boxNoiseReason = null;
+    const boxWordTokens = text.split(/\s+/).filter(Boolean);
+    for (const tok of boxWordTokens) {
+      const analysis = garbageFilterService.analyzeToken(tok, whitelist);
+      if (analysis.isGarbage && !/^\d+$/.test(tok)) {
+        boxNoiseReason = `OCR Noise detected in token '${tok}' (${analysis.reason})`;
+        break;
+      }
+      if (/[./!?'#@%&*]{2,}/.test(tok) || /^[^\w\s\u0900-\u097f]+$/.test(tok)) {
+        boxNoiseReason = `Unusual OCR symbol artifact '${tok}'`;
+        break;
       }
     }
 
@@ -809,10 +790,13 @@ const buildAnnotatedPosterBoxes = ({
       statusLabel = 'YELLOW = Manual Check';
       reason = phoneMismatchReason;
     } else if (hasAddressMismatch) {
-      // Address number mismatch: YELLOW = Manual Check (do not quietly pass)
       status = 'yellow';
-      statusLabel = 'YELLOW = Manual Check';
+      statusLabel = 'YELLOW = OCR Doubt';
       reason = addressMismatchReason;
+    } else if (boxNoiseReason) {
+      status = 'yellow';
+      statusLabel = 'YELLOW = OCR Doubt';
+      reason = `OCR Doubt: ${boxNoiseReason}. Unclear visual region on poster.`;
     } else if (confPercent < 80) {
       status = 'yellow';
       statusLabel = 'YELLOW = OCR Doubt';
@@ -1068,25 +1052,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
           return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
         });
       }
-    } else if (geminiOut.length === 0 && ocrReliable && cleanedOcrText.trim()) {
-      // If Gemini returned empty array, run Dictionary fallback as safety check
-      const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
-      const dictIssues = rawSpelling.filter((issue) => {
-        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
-        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
-      });
-      if (dictIssues.length > 0) {
-        spellingIssues = dictIssues;
-        imageKeyError = imageKeyError || {
-          service: 'gemini',
-          code: 'GEMINI_FALLBACK',
-          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
-        };
-      } else {
-        spellingIssues = [];
-      }
     } else {
-      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
       spellingIssues = geminiOut
         .filter((item) => item.type === 'spelling')
         .map((item) => ({
@@ -1142,25 +1109,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
           return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
         });
       }
-    } else if (geminiOut.length === 0 && ocrReliable && cleanedOcrText.trim()) {
-      // If Gemini returned empty array, run Dictionary fallback as safety check
-      const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
-      const dictIssues = rawSpelling.filter((issue) => {
-        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
-        return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
-      });
-      if (dictIssues.length > 0) {
-        spellingIssues = dictIssues;
-        imageKeyError = imageKeyError || {
-          service: 'gemini',
-          code: 'GEMINI_FALLBACK',
-          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
-        };
-      } else {
-        spellingIssues = [];
-      }
     } else {
-      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar
+      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
       spellingIssues = geminiOut
         .filter((item) => item.type === 'spelling')
         .map((item) => ({
@@ -1240,7 +1190,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
 
   const ocrDoubts = annotatedBoxes.filter((b) => b.status === 'yellow');
 
-  // OCR Doubt Words: If overall OCR confidence is low (< 80%) or word fuzzy matches whitelist/guidelines,
+  // OCR Doubt Words: If overall OCR confidence is low (< 80%), or word fuzzy matches whitelist/guidelines,
+  // or word matches caption (>80% similarity indicating OCR ligature transcription artifact),
   // classify as OCR Doubt, NOT a confirmed poster spelling error
   const realSpellingIssues = spellingIssues.filter((issue) => {
     if (ocrConfidenceAverage < 0.80) return false;
@@ -1250,6 +1201,19 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       70
     );
     if (isFuzzyWhitelisted) return false;
+
+    // Caption cross-verification: If caption contains the intended word (>=80% similarity),
+    // it confirms OCR transcribed an imperfect ligature artifact (e.g. 'ाइए' vs 'आइए')
+    if (caption) {
+      const captionTokens = caption.split(/[\s,।!?:;()\n\r]+/).map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 2);
+      const cleanIssueWord = (issue.word || '').trim().toLowerCase();
+      for (const ct of captionTokens) {
+        if (fuzzball.ratio(cleanIssueWord, ct) >= 80) {
+          return false;
+        }
+      }
+    }
+
     return true;
   });
 

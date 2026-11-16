@@ -104,9 +104,6 @@ Return STRICT JSON matching this schema:
 }
 Where rect coordinates are percentages from 0.0 to 100.0 relative to image width and height.`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
   const requestBody = JSON.stringify({
     contents: [
@@ -128,24 +125,40 @@ Where rect coordinates are percentages from 0.0 to 100.0 relative to image width
     },
   });
 
-  let response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: requestBody,
-    signal: controller.signal,
-  });
+  let response;
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const attemptController = new AbortController();
+    const attemptTimeout = setTimeout(() => attemptController.abort(), 35000);
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: requestBody,
+        signal: attemptController.signal,
+      });
+      clearTimeout(attemptTimeout);
 
-  if (response.status === 503) {
-    // Retry once after 2s on temporary Google high demand spike
-    await new Promise((r) => setTimeout(r, 2000));
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: requestBody,
-    });
+      if (response.status === 503 || response.status === 429) {
+        if (attempt < maxAttempts) {
+          const delay = attempt * 2000;
+          console.warn(`[GoogleVisionService] Attempt ${attempt} returned status ${response.status}. Retrying in ${delay}ms...`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+      }
+      break;
+    } catch (netErr) {
+      clearTimeout(attemptTimeout);
+      if (attempt < maxAttempts) {
+        const delay = attempt * 2000;
+        console.warn(`[GoogleVisionService] Attempt ${attempt} error (${netErr.message}). Retrying in ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw netErr;
+    }
   }
-
-  clearTimeout(timeout);
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');

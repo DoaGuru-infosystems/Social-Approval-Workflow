@@ -80,15 +80,25 @@ const checkGrammar = async (text, language = 'auto', whitelist = [], brandName =
         : '';
 
       prompt = `You are an expert Hindi copy editor and language (वर्तनी एवं व्याकरण) validator for professional marketing copy.
-Critically evaluate the following Hindi text for BOTH:
-1. Spelling Errors (वर्तनी / हिज्जे की अशुद्धियाँ): Misspelled Hindi words, missing or wrong matras (मात्रा दोष), missing or misplaced anuswar/chandrabindu (अनुस्वार / अनुनासिक). Mark "type": "spelling".
+Critically evaluate the following Hindi text for genuine language errors.
+
+IMPORTANT OCR AWARENESS:
+The text may originate from poster OCR transcription. OCR may sometimes fragment characters or split ligatures (e.g. 'वृिदवि', 'संतुिलत', 'हािदेक', 'बचोंकी', 'ाइए').
+- If a word appears imperfect due to OCR ligature splitting or visual font artifacts (e.g. 'ाइए' for 'आइए', 'वृिदवि' for 'वृद्धि'), DO NOT flag it as a human spelling error. Treat it as an OCR artifact.
+- ONLY flag a spelling error when a word is unambiguously misspelled in human writing (e.g., clear incorrect letters like 'दवस' instead of 'दिवस').
+- Do NOT flag common and valid Hindi words (such as 'शुभकामनाएँ', 'चिल्ड्रन्स', 'न्यूरोलॉजिस्ट', 'पीडियाट्रिक्स', 'ओपीडी', 'अस्पताल', 'स्वास्थ्य', 'आइए') as spelling errors.
+- NEVER fabricate unnatural or incorrect suggestions (e.g., NEVER suggest 'शुभकामनाएओँ' for 'शुभकामनाएँ').
+- If there is NO genuine error, return strictly []. Do not force unnecessary suggestions.
+
+EVALUATION CRITERIA:
+1. Spelling Errors (वर्तनी / हिज्जे की वास्तविक अशुद्धियाँ): Mark "type": "spelling".
 2. Grammar & Punctuation (व्याकरण एवं विराम-चिह्न):
-   - Missing comma (अल्पविराम ',') after introductory clauses, proper viram-chinh (पूर्णविराम '।'), spacing around punctuation.
-   - Word Order (पदक्रम): Standard Hindi SOV word order (clause verb must come at the end of the clause).
+   - Missing comma after introductory clauses, viram-chinh (।), proper spacing.
+   - Word Order (पदक्रम): Clause verb must come at the end of the clause.
    Mark "type": "grammar".
 
 RULES TO STRICTLY FOLLOW:${brandClause}
-- Do NOT flag brand names, proper nouns, business/clinic names, doctor/specialist names, or valid hashtags as spelling errors; brand discrepancies are evaluated separately.
+- Do NOT flag brand names, proper nouns, business/clinic names, doctor/specialist names, medical degrees (e.g. MBBS, DNB), or valid hashtags as spelling errors; brand discrepancies are evaluated separately.
 - Do NOT flag phone numbers, numbers, pin codes, or addresses.
 ${whitelistClause}
 - If there are NO errors, return strictly [].
@@ -141,7 +151,7 @@ If there are no issues at all, return []`;
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    const timeout = setTimeout(() => controller.abort(), 60000);
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
     let res = await fetch(url, {
@@ -157,9 +167,9 @@ If there are no issues at all, return []`;
       signal: controller.signal,
     });
 
-    if (res.status === 503) {
-      // Retry once after 1.5s on temporary Google high demand spike
-      await new Promise((r) => setTimeout(r, 1500));
+    if (res.status === 503 || res.status === 429) {
+      // Retry once after 2.5s on temporary Google high demand spike
+      await new Promise((r) => setTimeout(r, 2500));
       res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,26 +188,39 @@ If there are no issues at all, return []`;
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       console.warn(`[GrammarService] Gemini returned ${res.status}: ${errText.slice(0, 150)}`);
-      return [
-        {
-          original: '',
-          suggestion: '',
-          reason: 'AI se check nahi hua, Dictionary se check kiya gaya',
-          type: 'grammar_error',
-          key_error: {
-            service: 'gemini',
-            code: 'GEMINI_KEY_EXPIRED',
-            user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+      const isKeyErr = res.status === 400 || res.status === 401 || res.status === 403 || /api_key|expired|billing|unauthorized/i.test(errText);
+      if (isKeyErr) {
+        return [
+          {
+            original: '',
+            suggestion: '',
+            reason: 'AI se check nahi hua, Dictionary se check kiya gaya',
+            type: 'grammar_error',
+            key_error: {
+              service: 'gemini',
+              code: 'GEMINI_KEY_EXPIRED',
+              user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+            },
           },
-        },
-      ];
+        ];
+      }
+      return [];
     }
 
     const data = await res.json();
     const rawOut = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawOut) return [];
 
-    let parsed = JSON.parse(rawOut);
+    let parsed = [];
+    try {
+      parsed = JSON.parse(rawOut);
+    } catch {
+      const match = rawOut.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch { parsed = []; }
+      }
+    }
+
     if (!Array.isArray(parsed)) {
       if (parsed && typeof parsed === 'object') {
         parsed = parsed.suggestions || parsed.issues || parsed.grammar || [];
@@ -219,19 +242,23 @@ If there are no issues at all, return []`;
     return normalized;
   } catch (err) {
     console.warn('[GrammarService] Error checking grammar/spelling:', err.message);
-    return [
-      {
-        original: '',
-        suggestion: '',
-        reason: 'AI se check nahi hua, Dictionary se check kiya gaya',
-        type: 'grammar_error',
-        key_error: {
-          service: 'gemini',
-          code: 'GEMINI_FALLBACK',
-          user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+    const isHardKeyError = /api_key|expired|billing|permission|unauthorized|401|403/i.test(err.message);
+    if (isHardKeyError) {
+      return [
+        {
+          original: '',
+          suggestion: '',
+          reason: 'AI se check nahi hua, Dictionary se check kiya gaya',
+          type: 'grammar_error',
+          key_error: {
+            service: 'gemini',
+            code: 'GEMINI_KEY_EXPIRED',
+            user_message: 'AI se check nahi hua, Dictionary se check kiya gaya',
+          },
         },
-      },
-    ];
+      ];
+    }
+    return [];
   }
 };
 
