@@ -66,6 +66,38 @@ export const clientService = {
     const response = await api.get(`/clients/${clientId}/social/connect/${platform}?json=true`);
     return response.data;
   },
+
+  // Trigger manual GMB sync for client (Admin only)
+  syncGmb: async (clientId) => {
+    const response = await api.post(`/clients/${clientId}/sync-gmb`);
+    return response.data;
+  },
+
+  // 4-Platform Social Connect System
+  getSocialPlatforms: async (clientId) => {
+    const response = await api.get(`/clients/${clientId}/social`);
+    return response.data;
+  },
+
+  getOAuthUrl: async (clientId, platform) => {
+    const response = await api.get(`/clients/${clientId}/social/${platform}/connect`);
+    return response.data;
+  },
+
+  manualConnectSocial: async (clientId, data) => {
+    const response = await api.post(`/clients/${clientId}/social/manual-connect`, data);
+    return response.data;
+  },
+
+  disconnectSocialPlatform: async (clientId, platform) => {
+    const response = await api.post(`/clients/${clientId}/social/${platform}/disconnect`);
+    return response.data;
+  },
+
+  testSocialPlatform: async (clientId, platform) => {
+    const response = await api.post(`/clients/${clientId}/social/${platform}/test`);
+    return response.data;
+  },
 };
 
 export default clientService;

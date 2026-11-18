@@ -1,5 +1,11 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-export const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:5000';
+export const API_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:5000/api';
+export const SERVER_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SERVER_URL) || 'http://localhost:5000';
+
+export const GOOGLE_PROJECT_ID =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_PROJECT_ID) || 'socel-workflow';
+export const GOOGLE_CLOUD_TEST_USER_URL = `https://console.cloud.google.com/auth/audience?project=${GOOGLE_PROJECT_ID}`;
 
 export const ROLES = {
   SMO: 'smo',

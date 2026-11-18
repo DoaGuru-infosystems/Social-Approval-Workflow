@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { LogOut, Layers } from 'lucide-react';
+import { LogOut, Layers, Building2, LayoutDashboard } from 'lucide-react';
 
 const Navbar = () => {
   const { user, role, logout } = useAuth();
@@ -42,6 +42,27 @@ const Navbar = () => {
             <span className="text-[11px] text-[#6B6A63] font-medium">Social Approval Platform</span>
           </div>
         </Link>
+
+        {/* Navigation Links for Authenticated Users (SMO, Manager, Admin) */}
+        {user && (
+          <div className="hidden md:flex items-center gap-2">
+            <Link
+              to={role === 'admin' ? '/admin' : role === 'manager' ? '/manager' : '/smo'}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-stone-600 hover:text-[#2B2A27] hover:bg-stone-50 border border-transparent hover:border-[#E5E2DA] transition-all flex items-center gap-1.5"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5 text-stone-500" />
+              <span>Dashboard</span>
+            </Link>
+
+            <Link
+              to="/admin?tab=clients"
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-stone-600 hover:text-[#2B2A27] hover:bg-stone-50 border border-transparent hover:border-[#E5E2DA] transition-all flex items-center gap-1.5"
+            >
+              <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Clients &amp; Accounts</span>
+            </Link>
+          </div>
+        )}
 
         {/* User Info & Actions */}
         <div className="flex items-center gap-4">

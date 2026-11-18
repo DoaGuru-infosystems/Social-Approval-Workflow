@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const { encrypt } = require('../utils/encryption');
+const gmbService = require('../services/gmbService');
 
 /**
  * Helper to parse comma-separated string or array into clean string array
@@ -24,7 +25,7 @@ const parseCleanList = (input) => {
  */
 const createClient = async (req, res) => {
   try {
-    const { name, primary_phone, alternate_phone, address } = req.body;
+    const { name, primary_phone, alternate_phone, address, gmb_url } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
@@ -36,11 +37,12 @@ const createClient = async (req, res) => {
     const cleanPrimaryPhone = primary_phone ? String(primary_phone).trim() : null;
     const cleanAlternatePhone = alternate_phone ? String(alternate_phone).trim() : null;
     const cleanAddress = address ? String(address).trim() : null;
+    const cleanGmbUrl = gmb_url ? String(gmb_url).trim() : null;
     const adminId = req.user.id;
 
     const [result] = await pool.query(
-      'INSERT INTO clients (name, primary_phone, alternate_phone, address, created_by_admin_id, is_active) VALUES (?, ?, ?, ?, ?, TRUE)',
-      [trimmedName, cleanPrimaryPhone, cleanAlternatePhone, cleanAddress, adminId]
+      'INSERT INTO clients (name, primary_phone, alternate_phone, address, gmb_url, created_by_admin_id, is_active) VALUES (?, ?, ?, ?, ?, ?, TRUE)',
+      [trimmedName, cleanPrimaryPhone, cleanAlternatePhone, cleanAddress, cleanGmbUrl, adminId]
     );
 
     const clientId = result.insertId;
@@ -53,11 +55,20 @@ const createClient = async (req, res) => {
     );
 
     const [created] = await pool.query('SELECT * FROM clients WHERE id = ?', [clientId]);
+    const clientRecord = created[0];
+    if (clientRecord) {
+      if (clientRecord.gmb_snapshot && typeof clientRecord.gmb_snapshot === 'string') {
+        try { clientRecord.gmb_snapshot = JSON.parse(clientRecord.gmb_snapshot); } catch (e) {}
+      }
+      if (clientRecord.gmb_auto_whitelist && typeof clientRecord.gmb_auto_whitelist === 'string') {
+        try { clientRecord.gmb_auto_whitelist = JSON.parse(clientRecord.gmb_auto_whitelist); } catch (e) {}
+      }
+    }
 
     return res.status(201).json({
       success: true,
       message: `Client '${trimmedName}' created successfully.`,
-      client: created[0],
+      client: clientRecord,
     });
   } catch (error) {
     console.error('Error creating client:', error);
@@ -90,9 +101,21 @@ const getClients = async (req, res) => {
       ORDER BY c.created_at DESC
     `);
 
+    // Parse JSON fields safely if stringified
+    const formattedClients = clients.map((c) => {
+      const copy = { ...c };
+      if (copy.gmb_snapshot && typeof copy.gmb_snapshot === 'string') {
+        try { copy.gmb_snapshot = JSON.parse(copy.gmb_snapshot); } catch (e) {}
+      }
+      if (copy.gmb_auto_whitelist && typeof copy.gmb_auto_whitelist === 'string') {
+        try { copy.gmb_auto_whitelist = JSON.parse(copy.gmb_auto_whitelist); } catch (e) {}
+      }
+      return copy;
+    });
+
     return res.status(200).json({
       success: true,
-      clients,
+      clients: formattedClients,
     });
   } catch (error) {
     console.error('Error fetching clients:', error);
@@ -127,7 +150,13 @@ const getClientById = async (req, res) => {
       });
     }
 
-    const client = clients[0];
+    const client = { ...clients[0] };
+    if (client.gmb_snapshot && typeof client.gmb_snapshot === 'string') {
+      try { client.gmb_snapshot = JSON.parse(client.gmb_snapshot); } catch (e) {}
+    }
+    if (client.gmb_auto_whitelist && typeof client.gmb_auto_whitelist === 'string') {
+      try { client.gmb_auto_whitelist = JSON.parse(client.gmb_auto_whitelist); } catch (e) {}
+    }
 
     // Fetch brand guidelines
     const [guidelines] = await pool.query(
@@ -160,11 +189,73 @@ const getClientById = async (req, res) => {
       [id]
     );
 
+    // Fetch 4-platform social connect accounts
+    const ALL_PLATFORMS = ['instagram', 'facebook', 'youtube', 'linkedin'];
+    const [socialPlatformRows] = await pool.query(
+      `SELECT id, client_id, platform, profile_url, platform_username, platform_id,
+              access_token_encrypted, refresh_token_encrypted, token_expires_at,
+              refresh_token_expires_at, connection_method, is_connected, last_tested_at, last_error
+       FROM client_social_accounts
+       WHERE client_id = ?`,
+      [id]
+    );
+    const existingPlatformMap = new Map();
+    socialPlatformRows.forEach((r) => existingPlatformMap.set(r.platform, r));
+
+    const { decrypt } = require('../utils/encryption');
+    const socialPlatforms = ALL_PLATFORMS.map((platform) => {
+      const rec = existingPlatformMap.get(platform);
+      if (!rec) {
+        return {
+          platform,
+          is_connected: false,
+          profile_url: null,
+          platform_username: null,
+          platform_id: null,
+          connection_method: null,
+          token_expires_at: null,
+          refresh_token_expires_at: null,
+          last_tested_at: null,
+          last_error: null,
+          masked_access_token: null,
+          has_refresh_token: false,
+          masked_refresh_token: null,
+        };
+      }
+      let maskedToken = null;
+      let maskedRefreshToken = null;
+      if (rec.access_token_encrypted) {
+        const dec = decrypt(rec.access_token_encrypted);
+        if (dec) maskedToken = '....' + dec.slice(-4);
+      }
+      if (rec.refresh_token_encrypted) {
+        const decR = decrypt(rec.refresh_token_encrypted);
+        if (decR) maskedRefreshToken = '....' + decR.slice(-4);
+      }
+      return {
+        id: rec.id,
+        platform: rec.platform,
+        is_connected: Boolean(rec.is_connected),
+        profile_url: rec.profile_url,
+        platform_username: rec.platform_username,
+        platform_id: rec.platform_id,
+        connection_method: rec.connection_method,
+        token_expires_at: rec.token_expires_at,
+        refresh_token_expires_at: rec.refresh_token_expires_at,
+        last_tested_at: rec.last_tested_at,
+        last_error: rec.last_error,
+        masked_access_token: maskedToken,
+        has_refresh_token: Boolean(rec.refresh_token_encrypted),
+        masked_refresh_token: maskedRefreshToken,
+      };
+    });
+
     return res.status(200).json({
       success: true,
       client,
       brand_guidelines: guidelineData,
       social_accounts: socialAccounts,
+      social_platforms: socialPlatforms,
     });
   } catch (error) {
     console.error('Error fetching client details:', error);
@@ -183,7 +274,7 @@ const getClientById = async (req, res) => {
 const updateClient = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, primary_phone, alternate_phone, address, is_active } = req.body;
+    const { name, primary_phone, alternate_phone, address, gmb_url, is_active } = req.body;
 
     const updates = [];
     const values = [];
@@ -208,6 +299,11 @@ const updateClient = async (req, res) => {
       values.push(address ? String(address).trim() : null);
     }
 
+    if (gmb_url !== undefined) {
+      updates.push('gmb_url = ?');
+      values.push(gmb_url ? String(gmb_url).trim() : null);
+    }
+
     if (is_active !== undefined) {
       updates.push('is_active = ?');
       values.push(Boolean(is_active));
@@ -224,11 +320,20 @@ const updateClient = async (req, res) => {
     await pool.query(`UPDATE clients SET ${updates.join(', ')} WHERE id = ?`, values);
 
     const [updated] = await pool.query('SELECT * FROM clients WHERE id = ?', [id]);
+    const clientRecord = updated[0];
+    if (clientRecord) {
+      if (clientRecord.gmb_snapshot && typeof clientRecord.gmb_snapshot === 'string') {
+        try { clientRecord.gmb_snapshot = JSON.parse(clientRecord.gmb_snapshot); } catch (e) {}
+      }
+      if (clientRecord.gmb_auto_whitelist && typeof clientRecord.gmb_auto_whitelist === 'string') {
+        try { clientRecord.gmb_auto_whitelist = JSON.parse(clientRecord.gmb_auto_whitelist); } catch (e) {}
+      }
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Client updated successfully.',
-      client: updated[0],
+      client: clientRecord,
     });
   } catch (error) {
     console.error('Error updating client:', error);
@@ -613,6 +718,60 @@ const disconnectSocialAccount = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/clients/:id/sync-gmb
+ * Trigger manual sync for client GMB profile (Admin only)
+ */
+const syncGmbClient = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await gmbService.syncClientGmb(id);
+    const [clients] = await pool.query('SELECT * FROM clients WHERE id = ?', [id]);
+    if (clients.length === 0) {
+      return res.status(404).json({ success: false, message: 'Client not found.' });
+    }
+    const client = { ...clients[0] };
+    if (client.gmb_snapshot && typeof client.gmb_snapshot === 'string') {
+      try { client.gmb_snapshot = JSON.parse(client.gmb_snapshot); } catch (e) {}
+    }
+    if (client.gmb_auto_whitelist && typeof client.gmb_auto_whitelist === 'string') {
+      try { client.gmb_auto_whitelist = JSON.parse(client.gmb_auto_whitelist); } catch (e) {}
+    }
+
+    // Key missing or invalid returns HTTP 200 with { success: false, keyError } so frontend shows friendly banner/toast
+    if (result.keyError) {
+      return res.status(200).json({
+        success: false,
+        keyError: result.keyError,
+        client,
+      });
+    }
+
+    if (!result.success) {
+      return res.status(200).json({
+        success: false,
+        message: result.reason || 'Sync failed',
+        syncResult: result,
+        client,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: result.skipped ? `Sync skipped: ${result.reason}` : 'GMB profile synced successfully.',
+      syncResult: result,
+      client,
+    });
+  } catch (error) {
+    console.error('Error syncing GMB for client:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to sync GMB for client.',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createClient,
   getClients,
@@ -626,5 +785,6 @@ module.exports = {
   initiateSocialConnect,
   handleSocialCallback,
   disconnectSocialAccount,
+  syncGmbClient,
 };
 

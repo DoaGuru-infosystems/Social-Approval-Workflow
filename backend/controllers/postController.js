@@ -741,13 +741,13 @@ const adminReview = async (req, res) => {
 const selectPlatform = async (req, res) => {
   try {
     const postId = parseInt(req.params.id, 10);
-    const { platform } = req.body;
+    const { platform, target_platforms } = req.body;
 
-    const allowedPlatforms = ['instagram', 'facebook'];
+    const allowedPlatforms = ['instagram', 'facebook', 'youtube', 'linkedin'];
     if (!platform || !allowedPlatforms.includes(platform)) {
       return res.status(400).json({
         success: false,
-        message: `Platform must be either 'instagram' or 'facebook'.`,
+        message: `Platform must be one of: ${allowedPlatforms.join(', ')}.`,
       });
     }
 
@@ -768,21 +768,27 @@ const selectPlatform = async (req, res) => {
 
     // Verify client has connected social account for this platform
     const [socialAccounts] = await pool.query(
-      'SELECT id, account_name FROM social_accounts WHERE client_id = ? AND platform = ? AND is_active = TRUE',
-      [post.client_id, platform]
+      `SELECT id, platform_username AS account_name FROM client_social_accounts 
+       WHERE client_id = ? AND platform = ? AND is_connected = TRUE
+       UNION
+       SELECT id, account_name FROM social_accounts 
+       WHERE client_id = ? AND platform = ? AND is_active = TRUE`,
+      [post.client_id, platform, post.client_id, platform]
     );
 
     if (socialAccounts.length === 0) {
       return res.status(400).json({
         success: false,
-        message: `This client has no connected ${platform.toUpperCase()} account. Ask an Admin to connect one first.`,
+        message: `This client has no connected ${platform.toUpperCase()} account. Ask an Admin or SMO to connect one first.`,
       });
     }
 
+    const targetsJson = target_platforms && Array.isArray(target_platforms) ? JSON.stringify(target_platforms) : JSON.stringify([platform]);
+
     // Update platform and set status to ready_to_publish
     await pool.query(
-      "UPDATE posts SET platform = ?, status = 'ready_to_publish' WHERE id = ?",
-      [platform, postId]
+      "UPDATE posts SET platform = ?, target_platforms = ?, status = 'ready_to_publish' WHERE id = ?",
+      [platform, targetsJson, postId]
     );
 
     const [updatedPosts] = await pool.query(
@@ -800,6 +806,127 @@ const selectPlatform = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to select platform.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * POST /api/posts/:id/publish-now
+ * Immediately publish post to target platforms
+ */
+const publishNow = async (req, res) => {
+  try {
+    const postId = parseInt(req.params.id, 10);
+    const { target_platforms } = req.body;
+
+    const [posts] = await pool.query('SELECT * FROM posts WHERE id = ?', [postId]);
+    if (posts.length === 0) {
+      return res.status(404).json({ success: false, message: 'Post not found.' });
+    }
+
+    const post = posts[0];
+    if (
+      post.status !== 'admin_approved' &&
+      post.status !== 'ready_to_publish' &&
+      post.status !== 'scheduled' &&
+      post.status !== 'failed'
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Post must be approved first (current status: ${post.status}).`,
+      });
+    }
+
+    if (target_platforms && Array.isArray(target_platforms)) {
+      await pool.query('UPDATE posts SET target_platforms = ? WHERE id = ?', [
+        JSON.stringify(target_platforms),
+        postId,
+      ]);
+    }
+
+    const publishService = require('../services/publishService');
+    const result = await publishService.publishPost(postId);
+
+    const [updatedPosts] = await pool.query(
+      `SELECT p.*, c.name AS client_name FROM posts p JOIN clients c ON p.client_id = c.id WHERE p.id = ?`,
+      [postId]
+    );
+
+    return res.status(200).json({
+      success: result.success,
+      message: result.success ? 'Post published successfully!' : 'Publish completed with warnings/failures.',
+      status: result.status,
+      results: result.results,
+      post: updatedPosts[0],
+    });
+  } catch (error) {
+    console.error('Error publishing post:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to publish post.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * POST /api/posts/:id/schedule
+ * Schedule post to be published at scheduled_at
+ */
+const schedulePost = async (req, res) => {
+  try {
+    const postId = parseInt(req.params.id, 10);
+    const { scheduled_at, target_platforms } = req.body;
+
+    if (!scheduled_at) {
+      return res.status(400).json({
+        success: false,
+        message: 'scheduled_at datetime is required.',
+      });
+    }
+
+    const [posts] = await pool.query('SELECT * FROM posts WHERE id = ?', [postId]);
+    if (posts.length === 0) {
+      return res.status(404).json({ success: false, message: 'Post not found.' });
+    }
+
+    const post = posts[0];
+    if (
+      post.status !== 'admin_approved' &&
+      post.status !== 'ready_to_publish' &&
+      post.status !== 'scheduled'
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Post must be approved first (current status: ${post.status}).`,
+      });
+    }
+
+    const cleanTargets = Array.isArray(target_platforms) && target_platforms.length > 0
+      ? target_platforms
+      : [post.platform || 'instagram'];
+
+    await pool.query(
+      "UPDATE posts SET scheduled_at = ?, target_platforms = ?, status = 'scheduled' WHERE id = ?",
+      [new Date(scheduled_at), JSON.stringify(cleanTargets), postId]
+    );
+
+    const [updatedPosts] = await pool.query(
+      `SELECT p.*, c.name AS client_name FROM posts p JOIN clients c ON p.client_id = c.id WHERE p.id = ?`,
+      [postId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Post scheduled successfully for ${scheduled_at}.`,
+      post: updatedPosts[0],
+    });
+  } catch (error) {
+    console.error('Error scheduling post:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to schedule post.',
       error: error.message,
     });
   }
@@ -1254,6 +1381,8 @@ module.exports = {
   managerReview,
   adminReview,
   selectPlatform,
+  publishNow,
+  schedulePost,
   updatePublishUrl,
   getPosts,
   getPostById,

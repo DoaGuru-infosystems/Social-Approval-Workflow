@@ -3,7 +3,7 @@ import Navbar from '../components/Navbar';
 import Button from '../components/Button';
 import postService from '../services/postService';
 import clientService from '../services/clientService';
-import { SERVER_URL } from '../utils/constants';
+import { SERVER_URL, GOOGLE_CLOUD_TEST_USER_URL } from '../utils/constants';
 import { formatDate, getStatusBadgeStyle } from '../utils/helpers';
 import { useToast } from '../context/ToastContext';
 import {
@@ -27,6 +27,7 @@ import {
   FileText,
   Phone,
   MapPin,
+  Globe,
 } from 'lucide-react';
 
 const InstagramIcon = ({ className = 'w-5 h-5' }) => (
@@ -40,6 +41,18 @@ const InstagramIcon = ({ className = 'w-5 h-5' }) => (
 const FacebookIcon = ({ className = 'w-5 h-5' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
+  </svg>
+);
+
+const YouTubeIcon = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+  </svg>
+);
+
+const LinkedInIcon = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 8.76c-.95 0-1.72-.77-1.72-1.72s.77-1.72 1.72-1.72 1.72.77 1.72 1.72-.77 1.72-1.72 1.72m1.39 9.74v-8.37H5.07v8.37h2.78z"/>
   </svg>
 );
 
@@ -67,6 +80,7 @@ const AdminDashboard = () => {
   const [newPrimaryPhone, setNewPrimaryPhone] = useState('');
   const [newAlternatePhone, setNewAlternatePhone] = useState('');
   const [newAddress, setNewAddress] = useState('');
+  const [newGmbUrl, setNewGmbUrl] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
 
   // Client Official Identity State (for selectedClient)
@@ -74,7 +88,10 @@ const AdminDashboard = () => {
   const [identityPrimaryPhone, setIdentityPrimaryPhone] = useState('');
   const [identityAlternatePhone, setIdentityAlternatePhone] = useState('');
   const [identityAddress, setIdentityAddress] = useState('');
+  const [identityGmbUrl, setIdentityGmbUrl] = useState('');
   const [savingIdentity, setSavingIdentity] = useState(false);
+  const [syncingGmb, setSyncingGmb] = useState(false);
+  const [gmbKeyError, setGmbKeyError] = useState(null);
 
   // Brand Guidelines State
   const [whitelistInput, setWhitelistInput] = useState('');
@@ -88,7 +105,33 @@ const AdminDashboard = () => {
   const [connectAccountName, setConnectAccountName] = useState('');
   const [connectingSocial, setConnectingSocial] = useState(false);
 
+  // 4-Platform Social Connect System (Single Agency App)
+  const [socialPlatforms, setSocialPlatforms] = useState([
+    { platform: 'instagram', is_connected: false, profile_url: null },
+    { platform: 'facebook', is_connected: false, profile_url: null },
+    { platform: 'youtube', is_connected: false, profile_url: null },
+    { platform: 'linkedin', is_connected: false, profile_url: null },
+  ]);
+  const [manualFormPlatform, setManualFormPlatform] = useState(null);
+  const [manualFormData, setManualFormData] = useState({
+    instagram: { profile_url: '', platform_id: '', access_token: '', refresh_token: '' },
+    facebook: { profile_url: '', platform_id: '', access_token: '', refresh_token: '' },
+    youtube: { profile_url: '', platform_id: '', access_token: '', refresh_token: '' },
+    linkedin: { profile_url: '', platform_id: '', access_token: '', refresh_token: '' },
+  });
+  const [actionLoading, setActionLoading] = useState({});
+  const [cardBanners, setCardBanners] = useState({});
+
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    if (tabParam === 'clients') {
+      setActiveTab('clients');
+    }
+    const clientParam = params.get('client');
+    if (clientParam) {
+      handleSelectClient(parseInt(clientParam, 10));
+    }
     fetchAdminPosts();
     fetchClients();
   }, []);
@@ -120,6 +163,9 @@ const AdminDashboard = () => {
 
   const handleSelectClient = async (clientId) => {
     setLoadingClientDetail(true);
+    setGmbKeyError(null);
+    setManualFormPlatform(null);
+    setCardBanners({});
     try {
       const data = await clientService.getClientById(clientId);
       setSelectedClient(data);
@@ -129,15 +175,189 @@ const AdminDashboard = () => {
       setIdentityPrimaryPhone(c.primary_phone || '');
       setIdentityAlternatePhone(c.alternate_phone || '');
       setIdentityAddress(c.address || '');
+      setIdentityGmbUrl(c.gmb_url || '');
 
       const g = data?.brand_guidelines || {};
       setWhitelistInput((g.whitelist_words || []).join(', '));
       setBannedInput((g.banned_words || []).join(', '));
       setMandatoryInput((g.mandatory_phrases || []).join(', '));
+
+      if (data?.social_platforms && data.social_platforms.length > 0) {
+        setSocialPlatforms(data.social_platforms);
+      } else {
+        fetchClientSocialPlatforms(clientId);
+      }
     } catch {
       showToast('Unable to load client details.', 'error');
     } finally {
       setLoadingClientDetail(false);
+    }
+  };
+
+  const fetchClientSocialPlatforms = async (clientId) => {
+    try {
+      const res = await clientService.getSocialPlatforms(clientId);
+      if (res.platforms) {
+        setSocialPlatforms(res.platforms);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch social platforms:', err);
+    }
+  };
+
+  const handleOAuthConnect = async (platform) => {
+    if (!selectedClient?.client?.id) return;
+    const clientId = selectedClient.client.id;
+    setActionLoading((prev) => ({ ...prev, [`oauth-${platform}`]: true }));
+    try {
+      const res = await clientService.getOAuthUrl(clientId, platform);
+      if (!res.success) {
+        showToast(res.user_message || 'OAuth Key Nahi Mili - Manual wala use karo', 'warning');
+        handleToggleManualForm(platform);
+      } else if (res.authUrl) {
+        window.open(res.authUrl, '_blank');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.user_message || err.response?.data?.message || 'OAuth connect failed.';
+      showToast(msg, 'warning');
+      handleToggleManualForm(platform);
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`oauth-${platform}`]: false }));
+    }
+  };
+
+  const handleToggleManualForm = (platform) => {
+    if (manualFormPlatform === platform) {
+      setManualFormPlatform(null);
+    } else {
+      const existing = socialPlatforms.find((p) => p.platform === platform);
+      setManualFormData((prev) => ({
+        ...prev,
+        [platform]: {
+          profile_url: existing?.profile_url || '',
+          platform_id: existing?.platform_id || '',
+          access_token: '',
+          refresh_token: '',
+        },
+      }));
+      setManualFormPlatform(platform);
+    }
+  };
+
+  const handleManualFieldChange = (platform, field, value) => {
+    setManualFormData((prev) => ({
+      ...prev,
+      [platform]: {
+        ...(prev[platform] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleManualConnectSubmit = async (e, platform) => {
+    e.preventDefault();
+    if (!selectedClient?.client?.id) return;
+    const clientId = selectedClient.client.id;
+    const formData = manualFormData[platform] || {};
+
+    setActionLoading((prev) => ({ ...prev, [`manual-${platform}`]: true }));
+    try {
+      const res = await clientService.manualConnectSocial(clientId, {
+        platform,
+        profile_url: formData.profile_url,
+        platform_id: formData.platform_id,
+        access_token: formData.access_token,
+        refresh_token: formData.refresh_token,
+      });
+
+      if (res.code === 'YOUTUBE_REFRESH_TOKEN_REQUIRED') {
+        showToast(res.user_message, 'error');
+        setCardBanners((prev) => ({
+          ...prev,
+          [platform]: { type: 'error', message: res.user_message },
+        }));
+        return;
+      }
+
+      if (!res.is_connected) {
+        showToast(res.user_message || 'Token Invalid Hai - Kripya dobara check karein', 'warning');
+        setCardBanners((prev) => ({
+          ...prev,
+          [platform]: {
+            type: 'error',
+            message: `Token Expired - Dobara Connect Karo (${res.testResult?.error || 'Invalid Token'})`,
+          },
+        }));
+      } else {
+        showToast(res.message || 'Platform connected successfully!', 'success');
+        setCardBanners((prev) => ({
+          ...prev,
+          [platform]: null,
+        }));
+        setManualFormPlatform(null);
+      }
+
+      const updated = await clientService.getSocialPlatforms(clientId);
+      if (updated.platforms) {
+        setSocialPlatforms(updated.platforms);
+      }
+    } catch (err) {
+      const errData = err.response?.data;
+      const msg = errData?.user_message || errData?.message || 'Manual connect failed.';
+      showToast(msg, 'error');
+      setCardBanners((prev) => ({
+        ...prev,
+        [platform]: { type: 'error', message: msg },
+      }));
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`manual-${platform}`]: false }));
+    }
+  };
+
+  const handleTestPlatform = async (platform) => {
+    if (!selectedClient?.client?.id) return;
+    const clientId = selectedClient.client.id;
+    setActionLoading((prev) => ({ ...prev, [`test-${platform}`]: true }));
+    try {
+      const res = await clientService.testSocialPlatform(clientId, platform);
+      if (res.valid) {
+        showToast(`${platform.toUpperCase()}: Token Sahi Hai (${res.accountName || 'Verified'})`, 'success');
+        setCardBanners((prev) => ({ ...prev, [platform]: null }));
+      } else {
+        showToast(`${platform.toUpperCase()}: Token Invalid Hai`, 'error');
+        setCardBanners((prev) => ({
+          ...prev,
+          [platform]: { type: 'error', message: `Token Expired - Dobara Connect Karo (${res.error || 'Invalid'})` },
+        }));
+      }
+      const updated = await clientService.getSocialPlatforms(clientId);
+      if (updated.platforms) {
+        setSocialPlatforms(updated.platforms);
+      }
+    } catch (err) {
+      showToast('Test failed: ' + (err.response?.data?.message || err.message), 'error');
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`test-${platform}`]: false }));
+    }
+  };
+
+  const handleDisconnectPlatform = async (platform) => {
+    if (!selectedClient?.client?.id) return;
+    if (!window.confirm(`Disconnect ${platform}? Profile URL will be preserved.`)) return;
+    const clientId = selectedClient.client.id;
+    setActionLoading((prev) => ({ ...prev, [`disc-${platform}`]: true }));
+    try {
+      await clientService.disconnectSocialPlatform(clientId, platform);
+      showToast(`${platform.toUpperCase()} disconnected. Profile URL preserved.`, 'success');
+      setCardBanners((prev) => ({ ...prev, [platform]: null }));
+      const updated = await clientService.getSocialPlatforms(clientId);
+      if (updated.platforms) {
+        setSocialPlatforms(updated.platforms);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to disconnect.', 'error');
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [`disc-${platform}`]: false }));
     }
   };
 
@@ -160,12 +380,14 @@ const AdminDashboard = () => {
         primary_phone: newPrimaryPhone.trim(),
         alternate_phone: newAlternatePhone.trim() || null,
         address: newAddress.trim() || null,
+        gmb_url: newGmbUrl.trim() || null,
       });
       showToast(`Client '${data.client.name}' was created.`, 'success');
       setNewClientName('');
       setNewPrimaryPhone('');
       setNewAlternatePhone('');
       setNewAddress('');
+      setNewGmbUrl('');
       setShowAddClientModal(false);
       fetchClients();
       handleSelectClient(data.client.id);
@@ -196,6 +418,7 @@ const AdminDashboard = () => {
         primary_phone: identityPrimaryPhone.trim() || null,
         alternate_phone: identityAlternatePhone.trim() || null,
         address: identityAddress.trim() || null,
+        gmb_url: identityGmbUrl.trim() || null,
       });
       showToast('Client official identity updated successfully.', 'success');
       fetchClients();
@@ -204,6 +427,35 @@ const AdminDashboard = () => {
       showToast(err.response?.data?.message || 'Unable to update client identity.', 'error');
     } finally {
       setSavingIdentity(false);
+    }
+  };
+
+  const handleSyncGmb = async () => {
+    if (!selectedClient?.client?.id) return;
+    setSyncingGmb(true);
+    try {
+      const res = await clientService.syncGmb(selectedClient.client.id);
+      if (res.keyError) {
+        setGmbKeyError(res.keyError);
+        if (res.keyError.code === 'GMB_KEY_NOT_FOUND') {
+          showToast('GMB API Key Not Found - Manual wala chalta rahega', 'warning');
+        } else if (res.keyError.code === 'GMB_KEY_INVALID') {
+          showToast('GMB API Key Invalid - Key ya Billing check karo', 'error');
+        } else {
+          showToast(res.keyError.user_message || 'GMB sync unavailable', 'warning');
+        }
+      } else if (res.success) {
+        setGmbKeyError(null);
+        showToast('Synced from Google', 'success');
+      } else if (res.syncResult?.skipped) {
+        showToast(`Sync skipped: ${res.syncResult.reason}`, 'info');
+      }
+      handleSelectClient(selectedClient.client.id);
+      fetchClients();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to sync GMB profile.', 'error');
+    } finally {
+      setSyncingGmb(false);
     }
   };
 
@@ -878,8 +1130,8 @@ const AdminDashboard = () => {
 
                 {/* Grid: Brand Guidelines & Connected Accounts */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  {/* BRAND GUIDELINES & OFFICIAL IDENTITY (7 Cols) */}
-                  <div className="lg:col-span-7 space-y-6">
+                  {/* BRAND GUIDELINES & OFFICIAL IDENTITY (6 Cols) */}
+                  <div className="lg:col-span-6 space-y-6">
                     {/* OFFICIAL CLIENT IDENTITY */}
                     <div className="bg-[#FFFFFF] p-6 rounded-3xl border border-[#E5E2DA] shadow-xs space-y-5">
                       <div className="flex items-center gap-2 pb-3 border-b border-[#E5E2DA]">
@@ -893,6 +1145,68 @@ const AdminDashboard = () => {
                       </div>
 
                       <form onSubmit={handleSaveClientIdentity} className="space-y-4">
+                        {/* GMB PROFILE LINK (Weekly Sync) */}
+                        <div className="p-4 bg-sky-50/60 rounded-2xl border border-sky-200/70 space-y-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-sky-950 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                              <Globe className="w-4 h-4 text-sky-600" />
+                              <span>GMB Profile Link (Optional)</span>
+                            </label>
+                            <input
+                              type="url"
+                              value={identityGmbUrl}
+                              onChange={(e) => setIdentityGmbUrl(e.target.value)}
+                              placeholder="e.g. https://maps.app.goo.gl/... or https://google.com/maps/place/..."
+                              className="w-full px-3.5 py-2.5 rounded-xl border border-sky-200 bg-white text-sm text-[#2B2A27] focus:outline-none focus:border-sky-600 font-mono"
+                            />
+                            <p className="text-[11px] text-sky-800/80 mt-1 leading-relaxed">
+                              GMB link dalne par har hafte 1 baar Google se official naam, address, phone auto-sync hoga. Tumhara manual likha hua kuch bhi delete nahi hoga.
+                            </p>
+                          </div>
+
+                          {/* Sync Status Banner */}
+                          <div className="pt-2 border-t border-sky-200/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                            <div className="text-sky-900 leading-snug">
+                              <div className="font-medium">
+                                <span className="text-sky-700">Last Synced: </span>
+                                {selectedClient.client?.gmb_last_synced_at
+                                  ? new Date(selectedClient.client.gmb_last_synced_at).toLocaleString()
+                                  : 'Not synced yet'}
+                              </div>
+                              {selectedClient.client?.gmb_snapshot?.officialName && (
+                                <div className="text-[11px] text-sky-800 mt-0.5">
+                                  Google Name: <span className="font-semibold">{selectedClient.client.gmb_snapshot.officialName}</span>
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              loading={syncingGmb}
+                              onClick={handleSyncGmb}
+                              className="!rounded-xl !bg-white hover:!bg-sky-100/70 !text-sky-700 !border-sky-300 text-xs shadow-none shrink-0"
+                            >
+                              Sync from Google
+                            </Button>
+                          </div>
+
+                          {/* Free Mode / Key Status Banner */}
+                          {(!selectedClient.client?.gmb_last_synced_at || gmbKeyError?.code === 'GMB_KEY_NOT_FOUND') && (
+                            <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl flex items-center gap-2 text-xs text-amber-900 font-medium">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                              <span>⚠ GMB Auto-Sync OFF - API Key Not Found. Manual data se kaam chal raha hai. (Free Mode)</span>
+                            </div>
+                          )}
+
+                          {gmbKeyError?.code === 'GMB_KEY_INVALID' && (
+                            <div className="p-2.5 bg-rose-50 border border-rose-200/80 rounded-xl flex items-center gap-2 text-xs text-rose-900 font-medium">
+                              <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                              <span>GMB API Key Invalid - Key check karo ya billing ON karo. Manual data se kaam chal raha hai.</span>
+                            </div>
+                          )}
+                        </div>
+
                         <div>
                           <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5">
                             Official Organization / Brand Name
@@ -992,6 +1306,31 @@ const AdminDashboard = () => {
                             placeholder="e.g. Apex, ApexHealth, FitFam, Insta, नमस्ते"
                             className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white resize-y font-mono"
                           />
+
+                          {/* GMB Auto Whitelist Chips */}
+                          {Array.isArray(selectedClient?.client?.gmb_auto_whitelist) && selectedClient.client.gmb_auto_whitelist.length > 0 && (
+                            <div className="mt-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                                  <Globe className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>Auto from GMB (Auto-derived whitelist)</span>
+                                </span>
+                                <span className="text-[11px] text-slate-500 font-medium">
+                                  {selectedClient.client.gmb_auto_whitelist.length} terms synced
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+                                {selectedClient.client.gmb_auto_whitelist.map((w, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-white text-slate-700 border border-slate-200 shadow-xs"
+                                  >
+                                    {w}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Banned Words */}
@@ -1043,103 +1382,383 @@ const AdminDashboard = () => {
                     </div>
                   </div>
 
-                  {/* CONNECTED SOCIAL ACCOUNTS (5 Cols) */}
-                  <div className="lg:col-span-5 space-y-4">
+                  {/* CONNECTED SOCIAL ACCOUNTS (6 Cols) */}
+                  <div className="lg:col-span-6 space-y-4">
                     <div className="bg-[#FFFFFF] p-6 rounded-3xl border border-[#E5E2DA] shadow-xs space-y-5">
                       <div className="flex items-center justify-between pb-3 border-b border-[#E5E2DA]">
                         <div className="flex items-center gap-2">
                           <Share2 className="w-5 h-5 text-emerald-600" />
-                          <h3 className="text-base font-bold text-[#2B2A27]">Connected Accounts</h3>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          leftIcon={<PlusCircle className="w-3.5 h-3.5" />}
-                          onClick={() => setShowConnectModal(true)}
-                        >
-                          Connect
-                        </Button>
-                      </div>
-
-                      <p className="text-xs text-[#6B6A63]">
-                        The SMO can publish posts only to these connected accounts.
-                      </p>
-
-                      {selectedClient.social_accounts?.length === 0 ? (
-                        <div className="p-6 rounded-2xl bg-[#FAF9F6] border border-[#E5E2DA] text-center space-y-2">
-                          <Share2 className="w-8 h-8 text-[#A8A29E] mx-auto" />
-                          <p className="text-xs font-semibold text-[#2B2A27]">
-                            This client has no connected accounts.
-                          </p>
-                          <p className="text-[11px] text-[#6B6A63]">
-                            Connect an Instagram or Facebook account to enable platform selection.
-                          </p>
-                          <div className="pt-2 flex justify-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConnectPlatform('instagram');
-                                setShowConnectModal(true);
-                              }}
-                              className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 text-xs font-medium cursor-pointer hover:bg-rose-100"
-                            >
-                              + Instagram
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConnectPlatform('facebook');
-                                setShowConnectModal(true);
-                              }}
-                              className="px-3 py-1.5 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 text-xs font-medium cursor-pointer hover:bg-sky-100"
-                            >
-                              + Facebook
-                            </button>
+                          <div>
+                            <h3 className="text-base font-bold text-[#2B2A27]">Connected Accounts</h3>
+                            <p className="text-[11px] text-[#6B6A63]">
+                              Single Agency App Architecture — All 4 Platforms Supported
+                            </p>
                           </div>
                         </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {selectedClient.social_accounts?.map((acc) => (
+                      </div>
+
+                      {/* 2x2 Grid for 4 Platforms */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        {['instagram', 'facebook', 'youtube', 'linkedin'].map((platformKey) => {
+                          const p = socialPlatforms.find((item) => item.platform === platformKey) || {
+                            platform: platformKey,
+                            is_connected: false,
+                            profile_url: null,
+                          };
+
+                          const isExpanded = manualFormPlatform === platformKey;
+                          const banner = cardBanners[platformKey] || (!p.is_connected && p.last_error ? { type: 'error', message: p.last_error } : null);
+
+                          return (
                             <div
-                              key={acc.id}
-                              className="p-3.5 rounded-2xl bg-[#FAF9F6] border border-[#E5E2DA] flex items-center justify-between"
+                              key={platformKey}
+                              className={`p-4 rounded-2xl border transition-all ${
+                                p.is_connected
+                                  ? 'bg-[#FAF9F6] border-emerald-200/80 shadow-xs'
+                                  : 'bg-[#FAF9F6] border-[#E5E2DA]'
+                              } space-y-3 flex flex-col justify-between`}
                             >
-                              <div className="flex items-center gap-3">
-                                <div
-                                  className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
-                                    acc.platform === 'instagram'
-                                      ? 'bg-rose-50 border-rose-200 text-rose-600'
-                                      : 'bg-sky-50 border-sky-200 text-sky-600'
-                                  }`}
-                                >
-                                  {acc.platform === 'instagram' ? (
-                                    <InstagramIcon className="w-5 h-5" />
+                              <div className="space-y-2.5">
+                                {/* Header: Icon + Name + Status + Auto-Refresh */}
+                                <div className="flex items-start justify-between gap-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      className={`w-8 h-8 rounded-xl flex items-center justify-center border ${
+                                        platformKey === 'instagram'
+                                          ? 'bg-rose-50 border-rose-200 text-rose-600'
+                                          : platformKey === 'facebook'
+                                          ? 'bg-sky-50 border-sky-200 text-sky-600'
+                                          : platformKey === 'youtube'
+                                          ? 'bg-red-50 border-red-200 text-red-600'
+                                          : 'bg-blue-50 border-blue-200 text-blue-600'
+                                      }`}
+                                    >
+                                      {platformKey === 'instagram' && <InstagramIcon className="w-4 h-4" />}
+                                      {platformKey === 'facebook' && <FacebookIcon className="w-4 h-4" />}
+                                      {platformKey === 'youtube' && <YouTubeIcon className="w-4 h-4" />}
+                                      {platformKey === 'linkedin' && <LinkedInIcon className="w-4 h-4" />}
+                                    </div>
+                                    <div>
+                                      <h4 className="text-xs font-bold text-[#2B2A27] capitalize">
+                                        {platformKey}
+                                      </h4>
+                                      <span
+                                        className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                          p.is_connected
+                                            ? 'bg-emerald-100 text-emerald-800'
+                                            : 'bg-stone-200 text-stone-600'
+                                        }`}
+                                      >
+                                        {p.is_connected ? 'Connected' : 'Not Connected'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 whitespace-nowrap">
+                                    Auto-Refresh: ON
+                                  </span>
+                                </div>
+
+                                {/* Profile URL & Info */}
+                                <div className="space-y-1 text-[11px]">
+                                  {p.profile_url ? (
+                                    <div className="flex items-center gap-1 font-mono text-stone-600">
+                                      <span className="text-[10px] uppercase font-bold text-stone-400">URL:</span>
+                                      <a
+                                        href={p.profile_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-emerald-700 hover:underline truncate max-w-[150px] inline-flex items-center gap-0.5"
+                                        title={p.profile_url}
+                                      >
+                                        {p.profile_url}
+                                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                                      </a>
+                                    </div>
                                   ) : (
-                                    <FacebookIcon className="w-5 h-5" />
+                                    <div className="text-stone-400 italic text-[10px]">No Profile URL</div>
+                                  )}
+
+                                  {p.is_connected && (
+                                    <div className="space-y-0.5 pt-0.5 border-t border-[#E5E2DA]/60 text-[10px] text-stone-600 font-mono">
+                                      <div className="flex justify-between">
+                                        <span className="text-stone-400">Method:</span>
+                                        <span className="font-semibold uppercase text-stone-700">
+                                          {p.connection_method || 'oauth'}
+                                        </span>
+                                      </div>
+                                      {p.masked_access_token && (
+                                        <div className="flex justify-between">
+                                          <span className="text-stone-400">Token:</span>
+                                          <span className="text-stone-700">{p.masked_access_token}</span>
+                                        </div>
+                                      )}
+                                      {p.token_expires_at && (
+                                        <div className="flex justify-between">
+                                          <span className="text-stone-400">Expires:</span>
+                                          <span className="text-stone-700">{formatDate(p.token_expires_at)}</span>
+                                        </div>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
-                                <div>
-                                  <span className="text-xs font-bold text-[#2B2A27] block">
-                                    {acc.account_name}
-                                  </span>
-                                  <span className="text-[10px] text-emerald-700 font-medium">
-                                    ● Token Encrypted & Active
-                                  </span>
-                                </div>
+
+                                {/* Error / Revoked Banner */}
+                                {banner && (
+                                  <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-[11px] text-rose-800 leading-tight">
+                                    <span className="font-bold block">⚠️ Token Expired - Dobara Connect Karo</span>
+                                    <span className="text-[10px] text-rose-600">{banner.message}</span>
+                                  </div>
+                                )}
                               </div>
 
-                              <button
-                                type="button"
-                                onClick={() => handleDisconnectSocial(acc.id)}
-                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 cursor-pointer transition-colors"
-                                title="Disconnect Account"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {/* 4 Action Buttons */}
+                              <div className="pt-2 border-t border-[#E5E2DA] space-y-2">
+                                {/* YouTube Test User Helper Card */}
+                                {platformKey === 'youtube' && (
+                                  <div className="p-3 rounded-2xl bg-amber-50/90 border border-amber-200/90 text-stone-800 space-y-2.5 text-left mb-2 shadow-xs">
+                                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
+                                      <span>Naya YouTube Client? Pehle Test User Add Karo</span>
+                                    </div>
+
+                                    <ol className="text-[11px] text-stone-700 space-y-1 list-decimal list-inside leading-relaxed font-sans">
+                                      <li>Neeche wala link copy karo</li>
+                                      <li>Uss browser me jao jisme Owner wala Gmail login hai</li>
+                                      <li>Wahan paste karke [ Add Users ] me is client ka Gmail daal do</li>
+                                      <li>[ Add ] -&gt; [ Save ] dabao, fir yahan aake [ Connect YouTube ] dabao</li>
+                                    </ol>
+
+                                    <div className="flex items-center gap-2 pt-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(GOOGLE_CLOUD_TEST_USER_URL);
+                                          showToast(
+                                            'Link copy ho gaya! Ab Owner wale Gmail wale browser me paste karo',
+                                            'success'
+                                          );
+                                        }}
+                                        className="flex-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-white hover:bg-stone-50 border border-amber-300 text-stone-800 shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                                      >
+                                        <span>📋</span>
+                                        <span>Link Copy Karo</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => window.open(GOOGLE_CLOUD_TEST_USER_URL, '_blank')}
+                                        className="flex-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                                      >
+                                        <span>🔗</span>
+                                        <span>Google Cloud Kholo</span>
+                                      </button>
+                                    </div>
+
+                                    <p className="text-[10px] text-amber-800/90 font-medium leading-normal">
+                                      ⚠️ Ye link sirf Owner wale Gmail se khulega. Agar Access Denied aaye to Owner wale Gmail se login karke kholo.
+                                    </p>
+                                  </div>
+                                )}
+
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOAuthConnect(platformKey)}
+                                    disabled={actionLoading[`oauth-${platformKey}`]}
+                                    className={`px-2 py-1.5 rounded-lg text-[11px] font-bold text-white cursor-pointer transition-colors shadow-xs text-center ${
+                                      platformKey === 'youtube'
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-emerald-600 hover:bg-emerald-700'
+                                    }`}
+                                  >
+                                    {actionLoading[`oauth-${platformKey}`]
+                                      ? 'Connecting...'
+                                      : platformKey === 'youtube'
+                                      ? 'Connect YouTube'
+                                      : 'Connect'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleManualForm(platformKey)}
+                                    className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors text-center cursor-pointer ${
+                                      isExpanded
+                                        ? 'bg-stone-200 border-stone-300 text-stone-900'
+                                        : 'bg-white hover:bg-stone-100 border-[#E5E2DA] text-[#2B2A27]'
+                                    }`}
+                                  >
+                                    {isExpanded ? 'Hide Form' : 'Manual se Jodo'}
+                                  </button>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTestPlatform(platformKey)}
+                                    disabled={actionLoading[`test-${platformKey}`]}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 cursor-pointer transition-colors text-center"
+                                  >
+                                    {actionLoading[`test-${platformKey}`] ? 'Testing...' : 'Test'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDisconnectPlatform(platformKey)}
+                                    disabled={actionLoading[`disc-${platformKey}`] || !p.is_connected}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-semibold text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 cursor-pointer transition-colors text-center disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                    {actionLoading[`disc-${platformKey}`] ? 'Disconnecting...' : 'Disconnect'}
+                                  </button>
+                                </div>
+
+                                {/* Platform-Tailored Manual Connect Form */}
+                                {isExpanded && (
+                                  <form
+                                    onSubmit={(e) => handleManualConnectSubmit(e, platformKey)}
+                                    className="mt-2 p-3 rounded-xl bg-white border border-[#E5E2DA] space-y-2 text-left"
+                                  >
+                                    <div className="text-[11px] font-bold text-[#2B2A27] pb-1 border-b border-[#E5E2DA]">
+                                      Manual Connect: {platformKey.toUpperCase()}
+                                    </div>
+
+                                    {/* Profile URL */}
+                                    <div>
+                                      <label className="block text-[10px] font-semibold text-stone-600 uppercase mb-0.5">
+                                        Profile / Page URL
+                                      </label>
+                                      <input
+                                        type="url"
+                                        value={manualFormData[platformKey]?.profile_url || ''}
+                                        onChange={(e) =>
+                                          handleManualFieldChange(platformKey, 'profile_url', e.target.value)
+                                        }
+                                        placeholder="https://..."
+                                        className="w-full px-2 py-1 rounded-lg border border-[#E5E2DA] bg-[#FAF9F6] text-[11px] font-mono focus:outline-none focus:border-emerald-600"
+                                      />
+                                    </div>
+
+                                    {/* Platform ID */}
+                                    <div>
+                                      <label className="block text-[10px] font-semibold text-stone-600 uppercase mb-0.5">
+                                        {platformKey === 'instagram' && 'Instagram Business ID'}
+                                        {platformKey === 'facebook' && 'Page ID'}
+                                        {platformKey === 'youtube' && 'Channel ID'}
+                                        {platformKey === 'linkedin' && 'Organization ID'}
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={manualFormData[platformKey]?.platform_id || ''}
+                                        onChange={(e) =>
+                                          handleManualFieldChange(platformKey, 'platform_id', e.target.value)
+                                        }
+                                        placeholder="e.g. 178414000..."
+                                        className="w-full px-2 py-1 rounded-lg border border-[#E5E2DA] bg-[#FAF9F6] text-[11px] font-mono focus:outline-none focus:border-emerald-600"
+                                      />
+                                      {platformKey === 'instagram' && (
+                                        <p className="text-[9px] text-stone-500 mt-0.5">
+                                          ID kahan milegi? Meta Business Settings &gt; Instagram Account
+                                        </p>
+                                      )}
+                                      {platformKey === 'facebook' && (
+                                        <p className="text-[9px] text-stone-500 mt-0.5">
+                                          Page ID: Meta Business Settings &gt; Page &gt; Page ID
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    {/* Access Token (Only for Instagram, Facebook, LinkedIn) */}
+                                    {platformKey !== 'youtube' && (
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-stone-600 uppercase mb-0.5">
+                                          Access Token *
+                                        </label>
+                                        <input
+                                          type="password"
+                                          value={manualFormData[platformKey]?.access_token || ''}
+                                          onChange={(e) =>
+                                            handleManualFieldChange(platformKey, 'access_token', e.target.value)
+                                          }
+                                          placeholder="Enter Access Token"
+                                          required
+                                          className="w-full px-2 py-1 rounded-lg border border-[#E5E2DA] bg-[#FAF9F6] text-[11px] font-mono focus:outline-none focus:border-emerald-600"
+                                        />
+                                      </div>
+                                    )}
+
+                                    {/* Refresh Token (Optional for LinkedIn, REQUIRED for YouTube) */}
+                                    {platformKey === 'linkedin' && (
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-stone-600 uppercase mb-0.5">
+                                          Refresh Token (Optional)
+                                        </label>
+                                        <input
+                                          type="password"
+                                          value={manualFormData[platformKey]?.refresh_token || ''}
+                                          onChange={(e) =>
+                                            handleManualFieldChange(platformKey, 'refresh_token', e.target.value)
+                                          }
+                                          placeholder="Enter Refresh Token"
+                                          className="w-full px-2 py-1 rounded-lg border border-[#E5E2DA] bg-[#FAF9F6] text-[11px] font-mono focus:outline-none focus:border-emerald-600"
+                                        />
+                                        <p className="text-[9px] text-amber-700 bg-amber-50 p-1 rounded mt-1">
+                                          LinkedIn Token 60 din me expire hoga, fir dobara Connect karna padega.
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {platformKey === 'youtube' && (
+                                      <div>
+                                        <label className="block text-[10px] font-semibold text-stone-600 uppercase mb-0.5">
+                                          Refresh Token ONLY *
+                                        </label>
+                                        <input
+                                          type="password"
+                                          value={manualFormData[platformKey]?.refresh_token || ''}
+                                          onChange={(e) =>
+                                            handleManualFieldChange(platformKey, 'refresh_token', e.target.value)
+                                          }
+                                          placeholder="Enter Google Refresh Token (Required)"
+                                          required
+                                          className="w-full px-2 py-1 rounded-lg border border-[#E5E2DA] bg-[#FAF9F6] text-[11px] font-mono focus:outline-none focus:border-emerald-600"
+                                        />
+                                        <p className="text-[9px] text-stone-500 mt-1 leading-tight">
+                                          Refresh Token sirf Connect button se milta hai, API Key se upload nahi hoga. Agar Refresh Token nahi hai to [Connect] dabao.
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* Form Buttons */}
+                                    <div className="flex justify-end gap-1.5 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setManualFormPlatform(null)}
+                                        className="px-2 py-1 rounded-lg border border-[#E5E2DA] text-[10px] font-medium text-stone-600 hover:bg-stone-50 cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="submit"
+                                        disabled={actionLoading[`manual-${platformKey}`]}
+                                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold cursor-pointer transition-colors shadow-xs"
+                                      >
+                                        {actionLoading[`manual-${platformKey}`]
+                                          ? 'Saving & Testing...'
+                                          : 'Save & Test Connection'}
+                                      </button>
+                                    </div>
+                                  </form>
+                                )}
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          );
+                        })}
+                      </div>
+
+                      {/* Helper Note under 2x2 grid */}
+                      <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-900 leading-relaxed flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+                        <span>
+                          <strong>Platform Rule:</strong> YouTube pe sirf Video/Shorts post hoga, image poster sirf Instagram, Facebook, LinkedIn pe jayega.
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1220,6 +1839,23 @@ const AdminDashboard = () => {
                     placeholder="e.g. 1063, near Jan Jyoti Hospital, Gole Bazar, Wright Town, Jabalpur"
                     className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white resize-y"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                    <Globe className="w-3.5 h-3.5 text-blue-600" />
+                    <span>GMB Profile Link (Optional)</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={newGmbUrl}
+                    onChange={(e) => setNewGmbUrl(e.target.value)}
+                    placeholder="e.g. https://maps.app.goo.gl/... or https://google.com/maps/place/..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
+                  />
+                  <p className="text-[11px] text-[#6B6A63] mt-1 leading-relaxed">
+                    GMB link dalne par har hafte 1 baar Google se official naam, address, phone auto-sync hoga. Tumhara manual likha hua kuch bhi delete nahi hoga.
+                  </p>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">

@@ -30,9 +30,10 @@ const detectTextLanguage = (text) => {
  * @param {string} [language] 'en', 'hi', or 'auto'
  * @param {Array<string>} [whitelist] Whitelist words to never flag as errors
  * @param {string} [brandName] Official brand name from DB
+ * @param {Object} [gmbData] Optional GMB snapshot / auto-whitelist data
  * @returns {Promise<Array<{ original: string, suggestion: string, reason: string, type: 'grammar'|'spelling'|'grammar_error' }>>}
  */
-const checkGrammar = async (text, language = 'auto', whitelist = [], brandName = '') => {
+const checkGrammar = async (text, language = 'auto', whitelist = [], brandName = '', gmbData = null) => {
   if (!text || typeof text !== 'string' || text.trim().length < 5) {
     return [];
   }
@@ -43,7 +44,8 @@ const checkGrammar = async (text, language = 'auto', whitelist = [], brandName =
     ? whitelist.map((w) => String(w).trim()).filter(Boolean)
     : [];
   const cleanBrand = (brandName || '').trim();
-  const cacheKey = `${lang}:${cleanBrand}:${validWhitelist.slice(0, 5).join(',')}:${cleanText.slice(0, 200)}`;
+  const gmbOfficialName = (gmbData?.officialName || '').trim();
+  const cacheKey = `${lang}:${cleanBrand}:${gmbOfficialName}:${validWhitelist.slice(0, 5).join(',')}:${cleanText.slice(0, 200)}`;
 
   if (grammarCache.has(cacheKey)) {
     return grammarCache.get(cacheKey);
@@ -69,6 +71,15 @@ const checkGrammar = async (text, language = 'auto', whitelist = [], brandName =
   }
 
   try {
+    let gmbClause = '';
+    if (gmbData && (gmbOfficialName || (Array.isArray(gmbData.autoWhitelist) && gmbData.autoWhitelist.length > 0))) {
+      const gmbTokens = Array.isArray(gmbData.autoWhitelist) ? gmbData.autoWhitelist.join(', ') : '';
+      gmbClause = `\nGOOGLE MY BUSINESS (GMB) OFFICIAL DATA:
+- GMB Official Name: "${gmbOfficialName}"
+${gmbTokens ? `- GMB Derived Keywords: ${gmbTokens}` : ''}
+IMPORTANT PRECEDENCE RULE: If MANUAL and GMB differ, treat GMB as ground truth for brand name, but NEVER flag manual whitelist words as error.`;
+    }
+
     let prompt;
     if (lang === 'hi') {
       const whitelistClause = validWhitelist.length > 0
@@ -97,7 +108,7 @@ EVALUATION CRITERIA:
    - Word Order (पदक्रम): Clause verb must come at the end of the clause.
    Mark "type": "grammar".
 
-RULES TO STRICTLY FOLLOW:${brandClause}
+RULES TO STRICTLY FOLLOW:${brandClause}${gmbClause}
 - Do NOT flag brand names, proper nouns, business/clinic names, doctor/specialist names, medical degrees (e.g. MBBS, DNB), or valid hashtags as spelling errors; brand discrepancies are evaluated separately.
 - Do NOT flag phone numbers, numbers, pin codes, or addresses.
 ${whitelistClause}
@@ -129,7 +140,7 @@ Critically evaluate the following English text for BOTH:
 1. Spelling Errors (pure spelling typos, e.g. "childern" -> "children", "healty" -> "healthy", "tommorow" -> "tomorrow"). Mark "type": "spelling".
 2. Grammar, Punctuation & Capitalization (syntax flaws, improper mid-sentence capitalization like 'a Healthy Childhood' -> 'a healthy childhood', missing punctuation, subject-verb agreement). Mark "type": "grammar".
 
-CRITICAL RULES TO FOLLOW:${brandClause}
+CRITICAL RULES TO FOLLOW:${brandClause}${gmbClause}
 - Do NOT flag official brand names, registered company names, or logos as simple spelling errors; any brand name or logo discrepancy is checked by an independent brand verification engine.
 - Do NOT flag proper nouns, registered abbreviations/acronyms, doctor/specialist names, hashtags, phone numbers, or addresses as spelling errors.
 ${whitelistClause}

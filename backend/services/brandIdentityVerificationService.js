@@ -50,7 +50,13 @@ const getEditDistance = (a, b) => {
  * @param {string} officialName
  * @returns {Object}
  */
-const verifyBrandNamePresence = (ocrText, officialName) => {
+/**
+ * Internal helper to verify OCR text against a single brand name.
+ * @param {string} ocrText
+ * @param {string} officialName
+ * @returns {Object}
+ */
+const _checkSingleBrandName = (ocrText, officialName) => {
   if (!officialName || !officialName.trim()) {
     return {
       verified: false,
@@ -222,6 +228,42 @@ const verifyBrandNamePresence = (ocrText, officialName) => {
 };
 
 /**
+ * 1. FUZZY PHRASE MATCHING (Brand Name Presence & Integrity)
+ * Extracts sliding windows of 2 to 5 consecutive words from OCR text and compares
+ * them against the official organization name and/or GMB official name.
+ * 
+ * If either matches >= 90% (or >= 95%), brand_name_correct is true.
+ * 
+ * @param {string} ocrText
+ * @param {string} officialName Manual official name
+ * @param {string} [gmbOfficialName] GMB fetched official name
+ * @returns {Object}
+ */
+const verifyBrandNamePresence = (ocrText, officialName, gmbOfficialName = '') => {
+  const cleanManual = (officialName || '').trim();
+  const cleanGmb = (gmbOfficialName || '').trim();
+
+  if (!cleanManual && !cleanGmb) {
+    return {
+      verified: false,
+      reason: 'No official organization name registered',
+    };
+  }
+
+  const resManual = cleanManual ? _checkSingleBrandName(ocrText, cleanManual) : null;
+  const resGmb = cleanGmb && cleanGmb !== cleanManual ? _checkSingleBrandName(ocrText, cleanGmb) : null;
+
+  if (resManual && resManual.brand_name_correct) return resManual;
+  if (resGmb && resGmb.brand_name_correct) return resGmb;
+
+  // If neither is 100% / >= 95% correct, pick the higher scoring candidate
+  if (resManual && resGmb) {
+    return (resGmb.score || 0) > (resManual.score || 0) ? resGmb : resManual;
+  }
+  return resManual || resGmb;
+};
+
+/**
  * Normalize phone string into 10-digit number.
  * Removes non-digits and leading +91 or 0 if present.
  * @param {string} phone
@@ -241,20 +283,28 @@ const normalizePhone = (phone) => {
 /**
  * 2. PHONE NUMBER VERIFICATION
  * Scans OCR text and caption for 10-digit numbers and compares each digit-by-digit
- * against primaryPhone and alternatePhone.
+ * against primaryPhone, alternatePhone, and gmbPhone.
  * 
  * @param {string} ocrText
  * @param {string} caption
  * @param {string} primaryPhone
  * @param {string} [alternatePhone]
+ * @param {string} [gmbPhone]
  * @returns {Array<Object>}
  */
-const verifyPhoneNumbers = (ocrText = '', caption = '', primaryPhone = '', alternatePhone = '') => {
+const verifyPhoneNumbers = (ocrText = '', caption = '', primaryPhone = '', alternatePhone = '', gmbPhone = '') => {
   const normPrimary = normalizePhone(primaryPhone);
   const normAlternate = normalizePhone(alternatePhone);
+  const normGmb = normalizePhone(gmbPhone);
+
   const registeredNumbers = [];
   if (normPrimary) registeredNumbers.push({ type: 'primary', number: normPrimary, raw: primaryPhone });
-  if (normAlternate) registeredNumbers.push({ type: 'alternate', number: normAlternate, raw: alternatePhone });
+  if (normAlternate && normAlternate !== normPrimary) {
+    registeredNumbers.push({ type: 'alternate', number: normAlternate, raw: alternatePhone });
+  }
+  if (normGmb && normGmb !== normPrimary && normGmb !== normAlternate) {
+    registeredNumbers.push({ type: 'gmb', number: normGmb, raw: gmbPhone });
+  }
 
   if (registeredNumbers.length === 0) {
     return [];
@@ -338,15 +388,13 @@ const verifyPhoneNumbers = (ocrText = '', caption = '', primaryPhone = '', alter
 };
 
 /**
- * 3. ADDRESS VERIFICATION (Soft / Informational Check)
- * Deconstructs registered address into keywords and checks presence in OCR text.
- * 
+ * Internal helper to verify OCR text against a single registered address.
  * @param {string} ocrText
- * @param {string} registeredAddress
+ * @param {string} address
  * @returns {Object}
  */
-const verifyAddressMention = (ocrText = '', registeredAddress = '') => {
-  if (!registeredAddress || !registeredAddress.trim()) {
+const _verifySingleAddress = (ocrText = '', address = '') => {
+  if (!address || !address.trim()) {
     return {
       match_percentage: 100,
       matched_keywords: [],
@@ -364,7 +412,7 @@ const verifyAddressMention = (ocrText = '', registeredAddress = '') => {
     };
   }
 
-  const cleanAddress = registeredAddress.trim().toLowerCase();
+  const cleanAddress = address.trim().toLowerCase();
   const rawWords = cleanAddress
     .replace(/[^\w\s\u0900-\u097f]/g, ' ')
     .split(/\s+/)
@@ -425,6 +473,37 @@ const verifyAddressMention = (ocrText = '', registeredAddress = '') => {
     total_keywords: keywords.length,
     warning,
   };
+};
+
+/**
+ * 3. ADDRESS VERIFICATION (Soft / Informational Check)
+ * Deconstructs registered address (manual and/or GMB) into keywords and checks presence in OCR text.
+ * 
+ * @param {string} ocrText
+ * @param {string} registeredAddress
+ * @param {string} [gmbAddress]
+ * @returns {Object}
+ */
+const verifyAddressMention = (ocrText = '', registeredAddress = '', gmbAddress = '') => {
+  const cleanManual = (registeredAddress || '').trim();
+  const cleanGmb = (gmbAddress || '').trim();
+
+  if (!cleanManual && !cleanGmb) {
+    return {
+      match_percentage: 100,
+      matched_keywords: [],
+      total_keywords: 0,
+      warning: null,
+    };
+  }
+
+  const resManual = cleanManual ? _verifySingleAddress(ocrText, cleanManual) : null;
+  const resGmb = cleanGmb && cleanGmb !== cleanManual ? _verifySingleAddress(ocrText, cleanGmb) : null;
+
+  if (resManual && resGmb) {
+    return (resGmb.match_percentage || 0) > (resManual.match_percentage || 0) ? resGmb : resManual;
+  }
+  return resManual || resGmb;
 };
 
 module.exports = {

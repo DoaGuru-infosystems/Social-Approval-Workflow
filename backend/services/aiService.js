@@ -34,18 +34,41 @@ const getClientGuidelines = async (clientId) => {
     };
   }
 
-  // Fetch brand guidelines and client official identity
+  // Fetch brand guidelines and client official identity (including GMB synced data)
   const [rows] = await pool.query(
     'SELECT whitelist_words, banned_words, mandatory_phrases FROM client_brand_guidelines WHERE client_id = ?',
     [clientId]
   );
 
   const [clientRows] = await pool.query(
-    'SELECT name, primary_phone, alternate_phone, address FROM clients WHERE id = ?',
+    'SELECT name, primary_phone, alternate_phone, address, gmb_snapshot, gmb_auto_whitelist FROM clients WHERE id = ?',
     [clientId]
   );
 
   const clientInfo = clientRows.length > 0 ? clientRows[0] : null;
+
+  let gmbSnapshot = null;
+  if (clientInfo?.gmb_snapshot) {
+    try {
+      gmbSnapshot = typeof clientInfo.gmb_snapshot === 'string'
+        ? JSON.parse(clientInfo.gmb_snapshot)
+        : clientInfo.gmb_snapshot;
+    } catch {
+      gmbSnapshot = null;
+    }
+  }
+
+  let gmbAutoWhitelist = [];
+  if (clientInfo?.gmb_auto_whitelist) {
+    try {
+      gmbAutoWhitelist = typeof clientInfo.gmb_auto_whitelist === 'string'
+        ? JSON.parse(clientInfo.gmb_auto_whitelist)
+        : clientInfo.gmb_auto_whitelist;
+    } catch {
+      gmbAutoWhitelist = [];
+    }
+  }
+  if (!Array.isArray(gmbAutoWhitelist)) gmbAutoWhitelist = [];
 
   const parseList = (val, splitTokens = false) => {
     let list = [];
@@ -92,6 +115,24 @@ const getClientGuidelines = async (clientId) => {
     });
   }
 
+  // Union with GMB Auto Whitelist tokens (Derived from GMB Place details)
+  for (const token of gmbAutoWhitelist) {
+    if (token && typeof token === 'string') {
+      const cleanTok = token.trim();
+      if (cleanTok && !whitelist.includes(cleanTok)) {
+        whitelist.push(cleanTok);
+      }
+    }
+  }
+
+  // Also add GMB Official Name if present
+  if (gmbSnapshot?.officialName) {
+    const cleanGmbName = gmbSnapshot.officialName.trim();
+    if (cleanGmbName && !whitelist.includes(cleanGmbName)) {
+      whitelist.push(cleanGmbName);
+    }
+  }
+
   return {
     whitelist,
     banned: parseList(g.banned_words, false),
@@ -100,6 +141,11 @@ const getClientGuidelines = async (clientId) => {
     primary_phone: clientInfo?.primary_phone || '',
     alternate_phone: clientInfo?.alternate_phone || '',
     address: clientInfo?.address || '',
+    gmb_snapshot: gmbSnapshot,
+    gmb_auto_whitelist: gmbAutoWhitelist,
+    gmb_official_name: gmbSnapshot?.officialName || '',
+    gmb_phone: gmbSnapshot?.nationalPhoneNumber || gmbSnapshot?.internationalPhoneNumber || '',
+    gmb_address: gmbSnapshot?.formattedAddress || '',
   };
 };
 
@@ -206,17 +252,21 @@ const resolveImagePath = (imagePath) => {
  * Helper to identify if a word is an erroneous distortion of the client's official brand name.
  * Brand distortions are handled as Brand Identity Errors, not regular dictionary typos.
  */
-const isBrandCandidateError = (word, orgName) => {
-  if (!word || !orgName) return false;
+const isBrandCandidateError = (word, orgName, gmbName = '') => {
+  if (!word || (!orgName && !gmbName)) return false;
   const cleanW = String(word).trim().toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
   if (cleanW.length < 3) return false;
-  const orgWords = orgName.trim().toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
-  for (const ow of orgWords) {
-    const cleanOw = ow.replace(/[^\w\u0900-\u097f]/g, '');
-    if (!cleanOw || cleanOw.length < 3) continue;
-    const sim = fuzzball.ratio(cleanW, cleanOw);
-    if (sim >= 50 && sim < 95) {
-      return true;
+
+  const namesToCheck = [orgName, gmbName].filter(Boolean);
+  for (const name of namesToCheck) {
+    const orgWords = name.trim().toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+    for (const ow of orgWords) {
+      const cleanOw = ow.replace(/[^\w\u0900-\u097f]/g, '');
+      if (!cleanOw || cleanOw.length < 3) continue;
+      const sim = fuzzball.ratio(cleanW, cleanOw);
+      if (sim >= 50 && sim < 95) {
+        return true;
+      }
     }
   }
   return false;
@@ -253,6 +303,11 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
   let grammarSuggestions = [];
   let keyError = null;
 
+  const gmbData = {
+    officialName: guidelines.gmb_official_name,
+    autoWhitelist: guidelines.gmb_auto_whitelist,
+  };
+
   if (isHindi) {
     // 1. PRIMARY: Gemini AI for Hindi Spelling + Grammar
     let geminiOut = [];
@@ -261,7 +316,8 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         combinedText,
         'hi',
         guidelines.whitelist,
-        guidelines.organization_name
+        guidelines.organization_name,
+        gmbData
       );
     }
 
@@ -280,7 +336,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
         : [];
       spellingIssues = rawSpelling.filter((issue) => {
-        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+        if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
     } else {
@@ -300,7 +356,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
 
     // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
-      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+      if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     grammarSuggestions = grammarSuggestions.filter((item) => {
@@ -314,7 +370,8 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         combinedText,
         'en',
         guidelines.whitelist,
-        guidelines.organization_name
+        guidelines.organization_name,
+        gmbData
       );
     }
 
@@ -334,7 +391,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         : [];
 
       spellingIssues = rawSpellingIssues.filter((issue) => {
-        if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+        if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
     } else {
@@ -354,7 +411,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
 
     // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
-      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+      if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     grammarSuggestions = grammarSuggestions.filter((item) => {
@@ -375,12 +432,13 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
 
   // 5. Phone Verification in Caption (Node)
   let phoneVerification = [];
-  if (caption && (guidelines.primary_phone || guidelines.alternate_phone)) {
+  if (caption && (guidelines.primary_phone || guidelines.alternate_phone || guidelines.gmb_phone)) {
     phoneVerification = brandIdentityVerificationService.verifyPhoneNumbers(
       '',
       caption,
       guidelines.primary_phone,
-      guidelines.alternate_phone
+      guidelines.alternate_phone,
+      guidelines.gmb_phone
     );
   }
 
@@ -551,9 +609,10 @@ const buildAnnotatedPosterBoxes = ({
 }) => {
   const normOcr = (rawOcrText || '').trim();
   const orgName = guidelines.organization_name || '';
+  const gmbOfficialName = guidelines.gmb_official_name || '';
   const bannedList = Array.isArray(guidelines.banned) ? guidelines.banned : [];
   const whitelist = Array.isArray(guidelines.whitelist) ? guidelines.whitelist : [];
-  const expectedPhones = [guidelines.primary_phone, guidelines.alternate_phone]
+  const expectedPhones = [guidelines.primary_phone, guidelines.alternate_phone, guidelines.gmb_phone]
     .filter(Boolean)
     .map((p) => String(p).replace(/\D/g, ''));
 
@@ -677,6 +736,18 @@ const buildAnnotatedPosterBoxes = ({
         brandErrorReason = `Poster me hi brand name galat likha hai: "${bestPrimaryCandidate}" vs official "${primaryWord}" (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer ko bolo: Poster me ${bestPrimaryCandidate} ki jagah ${primaryWord} likho.`;
       } else if (bestPrimarySim >= 95 || fullOrgSim >= 95) {
         isBrandExact = true;
+      }
+    }
+
+    // Also verify against GMB official name if available
+    if (gmbOfficialName && text.length > 3) {
+      const cleanGmb = gmbOfficialName.trim();
+      const cleanGmbFull = cleanGmb.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
+      const cleanBoxText = text.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
+      if (fuzzball.ratio(cleanBoxText, cleanGmbFull) >= 95) {
+        isBrandExact = true;
+        hasBrandNameError = false;
+        brandErrorReason = null;
       }
     }
 
@@ -906,79 +977,50 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   };
 
   try {
-    if (isHindiOrMix) {
-      console.log('[Hybrid OCR] Caption is Hindi/Mix -> Sending to Google Vision Primary');
-      try {
-        remoteResult = await tryGoogleVision();
-        ocrEngineUsed = 'google_vision';
-      } catch (gErr) {
-        console.warn(`[Hybrid OCR] Google Vision failed (${gErr.message}), falling back to A2 PaddleOCR...`);
-        const isGoogleKeyErr = gErr.isKeyError || /api_key|expired|billing|401|403|unauthorized/i.test(gErr.message);
-        if (isGoogleKeyErr) {
-          keyError = {
-            service: 'google_vision',
-            code: 'VISION_KEY_EXPIRED',
-            user_message: 'Google Vision Key me problem hai - Admin se contact karein. Abhi A2 se result dikhaya ja raha hai.',
-          };
-        }
-        fallbackUsed = true;
-        remoteResult = await tryA2PaddleOCR();
-        ocrEngineUsed = 'a2_paddleocr';
-      }
-    } else {
-      console.log('[Hybrid OCR] Caption is English Only -> Sending to A2 PaddleOCR Primary');
-      let needFallback = false;
-      try {
-        remoteResult = await tryA2PaddleOCR();
-        ocrEngineUsed = 'a2_paddleocr';
-        if ((remoteResult.ocr_confidence_avg || 0) < 0.80) {
-          console.warn(`[Hybrid OCR] A2 confidence (${remoteResult.ocr_confidence_avg}) < 80%, falling back to Google Vision...`);
-          needFallback = true;
-          fallbackUsed = true;
-        }
-      } catch (a2Err) {
-        console.warn(`[Hybrid OCR] A2 PaddleOCR failed (${a2Err.message}), falling back to Google Vision...`);
-        const isA2KeyErr = /unauthorized|401|missing or invalid api key/i.test(a2Err.message);
-        if (isA2KeyErr) {
-          keyError = {
-            service: 'a2_paddleocr',
-            code: 'A2_KEY_UNAUTHORIZED',
-            user_message: 'A2 Key me problem hai - Vision se result dikhaya ja raha hai.',
-          };
-        }
-        fallbackUsed = true;
-        needFallback = true;
-      }
-
-      if (needFallback) {
-        try {
-          remoteResult = await tryGoogleVision();
-          ocrEngineUsed = 'google_vision';
-        } catch (gErr) {
-          if (!remoteResult) {
-            throw new Error(`Both A2 OCR and Google Vision failed: ${gErr.message}`);
-          }
-        }
-      }
+    // 1. PRIMARY (always first for BOTH Hindi & English): AI OCR (Google Vision / Gemini Multimodal)
+    const aiResult = await tryGoogleVision();
+    const extractedText = (aiResult?.ocr_text || aiResult?.text || '').trim();
+    if (!extractedText) {
+      throw new Error('AI returned empty text');
     }
-  } catch (err) {
-    console.error('Hybrid OCR execution error:', err.message);
-    return {
-      image_status: 'failed',
-      image_error: err.message || 'Remote OCR server request failed',
-      passed: false,
-      summary: `Image OCR failed: ${err.message || 'Remote server unreachable'}`,
-      ocr_extracted_text: '',
-      ocr_confidence: 0,
-      ocr_confidence_avg: 0,
-      ocr_reliable: false,
-      ocr_unreliable: true,
-      spelling_issues: [],
-      grammar_suggestions: [],
-      noise_tokens: [],
-      banned_words_found: [],
-      brand_identity_check: null,
+    remoteResult = aiResult;
+    ocrEngineUsed = 'gemini_ai';
+    fallbackUsed = false;
+  } catch (aiError) {
+    // 2. FALLBACK (only if AI fails, errors, or returns empty text): A2 Remote PaddleOCR
+    console.log('AI OCR failed, falling back to PaddleOCR:', aiError.message);
+    fallbackUsed = true;
+    ocrEngineUsed = 'a2_paddleocr';
+    keyError = {
+      service: 'google_vision',
+      code: 'VISION_KEY_EXPIRED',
+      user_message:
+        'AI se check nahi hua, A2 se check kiya gaya (Warning: Hindi matra aur OCR text ki accuracy kam ho sakti hai, kripya poster manually verify karein).',
     };
+    try {
+      remoteResult = await tryA2PaddleOCR();
+    } catch (a2Err) {
+      console.error('[OCR Pipeline] Both AI OCR and A2 PaddleOCR failed:', a2Err.message);
+      return {
+        image_status: 'failed',
+        image_error: `AI OCR failed (${aiError.message}) and A2 PaddleOCR fallback failed (${a2Err.message})`,
+        passed: false,
+        summary: `Image OCR failed: Both AI and A2 fallback unreachable`,
+        ocr_extracted_text: '',
+        ocr_confidence: 0,
+        ocr_confidence_avg: 0,
+        ocr_reliable: false,
+        ocr_unreliable: true,
+        spelling_issues: [],
+        grammar_suggestions: [],
+        noise_tokens: [],
+        banned_words_found: [],
+        brand_identity_check: null,
+        ocr_engine: 'none',
+        fallback_used: true,
+        key_error: keyError,
+      };
+    }
   }
 
   const rawOcrText = remoteResult.ocr_text || '';
@@ -1022,6 +1064,11 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   let bannedWordsFound = [];
   let imageKeyError = keyError;
 
+  const gmbData = {
+    officialName: guidelines.gmb_official_name,
+    autoWhitelist: guidelines.gmb_auto_whitelist,
+  };
+
   if (isHindiOrMix) {
     // 1. PRIMARY: Gemini AI for Hindi Spelling + Grammar on OCR text
     let geminiOut = [];
@@ -1030,7 +1077,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
         cleanedOcrText || rawOcrText,
         'hi',
         guidelines.whitelist,
-        guidelines.organization_name
+        guidelines.organization_name,
+        gmbData
       );
     }
 
@@ -1048,7 +1096,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       if (ocrReliable && cleanedOcrText.trim()) {
         const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
         spellingIssues = rawSpelling.filter((issue) => {
-          if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+          if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
           return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
         });
       }
@@ -1069,7 +1117,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
 
     // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
-      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+      if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     imageGrammarSuggestions = imageGrammarSuggestions.filter((item) => {
@@ -1087,7 +1135,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
         cleanedOcrText || rawOcrText,
         'en',
         guidelines.whitelist,
-        guidelines.organization_name
+        guidelines.organization_name,
+        gmbData
       );
     }
 
@@ -1105,7 +1154,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       if (ocrReliable && cleanedOcrText.trim()) {
         const rawSpelling = await spellCheckService.checkText(cleanedOcrText, guidelines.whitelist);
         spellingIssues = rawSpelling.filter((issue) => {
-          if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+          if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
           return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
         });
       }
@@ -1126,7 +1175,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
 
     // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
-      if (isBrandCandidateError(issue.word, guidelines.organization_name)) return false;
+      if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     imageGrammarSuggestions = imageGrammarSuggestions.filter((item) => {
@@ -1148,10 +1197,11 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     address_warning: null,
   };
 
-  if (guidelines.organization_name && ocrForIdentity) {
+  if ((guidelines.organization_name || guidelines.gmb_official_name) && ocrForIdentity) {
     const nameCheck = brandIdentityVerificationService.verifyBrandNamePresence(
       ocrForIdentity,
-      guidelines.organization_name
+      guidelines.organization_name,
+      guidelines.gmb_official_name
     );
     brandIdentityCheck.brand_name_correct = nameCheck.brand_name_correct;
     brandIdentityCheck.brand_name_match_score = nameCheck.score;
@@ -1161,19 +1211,21 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     }
   }
 
-  if ((guidelines.primary_phone || guidelines.alternate_phone) && ocrForIdentity) {
+  if ((guidelines.primary_phone || guidelines.alternate_phone || guidelines.gmb_phone) && ocrForIdentity) {
     brandIdentityCheck.phone_verification = brandIdentityVerificationService.verifyPhoneNumbers(
       ocrForIdentity,
       caption || '',
       guidelines.primary_phone,
-      guidelines.alternate_phone
+      guidelines.alternate_phone,
+      guidelines.gmb_phone
     );
   }
 
-  if (guidelines.address && ocrForIdentity) {
+  if ((guidelines.address || guidelines.gmb_address) && ocrForIdentity) {
     const addrCheck = brandIdentityVerificationService.verifyAddressMention(
       ocrForIdentity,
-      guidelines.address
+      guidelines.address,
+      guidelines.gmb_address
     );
     brandIdentityCheck.address_match_percentage = addrCheck.match_percentage;
     brandIdentityCheck.address_warning = addrCheck.warning;

@@ -557,7 +557,8 @@ def process_post(data, reader=None, dictionaries=None):
         "ocr_blocks_total": ocr_blocks_total,
         "ocr_blocks_excluded_low_confidence": ocr_blocks_excluded_low_confidence,
         "detected_language": detected_language,
-        "top7_used": top7_used,
+        "top7_used": top10_used,
+        "top10_used": top10_used,
         "_internal_timings": {
             "ocr_inference_ms": round(ocr_inference_ms, 2),
         },

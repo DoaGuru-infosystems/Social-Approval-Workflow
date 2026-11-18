@@ -76,6 +76,16 @@ export const postService = {
     const response = await api.post(`/posts/${id}/check-text`);
     return response.data;
   },
+
+  publishNow: async (id, target_platforms) => {
+    const response = await api.post(`/posts/${id}/publish-now`, { target_platforms });
+    return response.data;
+  },
+
+  schedulePost: async (id, data) => {
+    const response = await api.post(`/posts/${id}/schedule`, data);
+    return response.data;
+  },
 };
 
 export default postService;

@@ -52,6 +52,8 @@ const SMODashboard = () => {
   const [selectedPlatforms, setSelectedPlatforms] = useState({});
   const [liveUrls, setLiveUrls] = useState({});
   const [clientAccountsMap, setClientAccountsMap] = useState({});
+  const [scheduleDateMap, setScheduleDateMap] = useState({});
+  const [showScheduleMap, setShowScheduleMap] = useState({});
 
   // Loading States
   const [posts, setPosts] = useState([]);
@@ -387,6 +389,46 @@ const SMODashboard = () => {
     } catch (err) {
       const msg = err.response?.data?.message || 'Unable to save the live URL.';
       showToast(msg, 'error');
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const handlePublishNow = async (postId) => {
+    setActiveActionId(`publish-now-${postId}`);
+    try {
+      const res = await postService.publishNow(postId);
+      if (res.success) {
+        showToast('Post published successfully to connected platforms!', 'success');
+      } else {
+        const errorMsgs = (res.results || [])
+          .filter((r) => !r.success)
+          .map((r) => `${r.platform}: ${r.user_message || r.error}`)
+          .join('; ');
+        showToast(`Publish notice: ${errorMsgs || 'Some platforms failed or were skipped'}`, 'warning');
+      }
+      fetchPosts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Publish failed.', 'error');
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const handleScheduleSubmit = async (postId) => {
+    const scheduledAt = scheduleDateMap[postId];
+    if (!scheduledAt) {
+      showToast('Select a schedule date and time first.', 'warning');
+      return;
+    }
+    setActiveActionId(`schedule-${postId}`);
+    try {
+      await postService.schedulePost(postId, { scheduled_at: scheduledAt });
+      showToast(`Post scheduled for ${new Date(scheduledAt).toLocaleString()}.`, 'success');
+      setShowScheduleMap((prev) => ({ ...prev, [postId]: false }));
+      fetchPosts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Scheduling failed.', 'error');
     } finally {
       setActiveActionId(null);
     }
@@ -942,26 +984,166 @@ const SMODashboard = () => {
 
                         {/* Status: ready_to_publish */}
                         {post.status === 'ready_to_publish' && (
-                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full">
-                            <input
-                              type="url"
-                              value={liveUrls[post.id] || ''}
-                              onChange={(e) =>
-                                setLiveUrls({ ...liveUrls, [post.id]: e.target.value })
-                              }
-                              placeholder="Paste published URL (e.g. https://instagram.com/p/...)"
-                              className="flex-1 px-3 py-1.5 rounded-xl bg-[#FAF9F6] border border-[#E5E2DA] text-xs text-[#2B2A27] placeholder-[#A8A29E] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
-                            />
+                          <div className="w-full space-y-3 p-3 rounded-2xl bg-white border border-[#E5E2DA]">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-emerald-800">
+                                Post is Approved &amp; Ready to Publish!
+                              </span>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  className="!bg-emerald-600 hover:!bg-emerald-700"
+                                  loading={activeActionId === `publish-now-${post.id}`}
+                                  disabled={activeActionId !== null}
+                                  onClick={() => handlePublishNow(post.id)}
+                                >
+                                  Abhi Post Karo
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    setShowScheduleMap((prev) => ({
+                                      ...prev,
+                                      [post.id]: !prev[post.id],
+                                    }))
+                                  }
+                                >
+                                  Schedule Karo - Date &amp; Time Chuno
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Schedule Inline Picker */}
+                            {showScheduleMap[post.id] && (
+                              <div className="p-3 rounded-xl bg-stone-50 border border-[#E5E2DA] flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                <input
+                                  type="datetime-local"
+                                  value={scheduleDateMap[post.id] || ''}
+                                  onChange={(e) =>
+                                    setScheduleDateMap({
+                                      ...scheduleDateMap,
+                                      [post.id]: e.target.value,
+                                    })
+                                  }
+                                  className="px-3 py-1.5 rounded-lg border border-[#E5E2DA] bg-white text-xs font-mono"
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  loading={activeActionId === `schedule-${post.id}`}
+                                  disabled={activeActionId !== null}
+                                  onClick={() => handleScheduleSubmit(post.id)}
+                                >
+                                  Confirm Schedule
+                                </Button>
+                              </div>
+                            )}
+
+                            {/* Manual link input */}
+                            <div className="pt-2 border-t border-[#E5E2DA] flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                              <input
+                                type="url"
+                                value={liveUrls[post.id] || ''}
+                                onChange={(e) =>
+                                  setLiveUrls({ ...liveUrls, [post.id]: e.target.value })
+                                }
+                                placeholder="Ya manually link paste karo (e.g. https://instagram.com/p/...)"
+                                className="flex-1 px-3 py-1.5 rounded-xl bg-[#FAF9F6] border border-[#E5E2DA] text-xs text-[#2B2A27] placeholder-[#A8A29E] focus:outline-none focus:border-emerald-600 focus:bg-white font-mono"
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                                loading={activeActionId === `publish-${post.id}`}
+                                disabled={activeActionId !== null}
+                                onClick={() => handlePublishUrlSubmit(post.id)}
+                              >
+                                Save Manual Link
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Status: scheduled */}
+                        {post.status === 'scheduled' && (
+                          <div className="w-full p-3.5 rounded-2xl bg-purple-50/70 border border-purple-200 flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <Clock className="w-4 h-4 text-purple-700" />
+                              <span className="text-xs font-semibold text-purple-900">
+                                Scheduled for: <strong>{formatDate(post.scheduled_at)}</strong> (Automatic background cron)
+                              </span>
+                            </div>
                             <Button
                               size="sm"
                               variant="primary"
-                              leftIcon={<CheckCircle2 className="w-3.5 h-3.5" />}
-                              loading={activeActionId === `publish-${post.id}`}
+                              loading={activeActionId === `publish-now-${post.id}`}
                               disabled={activeActionId !== null}
-                              onClick={() => handlePublishUrlSubmit(post.id)}
+                              onClick={() => handlePublishNow(post.id)}
                             >
-                              Publish Complete
+                              Abhi Post Karo
                             </Button>
+                          </div>
+                        )}
+
+                        {/* Status: posted */}
+                        {post.status === 'posted' && (
+                          <div className="w-full p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-900 space-y-2">
+                            <div className="flex items-center gap-1.5 font-bold">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              <span>Successfully Published Live!</span>
+                            </div>
+                            {post.publish_results && (
+                              <div className="pt-1 text-[11px] space-y-1 font-mono">
+                                {(typeof post.publish_results === 'string'
+                                  ? JSON.parse(post.publish_results)
+                                  : post.publish_results
+                                ).map((r, i) => (
+                                  <div key={i} className="flex items-center gap-2">
+                                    <span className="font-bold uppercase text-stone-700">{r.platform}:</span>
+                                    {r.success ? (
+                                      <a
+                                        href={r.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-emerald-700 underline truncate max-w-xs font-semibold"
+                                      >
+                                        {r.url || 'View Live Post'}
+                                      </a>
+                                    ) : (
+                                      <span className="text-amber-700">{r.user_message || r.error}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Status: failed */}
+                        {post.status === 'failed' && (
+                          <div className="w-full p-3 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold">⚠️ Publishing Failed</span>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                className="!bg-rose-600 hover:!bg-rose-700"
+                                loading={activeActionId === `publish-now-${post.id}`}
+                                disabled={activeActionId !== null}
+                                onClick={() => handlePublishNow(post.id)}
+                              >
+                                Retry Publish
+                              </Button>
+                            </div>
+                            {post.publish_results && (
+                              <div className="text-[11px] text-rose-700 font-mono">
+                                {typeof post.publish_results === 'string'
+                                  ? post.publish_results
+                                  : JSON.stringify(post.publish_results)}
+                              </div>
+                            )}
                           </div>
                         )}
 

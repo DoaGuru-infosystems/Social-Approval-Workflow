@@ -663,6 +663,24 @@ class TestPaddleOCRProcessing(unittest.TestCase):
                     [[[0, 0]], ("9989590477", 0.89)],
                 ]
             ],
+            # Call 8: Variant 8
+            [
+                [
+                    [[[0, 0]], ("8989590477", 0.95)],
+                ]
+            ],
+            # Call 9: Variant 9
+            [
+                [
+                    [[[0, 0]], ("8447096306", 0.94)],
+                ]
+            ],
+            # Call 10: Variant 10
+            [
+                [
+                    [[[0, 0]], ("Happy बाल दिवस", 0.92)],
+                ]
+            ],
         ]
 
         result = process_post.process_post(
@@ -673,7 +691,7 @@ class TestPaddleOCRProcessing(unittest.TestCase):
         extracted = result["ocr_text"]
         # 1. TOP 1 is primary:
         self.assertIn("दवस, इस उहें िसफ खुिशयाँ नही...", extracted)
-        self.assertIn("BAL. COPALCHILDREN'E NEURO cLINIC", extracted)
+        self.assertIn("BAL. COPALCHILDREN'E NEURO CLINIC", extracted)
         self.assertIn("8989590477", extracted)
         self.assertIn("8447096306", extracted)
 

@@ -107,5 +107,21 @@ router.put(
   postController.updatePublishUrl
 );
 
+// 10. POST /api/posts/:id/publish-now — Immediately publish approved post
+router.post(
+  '/:id/publish-now',
+  authMiddleware,
+  roleMiddleware(['smo', 'admin']),
+  postController.publishNow
+);
+
+// 11. POST /api/posts/:id/schedule — Schedule post for future publishing
+router.post(
+  '/:id/schedule',
+  authMiddleware,
+  roleMiddleware(['smo', 'admin']),
+  postController.schedulePost
+);
+
 module.exports = router;
 
