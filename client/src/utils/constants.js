@@ -1,7 +1,7 @@
 export const API_BASE_URL =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:5000/api';
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:5001/api';
 export const SERVER_URL =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SERVER_URL) || 'http://localhost:5000';
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SERVER_URL) || 'http://localhost:5001';
 
 export const GOOGLE_PROJECT_ID =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_PROJECT_ID) || 'socel-workflow';

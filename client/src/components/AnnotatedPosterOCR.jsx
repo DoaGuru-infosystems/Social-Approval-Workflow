@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   AlertTriangle,
   AlertOctagon,
   CheckCircle2,
+  AlertCircle,
   Eye,
   Info,
   ChevronDown,
@@ -33,6 +34,11 @@ const AnnotatedPosterOCR = ({
 }) => {
   const [selectedBoxId, setSelectedBoxId] = useState(null);
   const [showRawOcr, setShowRawOcr] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+  }, [imgSrc]);
 
   // If no structured boxes provided, generate default 6 zones if poster image exists
   const displayBoxes = Array.isArray(boxes) && boxes.length > 0 ? boxes : [];
@@ -118,14 +124,24 @@ const AnnotatedPosterOCR = ({
 
       {/* 2. Visual Poster Canvas with Overlaid Numbered Bounding Boxes */}
       {imgSrc && (
-        <div className="relative rounded-2xl overflow-hidden bg-stone-900 border border-[#E5E2DA] shadow-md group">
-          {/* Main Creative Poster */}
-          <img
-            src={imgSrc}
-            alt="Poster with PaddleOCR Annotations"
-            className="w-full h-auto block select-none pointer-events-none"
-            loading="lazy"
-          />
+        imageError ? (
+          <div className="rounded-2xl p-6 bg-stone-100 border border-[#E5E2DA] text-center flex flex-col items-center justify-center space-y-2 min-h-[180px]">
+            <AlertCircle className="w-8 h-8 text-amber-600" />
+            <p className="text-xs font-bold text-[#2B2A27]">Poster Image Load Nahi Ho Paya</p>
+            <p className="text-[11px] text-[#6B6A63] max-w-sm font-mono truncate">
+              {imgSrc}
+            </p>
+          </div>
+        ) : (
+          <div className="relative rounded-2xl overflow-hidden bg-stone-900 border border-[#E5E2DA] shadow-md group min-h-[160px]">
+            {/* Main Creative Poster */}
+            <img
+              src={imgSrc}
+              alt="Poster with PaddleOCR Annotations"
+              className="w-full h-auto block select-none pointer-events-none"
+              onError={() => setImageError(true)}
+              loading="lazy"
+            />
 
           {/* Overlaid Interactive Bounding Boxes */}
           {displayBoxes.map((box) => {
@@ -172,6 +188,7 @@ const AnnotatedPosterOCR = ({
             Click any numbered box to inspect details
           </div>
         </div>
+        )
       )}
 
       {/* 3. OCR Doubts Callout (Check Manually - Never Blame Poster) */}
