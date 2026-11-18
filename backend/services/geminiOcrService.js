@@ -89,7 +89,7 @@ const runGeminiOCR = async ({ imagePath, imageBase64, mimeType = 'image/jpeg' })
   const systemInstruction = `You are an expert Optical Character Recognition (OCR) engine specialized in bilingual (Hindi / English) Indian posters.
 Your task is to accurately transcribe all visible text in the image into structured JSON format.
 CRITICAL INSTRUCTION:
-1. Transcribe characters EXACTLY as they appear visually on the poster. Do NOT autocorrect any typos, misspellings, or unusual character sequences (e.g. if the poster prints 'Helthcare', 'Succesfully', 'Compeleted', 'annouce', or 'suppport', transcribe it faithfully character-by-character as printed; NEVER auto-fix or guess intended words).
+1. Transcribe characters EXACTLY as they appear visually on the poster. Do NOT autocorrect any typos, misspellings, or unusual character sequences (even if words are visibly misspelled or non-standard, transcribe them faithfully character-by-character as printed; NEVER auto-fix, autocorrect, normalize, or guess intended words).
 2. Preserve exact spellings, diacritics, and ligatures in both Latin and Devanagari scripts.
 
 Return STRICT JSON matching this schema:
