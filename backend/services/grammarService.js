@@ -4,7 +4,13 @@ const dotenv = require('dotenv');
 // Ensure env variables loaded
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
-const MODEL_NAME = 'gemini-flash-lite-latest';
+const CANDIDATE_MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
+];
 
 // In-memory cache for grammar checks: key = `${lang}:${text.slice(0, 200)}`
 const grammarCache = new Map();
@@ -51,7 +57,7 @@ const checkGrammar = async (text, language = 'auto', whitelist = [], brandName =
     return grammarCache.get(cacheKey);
   }
 
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_VISION_API_KEY;
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
 
   if (!apiKey) {
     console.warn('[GrammarService] GEMINI_API_KEY not found in environment.');
@@ -161,40 +167,48 @@ Return STRICT JSON as an array of objects matching this exact schema:
 If there are no issues at all, return []`;
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000);
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
-    let res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          response_mime_type: 'application/json',
-          temperature: 0.1,
-        },
-      }),
-      signal: controller.signal,
+    let res;
+    let lastErrorText = '';
+    const requestPayload = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        response_mime_type: 'application/json',
+        temperature: 0.1,
+      },
     });
 
-    if (res.status === 503 || res.status === 429) {
-      // Retry once after 2.5s on temporary Google high demand spike
-      await new Promise((r) => setTimeout(r, 2500));
-      res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            response_mime_type: 'application/json',
-            temperature: 0.1,
-          },
-        }),
-      });
-    }
+    for (const modelName of CANDIDATE_MODELS) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
 
-    clearTimeout(timeout);
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestPayload,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (res.status === 503 || res.status === 429) {
+          console.warn(`[GrammarService] Model ${modelName} returned ${res.status}. Falling back to next model...`);
+          continue;
+        }
+
+        if (res.ok) {
+          break;
+        } else {
+          lastErrorText = await res.text().catch(() => '');
+          if (res.status === 400 || res.status === 401 || res.status === 403 || /api_key|expired|billing|unauthorized/i.test(lastErrorText)) {
+            break;
+          }
+        }
+      } catch (fetchErr) {
+        clearTimeout(timeout);
+        lastErrorText = fetchErr.message;
+      }
+    }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');

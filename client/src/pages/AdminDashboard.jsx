@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Button from '../components/Button';
@@ -6,39 +6,34 @@ import postService from '../services/postService';
 import clientService from '../services/clientService';
 import adminService from '../services/adminService';
 import { SERVER_URL, GOOGLE_CLOUD_TEST_USER_URL } from '../utils/constants';
-import { formatDate, getStatusBadgeStyle } from '../utils/helpers';
+import { formatDate } from '../utils/helpers';
 import { useToast } from '../context/ToastContext';
 import {
   ShieldAlert,
   CheckCircle2,
   RefreshCw,
-  XCircle,
-  RotateCcw,
   Sparkles,
   Clock,
   AlertTriangle,
   Building2,
-  PlusCircle,
-  Settings2,
   Share2,
   ArrowLeft,
   Trash2,
   ExternalLink,
-  Tag,
   AlertOctagon,
   Phone,
   MapPin,
   Globe,
   Plus,
   X,
-  Activity,
   Server,
-  Key,
-  Radio,
   ChevronDown,
   ChevronUp,
-  AlertCircle,
-  Info,
+  XCircle,
+  RotateCcw,
+  PlusCircle,
+  Settings2,
+  Tag,
 } from 'lucide-react';
 
 const InstagramIcon = ({ className = 'w-5 h-5' }) => (
@@ -71,8 +66,8 @@ const AdminDashboard = () => {
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Navigation State
-  const [activeTab, setActiveTab] = useState('pipeline'); // 'pipeline' | 'clients'
+  // Navigation State derived directly from URL search params
+  const activeTab = searchParams.get('tab') === 'clients' ? 'clients' : 'pipeline';
 
   // Pipeline State
   const [allPosts, setAllPosts] = useState([]);
@@ -114,12 +109,6 @@ const AdminDashboard = () => {
   const [mandatoryInput, setMandatoryInput] = useState('');
   const [savingGuidelines, setSavingGuidelines] = useState(false);
 
-  // Social Connect Modal
-  const [showConnectModal, setShowConnectModal] = useState(false);
-  const [connectPlatform, setConnectPlatform] = useState('instagram');
-  const [connectAccountName, setConnectAccountName] = useState('');
-  const [connectingSocial, setConnectingSocial] = useState(false);
-
   // 4-Platform Social Connect System (Single Agency App)
   const [socialPlatforms, setSocialPlatforms] = useState([
     { platform: 'instagram', is_connected: false, profile_url: null },
@@ -142,7 +131,82 @@ const AdminDashboard = () => {
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [showHealthPanel, setShowHealthPanel] = useState(false);
 
-  const fetchSystemHealth = async () => {
+  const fetchClientSocialPlatforms = useCallback(async (clientId) => {
+    try {
+      const res = await clientService.getSocialPlatforms(clientId);
+      if (res.platforms) {
+        setSocialPlatforms(res.platforms);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch social platforms:', err);
+    }
+  }, []);
+
+  const handleSelectClient = useCallback(
+    async (clientId, updateUrl = true) => {
+      if (updateUrl) {
+        setSearchParams({ tab: 'clients', client: String(clientId) });
+      }
+      setLoadingClientDetail(true);
+      setGmbKeyError(null);
+      setManualFormPlatform(null);
+      setCardBanners({});
+      try {
+        const data = await clientService.getClientById(clientId);
+        setSelectedClient(data);
+
+        const c = data?.client || {};
+        setIdentityName(c.name || '');
+        setIdentityPrimaryPhone(c.primary_phone || '');
+        setIdentityAlternatePhone(c.alternate_phone || '');
+        setIdentityAddress(c.address || '');
+        setIdentityGmbUrl(c.gmb_url || '');
+
+        const g = data?.brand_guidelines || {};
+        setWhitelistTags(Array.isArray(g.whitelist_words) ? g.whitelist_words : []);
+        setBannedTags(Array.isArray(g.banned_words) ? g.banned_words : []);
+        setMandatoryInput((g.mandatory_phrases || []).join(', '));
+
+        if (data?.social_platforms && data.social_platforms.length > 0) {
+          setSocialPlatforms(data.social_platforms);
+        } else {
+          fetchClientSocialPlatforms(clientId);
+        }
+      } catch {
+        showToast('Unable to load client details.', 'error');
+      } finally {
+        setLoadingClientDetail(false);
+      }
+    },
+    [fetchClientSocialPlatforms, setSearchParams, showToast]
+  );
+
+  const fetchAdminPosts = useCallback(async () => {
+    setLoadingPosts(true);
+    try {
+      const data = await postService.getPosts({ all: 'true' });
+      const list = Array.isArray(data) ? data : data?.posts || [];
+      setAllPosts(list);
+    } catch {
+      showToast('Unable to load Admin post data.', 'error');
+    } finally {
+      setLoadingPosts(false);
+    }
+  }, [showToast]);
+
+  const fetchClients = useCallback(async () => {
+    setLoadingClients(true);
+    try {
+      const data = await clientService.getClients();
+      setClients(data?.clients || []);
+    } catch {
+      showToast('Unable to load client list.', 'error');
+    } finally {
+      setLoadingClients(false);
+    }
+  }, [showToast]);
+
+  const fetchSystemHealth = useCallback(async () => {
     setLoadingHealth(true);
     try {
       const data = await adminService.getSystemHealth();
@@ -155,106 +219,41 @@ const AdminDashboard = () => {
     } finally {
       setLoadingHealth(false);
     }
-  };
-
-  // Sync state with URL search params (Fixes Navbar Dashboard & Clients & Accounts buttons)
-  useEffect(() => {
-    fetchAdminPosts();
-    fetchClients();
-    fetchSystemHealth();
   }, []);
 
+  // Initial load
   useEffect(() => {
-    const tabParam = searchParams.get('tab');
-    if (tabParam === 'clients') {
-      setActiveTab('clients');
-      const clientParam = searchParams.get('client');
+    let isMounted = true;
+    const init = async () => {
+      if (!isMounted) return;
+      await Promise.allSettled([
+        fetchAdminPosts(),
+        fetchClients(),
+        fetchSystemHealth(),
+      ]);
+    };
+    init();
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchAdminPosts, fetchClients, fetchSystemHealth]);
+
+  // Sync client details selection with URL search param (?client=ID)
+  useEffect(() => {
+    const clientParam = searchParams.get('client');
+    const timer = setTimeout(() => {
       if (clientParam) {
         handleSelectClient(parseInt(clientParam, 10), false);
       } else {
         setSelectedClient(null);
       }
-    } else {
-      setActiveTab('pipeline');
-      setSelectedClient(null);
-    }
-  }, [searchParams]);
-
-  const fetchAdminPosts = async () => {
-    setLoadingPosts(true);
-    try {
-      const data = await postService.getPosts({ all: 'true' });
-      const list = Array.isArray(data) ? data : data?.posts || [];
-      setAllPosts(list);
-    } catch {
-      showToast('Unable to load Admin post data.', 'error');
-    } finally {
-      setLoadingPosts(false);
-    }
-  };
-
-  const fetchClients = async () => {
-    setLoadingClients(true);
-    try {
-      const data = await clientService.getClients();
-      setClients(data?.clients || []);
-    } catch {
-      showToast('Unable to load client list.', 'error');
-    } finally {
-      setLoadingClients(false);
-    }
-  };
-
-  const handleSelectClient = async (clientId, updateUrl = true) => {
-    if (updateUrl) {
-      setSearchParams({ tab: 'clients', client: String(clientId) });
-    }
-    setLoadingClientDetail(true);
-    setGmbKeyError(null);
-    setManualFormPlatform(null);
-    setCardBanners({});
-    try {
-      const data = await clientService.getClientById(clientId);
-      setSelectedClient(data);
-
-      const c = data?.client || {};
-      setIdentityName(c.name || '');
-      setIdentityPrimaryPhone(c.primary_phone || '');
-      setIdentityAlternatePhone(c.alternate_phone || '');
-      setIdentityAddress(c.address || '');
-      setIdentityGmbUrl(c.gmb_url || '');
-
-      const g = data?.brand_guidelines || {};
-      setWhitelistTags(Array.isArray(g.whitelist_words) ? g.whitelist_words : []);
-      setBannedTags(Array.isArray(g.banned_words) ? g.banned_words : []);
-      setMandatoryInput((g.mandatory_phrases || []).join(', '));
-
-      if (data?.social_platforms && data.social_platforms.length > 0) {
-        setSocialPlatforms(data.social_platforms);
-      } else {
-        fetchClientSocialPlatforms(clientId);
-      }
-    } catch {
-      showToast('Unable to load client details.', 'error');
-    } finally {
-      setLoadingClientDetail(false);
-    }
-  };
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [searchParams, handleSelectClient]);
 
   const handleBackToClients = () => {
     setSelectedClient(null);
     setSearchParams({ tab: 'clients' });
-  };
-
-  const fetchClientSocialPlatforms = async (clientId) => {
-    try {
-      const res = await clientService.getSocialPlatforms(clientId);
-      if (res.platforms) {
-        setSocialPlatforms(res.platforms);
-      }
-    } catch (err) {
-      console.warn('Failed to fetch social platforms:', err);
-    }
   };
 
   const handleOAuthConnect = async (platform) => {
@@ -601,7 +600,6 @@ const AdminDashboard = () => {
           <div className="flex items-center gap-2 bg-stone-100 p-1 rounded-xl border border-[#E5E2DA]">
             <button
               onClick={() => {
-                setActiveTab('pipeline');
                 setSelectedClient(null);
                 setSearchParams({});
               }}
@@ -615,7 +613,6 @@ const AdminDashboard = () => {
             </button>
             <button
               onClick={() => {
-                setActiveTab('clients');
                 setSelectedClient(null);
                 setSearchParams({ tab: 'clients' });
               }}
@@ -891,7 +888,6 @@ const AdminDashboard = () => {
                   {pendingAdminPosts.map((post) => {
                     const rawImg = post.image_path || post.latest_revision?.image_path;
                     const imgSrc = rawImg ? `${SERVER_URL}/${rawImg}` : null;
-                    const aiReport = post.latest_ai_check;
                     const isActionActive = activeActionId !== null;
 
                     return (
@@ -1033,7 +1029,12 @@ const AdminDashboard = () => {
         {/* TAB 2: CLIENT GOVERNANCE & BRAND GUIDELINES */}
         {activeTab === 'clients' && (
           <div>
-            {!selectedClient ? (
+            {loadingClientDetail ? (
+              <div className="p-12 text-center bg-white rounded-3xl border border-[#E5E2DA] shadow-xs">
+                <RefreshCw className="w-8 h-8 text-emerald-600 animate-spin mx-auto mb-2" />
+                <p className="text-sm font-semibold text-[#2B2A27]">Loading client profile &amp; guidelines...</p>
+              </div>
+            ) : !selectedClient ? (
               /* Client Master List View */
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -2006,76 +2007,6 @@ const AdminDashboard = () => {
                     loading={creatingClient}
                   >
                     Create Client
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL: CONNECT SOCIAL ACCOUNT */}
-        {showConnectModal && selectedClient && (
-          <div className="fixed inset-0 z-50 bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-[#FFFFFF] border border-[#E5E2DA] rounded-3xl max-w-md w-full p-6 space-y-4 shadow-xl">
-              <div className="flex items-center justify-between border-b border-[#E5E2DA] pb-3">
-                <h3 className="font-bold text-[#2B2A27] text-base">
-                  Connect Social Account for {selectedClient.client?.name}
-                </h3>
-                <button
-                  onClick={() => setShowConnectModal(false)}
-                  className="text-[#6B6A63] hover:text-[#2B2A27] text-sm cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <form onSubmit={handleConnectSocialSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-2">
-                    Platform
-                  </label>
-                  <select
-                    value={connectPlatform}
-                    onChange={(e) => setConnectPlatform(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white"
-                  >
-                    <option value="instagram">Instagram</option>
-                    <option value="facebook">Facebook</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-[#2B2A27] uppercase tracking-wider mb-2">
-                    Account Handle / Page Name
-                  </label>
-                  <input
-                    type="text"
-                    value={connectAccountName}
-                    onChange={(e) => setConnectAccountName(e.target.value)}
-                    placeholder="e.g. @apex_fitness_official"
-                    required
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E2DA] bg-[#FAF9F6] text-sm text-[#2B2A27] focus:outline-none focus:border-emerald-600 focus:bg-white"
-                  />
-                  <p className="text-[11px] text-[#6B6A63] mt-1.5">
-                    The Meta Graph API access token will be encrypted with AES-256 before it is stored in the database.
-                  </p>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowConnectModal(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    size="sm"
-                    loading={connectingSocial}
-                  >
-                    Link Account
                   </Button>
                 </div>
               </form>

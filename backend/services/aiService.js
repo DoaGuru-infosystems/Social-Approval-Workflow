@@ -6,7 +6,7 @@ const garbageFilterService = require('./garbageFilterService');
 const brandRulesService = require('./brandRulesService');
 const textCorrectionService = require('./textCorrectionService');
 const brandIdentityVerificationService = require('./brandIdentityVerificationService');
-const googleVisionService = require('./googleVisionService');
+const geminiOcrService = require('./geminiOcrService');
 const grammarService = require('./grammarService');
 const fuzzball = require('fuzzball');
 
@@ -616,10 +616,11 @@ const buildAnnotatedPosterBoxes = ({
     .filter(Boolean)
     .map((p) => String(p).replace(/\D/g, ''));
 
-  // Use real PaddleOCR boxes if available; group into 6-10 logical regions
+  // Use real OCR boxes if available. If boxes are <= 25, keep individual boxes for pinpoint precision;
+  // only group if there are too many fragmented micro-boxes (>25).
   let sourceBoxes = [];
   if (Array.isArray(ocrBoxes) && ocrBoxes.length > 0) {
-    sourceBoxes = groupOcrBoxes(ocrBoxes, 8);
+    sourceBoxes = ocrBoxes.length > 25 ? groupOcrBoxes(ocrBoxes, 15) : ocrBoxes;
   } else if (normOcr) {
     const lines = normOcr.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const lineCount = Math.max(1, Math.min(lines.length, 8));
@@ -800,16 +801,22 @@ const buildAnnotatedPosterBoxes = ({
       }
     }
 
-    // Check if box text contains OCR noise / broken fragments (e.g. './६.', '!८', 'b?')
+    // Check if box text contains OCR noise / broken fragments (e.g. './६.', '!८')
     let boxNoiseReason = null;
     const boxWordTokens = text.split(/\s+/).filter(Boolean);
     for (const tok of boxWordTokens) {
       const analysis = garbageFilterService.analyzeToken(tok, whitelist);
-      if (analysis.isGarbage && !/^\d+$/.test(tok)) {
+      if (
+        analysis.isGarbage &&
+        !/^\d+$/.test(tok) &&
+        !/^\d+[xX]\d+$/i.test(tok) &&
+        tok !== '|' &&
+        tok !== '-'
+      ) {
         boxNoiseReason = `OCR Noise detected in token '${tok}' (${analysis.reason})`;
         break;
       }
-      if (/[./!?'#@%&*]{2,}/.test(tok) || /^[^\w\s\u0900-\u097f]+$/.test(tok)) {
+      if (/[./!?'#@%&*]{3,}/.test(tok)) {
         boxNoiseReason = `Unusual OCR symbol artifact '${tok}'`;
         break;
       }
@@ -846,6 +853,20 @@ const buildAnnotatedPosterBoxes = ({
     let statusLabel = 'GREEN = OK';
     let reason = `Verified OK (Confidence ${confPercent}%).`;
 
+    // Check for confirmed spelling issue in this clear box
+    const boxSpellError = (spellingIssues || []).find((issue) => {
+      if (!issue || !issue.word) return false;
+      const cleanIssueWord = String(issue.word).toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+      if (!cleanIssueWord) return false;
+      const cleanBoxText = text.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+      return cleanBoxText.includes(cleanIssueWord);
+    });
+
+    // Check if the misspelled word itself is explicitly whitelisted
+    const isSpellWordWhitelisted = boxSpellError
+      ? brandRulesService.fuzzyMatchWhitelist(boxSpellError.word, whitelist, 88)
+      : false;
+
     if (matchedBanned) {
       status = 'red';
       statusLabel = 'RED = Real Error';
@@ -855,6 +876,11 @@ const buildAnnotatedPosterBoxes = ({
       status = 'red';
       statusLabel = 'RED = Real Error';
       reason = brandErrorReason;
+    } else if (boxSpellError && !isSpellWordWhitelisted) {
+      // Confirmed spelling error on poster is ALWAYS a strict RED FLAG (Real Error)
+      status = 'red';
+      statusLabel = 'RED = Real Error';
+      reason = `Spelling error detected on poster: "${boxSpellError.word}"${boxSpellError.suggestion ? ` (Did you mean: "${boxSpellError.suggestion}"?)` : ''}`;
     } else if (hasPhoneMismatch) {
       // Phone mismatch: YELLOW = Manual Check (do not quietly auto-correct)
       status = 'yellow';
@@ -876,16 +902,6 @@ const buildAnnotatedPosterBoxes = ({
       status = 'green';
       statusLabel = 'GREEN = OK';
       reason = 'Verified OK against client whitelist/brand guidelines.';
-    } else {
-      // Check for confirmed spelling issue in this clear box
-      const boxSpellError = (spellingIssues || []).find((issue) =>
-        issue && issue.word && text.toLowerCase().includes(String(issue.word).toLowerCase())
-      );
-      if (boxSpellError && confPercent >= 80) {
-        status = 'red';
-        statusLabel = 'RED = Real Error';
-        reason = `Spelling error detected: "${boxSpellError.word}"`;
-      }
     }
 
     annotated.push({
@@ -970,42 +986,42 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     });
   };
 
-  const tryGoogleVision = async () => {
-    return await googleVisionService.runGoogleVisionOCR({
+  const tryGeminiOCR = async () => {
+    return await geminiOcrService.runGeminiOCR({
       imagePath: resolvedImagePath,
     });
   };
 
   try {
-    // 1. PRIMARY (always first for BOTH Hindi & English): AI OCR (Google Vision / Gemini Multimodal)
-    const aiResult = await tryGoogleVision();
+    // 1. PRIMARY: Gemini Multimodal AI OCR (gemini-flash-latest)
+    const aiResult = await tryGeminiOCR();
     const extractedText = (aiResult?.ocr_text || aiResult?.text || '').trim();
     if (!extractedText) {
-      throw new Error('AI returned empty text');
+      throw new Error('Gemini AI returned empty text');
     }
     remoteResult = aiResult;
     ocrEngineUsed = 'gemini_ai';
     fallbackUsed = false;
   } catch (aiError) {
-    // 2. FALLBACK (only if AI fails, errors, or returns empty text): A2 Remote PaddleOCR
-    console.log('AI OCR failed, falling back to PaddleOCR:', aiError.message);
+    // 2. FALLBACK (only if Gemini AI fails, errors, or returns empty text): A2 Remote PaddleOCR
+    console.log('[OCR Pipeline] Gemini AI OCR failed, falling back to A2 PaddleOCR:', aiError.message);
     fallbackUsed = true;
     ocrEngineUsed = 'a2_paddleocr';
     keyError = {
-      service: 'google_vision',
-      code: 'VISION_KEY_EXPIRED',
+      service: 'gemini_ai',
+      code: 'GEMINI_KEY_EXPIRED',
       user_message:
-        'AI se check nahi hua, A2 se check kiya gaya (Warning: Hindi matra aur OCR text ki accuracy kam ho sakti hai, kripya poster manually verify karein).',
+        'AI se check nahi hua, A2 PaddleOCR se check kiya gaya (Warning: Hindi matra aur OCR text ki accuracy kam ho sakti hai, kripya poster manually verify karein).',
     };
     try {
       remoteResult = await tryA2PaddleOCR();
     } catch (a2Err) {
-      console.error('[OCR Pipeline] Both AI OCR and A2 PaddleOCR failed:', a2Err.message);
+      console.error('[OCR Pipeline] Both Gemini AI OCR and A2 PaddleOCR failed:', a2Err.message);
       return {
         image_status: 'failed',
-        image_error: `AI OCR failed (${aiError.message}) and A2 PaddleOCR fallback failed (${a2Err.message})`,
+        image_error: `Gemini AI OCR failed (${aiError.message}) and A2 PaddleOCR fallback failed (${a2Err.message})`,
         passed: false,
-        summary: `Image OCR failed: Both AI and A2 fallback unreachable`,
+        summary: `Image OCR failed: Both Gemini AI and A2 fallback unreachable`,
         ocr_extracted_text: '',
         ocr_confidence: 0,
         ocr_confidence_avg: 0,
@@ -1038,18 +1054,19 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
 
     for (const line of rawLines) {
       const tokens = line.split(/\s+/).filter(Boolean);
-      let lineHasGarbage = false;
+      const cleanTokens = [];
 
       for (const token of tokens) {
         const analysis = garbageFilterService.analyzeToken(token, guidelines.whitelist);
         if (analysis.isGarbage) {
           noiseTokens.push({ token, reason: analysis.reason });
-          lineHasGarbage = true;
+        } else {
+          cleanTokens.push(token);
         }
       }
 
-      if (!lineHasGarbage) {
-        validLines.push(line);
+      if (cleanTokens.length > 0) {
+        validLines.push(cleanTokens.join(' '));
       }
     }
 
@@ -1231,43 +1248,31 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     brandIdentityCheck.address_warning = addrCheck.warning;
   }
 
+  // Real Spelling Issues Filter:
+  // Brand candidates and whitelisted words are excused.
+  // CRITICAL: Poster spelling mistakes are NEVER excused by caption words.
+  // Even if the caption spells a word correctly, a typo on the poster is a 100% RED FLAG (Real Error).
+  const realSpellingIssues = spellingIssues.filter((issue) => {
+    if (ocrConfidenceAverage < 0.60) return false;
+    const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
+      issue.word,
+      guidelines.whitelist,
+      88
+    );
+    if (isFuzzyWhitelisted) return false;
+    return true;
+  });
+
   // Generate structured annotated poster zones matching visual OCR boxes
   const annotatedBoxes = buildAnnotatedPosterBoxes({
     rawOcrText,
     ocrBoxes: remoteResult.ocr_boxes || [],
     guidelines,
     caption,
-    spellingIssues,
+    spellingIssues: realSpellingIssues,
   });
 
   const ocrDoubts = annotatedBoxes.filter((b) => b.status === 'yellow');
-
-  // OCR Doubt Words: If overall OCR confidence is low (< 80%), or word fuzzy matches whitelist/guidelines,
-  // or word matches caption (>80% similarity indicating OCR ligature transcription artifact),
-  // classify as OCR Doubt, NOT a confirmed poster spelling error
-  const realSpellingIssues = spellingIssues.filter((issue) => {
-    if (ocrConfidenceAverage < 0.80) return false;
-    const isFuzzyWhitelisted = brandRulesService.fuzzyMatchWhitelist(
-      issue.word,
-      guidelines.whitelist,
-      70
-    );
-    if (isFuzzyWhitelisted) return false;
-
-    // Caption cross-verification: If caption contains the intended word (>=80% similarity),
-    // it confirms OCR transcribed an imperfect ligature artifact (e.g. 'ाइए' vs 'आइए')
-    if (caption) {
-      const captionTokens = caption.split(/[\s,।!?:;()\n\r]+/).map((t) => t.trim().toLowerCase()).filter((t) => t.length >= 2);
-      const cleanIssueWord = (issue.word || '').trim().toLowerCase();
-      for (const ct of captionTokens) {
-        if (fuzzball.ratio(cleanIssueWord, ct) >= 80) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  });
 
   // Filter phone warnings to only validate true 10-digit phone candidate strings
   const validPhoneWarnings = (brandIdentityCheck.phone_verification || []).filter(
@@ -1368,8 +1373,14 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     new Set([...(textResult?.banned_words_found || []), ...(imageResult?.banned_words_found || [])])
   );
 
-  // Missing mandatory phrases (from text check against caption)
-  const missingMandatoryPhrases = textResult?.missing_mandatory_phrases || [];
+  // Missing mandatory phrases: Satisfied if present in either Caption OR Poster OCR text
+  let missingMandatoryPhrases = textResult?.missing_mandatory_phrases || [];
+  if (missingMandatoryPhrases.length > 0 && imageResult?.ocr_extracted_text) {
+    const ocrLower = (imageResult.ocr_extracted_text || '').toLowerCase();
+    missingMandatoryPhrases = missingMandatoryPhrases.filter((phrase) => {
+      return !ocrLower.includes(String(phrase || '').trim().toLowerCase());
+    });
+  }
 
   // Merge phone verification records
   const textPhones = textResult?.brand_identity_check?.phone_verification || [];

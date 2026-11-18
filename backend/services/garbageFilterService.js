@@ -7,7 +7,7 @@ const VALID_SHORT_WORDS = new Set([
   // English 1-2 letter words & common abbreviations
   'a', 'i', 'to', 'in', 'on', 'at', 'is', 'it', 'as', 'or', 'by', 'my', 'we',
   'he', 'do', 'go', 'no', 'so', 'up', 'am', 'an', 'if', 'me', 'us', 'be',
-  'dr', 'mr', 'ms', 'tv', 'ok', 'hi',
+  'dr', 'mr', 'ms', 'tv', 'ok', 'hi', 'of', 'pvt', 'ltd', 'co', 'st', 'rd', 'nd', 'th',
   // Hindi common 1-2 letter words
   'का', 'की', 'के', 'को', 'से', 'में', 'पर', 'है', 'हो', 'दो', 'लो', 'दी',
   'इस', 'उस', 'यह', 'वह', 'जो', 'भी', 'ना', 'था', 'थी', 'थे', 'कल', 'अब',
@@ -71,12 +71,13 @@ const analyzeToken = (token, whitelist = null) => {
     };
   }
 
-  // B) INVALID SYMBOL PLACEMENT: Contains ! or ? embedded with letters (e.g. "Joh!", "P1he!", "1?")
-  // Or strange non-word symbols mixed inside alphanumeric text
-  if (/[!?]/.test(raw)) {
+  // B) INVALID SYMBOL PLACEMENT: Trailing punctuation like "Compeleted!" or "Offer?" is normal.
+  // Only flag if ! or ? is embedded inside letters (e.g. "Com!pleted" or "1?")
+  const innerToken = raw.replace(/^[!?]+|[!?]+$/g, '');
+  if (/[!?]/.test(innerToken)) {
     return {
       isGarbage: true,
-      reason: 'invalid_symbol_placement (unexpected ! or ? in token)',
+      reason: 'invalid_symbol_placement (unexpected ! or ? inside token)',
     };
   }
 
@@ -101,6 +102,12 @@ const analyzeToken = (token, whitelist = null) => {
     const hasVowel = VOWEL_REGEX.test(lettersOnly);
 
     if (!hasVowel) {
+      // Common abbreviations bypass (e.g. Pvt, Ltd)
+      const cleanLower = lettersOnly.toLowerCase();
+      if (VALID_SHORT_WORDS.has(cleanLower) || cleanLower === 'pvt' || cleanLower === 'ltd') {
+        return { isGarbage: false, reason: null };
+      }
+
       // If 3 or more letters and NO vowel at all (e.g. "hbb", "hhh", "dhlh", "uhss")
       if (lettersOnly.length >= 3) {
         return {
@@ -125,12 +132,11 @@ const analyzeToken = (token, whitelist = null) => {
       };
     }
 
-    // 4+ consecutive consonants even if word has a vowel somewhere (e.g. "sPhl", "bhhgh")
-    if (/[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]{4,}/.test(lettersOnly)) {
-      // Unless in whitelist
+    // 5+ consecutive consonants (allows words like 'helthcare' with 4 consonants without treating as noise)
+    if (/[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]{5,}/.test(lettersOnly)) {
       return {
         isGarbage: true,
-        reason: 'consecutive_consonant_cluster (4+ consonants in sequence)',
+        reason: 'consecutive_consonant_cluster (5+ consonants in sequence)',
       };
     }
   }

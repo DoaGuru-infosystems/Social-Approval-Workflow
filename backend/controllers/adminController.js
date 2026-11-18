@@ -31,8 +31,8 @@ exports.getSystemHealth = async (req, res) => {
       return s === '' || s.startsWith('DUMMY') || s.includes('REPLACE_LATER');
     };
 
-    // 1. GEMINI / GOOGLE VISION AI
-    const geminiKey = env.GEMINI_API_KEY || env.GOOGLE_VISION_API_KEY || '';
+    // 1. Google Gemini Multimodal AI
+    const geminiKey = env.GEMINI_API_KEY || '';
     if (!geminiKey || geminiKey.trim() === '') {
       services.push({
         id: 'gemini_ai',
