@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { LogOut, Layers, Building2, LayoutDashboard } from 'lucide-react';
@@ -8,6 +8,7 @@ const Navbar = () => {
   const { user, role, logout } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = () => {
     logout();
@@ -26,6 +27,13 @@ const Navbar = () => {
         return 'bg-emerald-50 text-emerald-800 border-emerald-200';
     }
   };
+
+  const isClientsActive = location.pathname === '/admin' && location.search.includes('tab=clients');
+  const isDashboardActive = (
+    (location.pathname === '/admin' && !location.search.includes('tab=clients')) ||
+    (location.pathname === '/manager') ||
+    (location.pathname === '/smo')
+  );
 
   return (
     <header className="sticky top-0 z-40 bg-[#FFFFFF]/90 backdrop-blur-md border-b border-[#E5E2DA] text-[#2B2A27]">
@@ -48,17 +56,25 @@ const Navbar = () => {
           <div className="hidden md:flex items-center gap-2">
             <Link
               to={role === 'admin' ? '/admin' : role === 'manager' ? '/manager' : '/smo'}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-stone-600 hover:text-[#2B2A27] hover:bg-stone-50 border border-transparent hover:border-[#E5E2DA] transition-all flex items-center gap-1.5"
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                isDashboardActive
+                  ? 'bg-stone-100 text-[#2B2A27] border border-[#E5E2DA] shadow-2xs font-bold'
+                  : 'text-stone-600 hover:text-[#2B2A27] hover:bg-stone-50 border border-transparent'
+              }`}
             >
-              <LayoutDashboard className="w-3.5 h-3.5 text-stone-500" />
+              <LayoutDashboard className={`w-3.5 h-3.5 ${isDashboardActive ? 'text-emerald-700' : 'text-stone-500'}`} />
               <span>Dashboard</span>
             </Link>
 
             <Link
               to="/admin?tab=clients"
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-stone-600 hover:text-[#2B2A27] hover:bg-stone-50 border border-transparent hover:border-[#E5E2DA] transition-all flex items-center gap-1.5"
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                isClientsActive
+                  ? 'bg-emerald-50 text-emerald-900 border border-emerald-200 shadow-2xs font-bold'
+                  : 'text-stone-600 hover:text-[#2B2A27] hover:bg-stone-50 border border-transparent'
+              }`}
             >
-              <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+              <Building2 className={`w-3.5 h-3.5 ${isClientsActive ? 'text-emerald-600' : 'text-stone-500'}`} />
               <span>Clients &amp; Accounts</span>
             </Link>
           </div>

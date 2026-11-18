@@ -86,6 +86,11 @@ export const postService = {
     const response = await api.post(`/posts/${id}/schedule`, data);
     return response.data;
   },
+
+  deletePost: async (id) => {
+    const response = await api.delete(`/posts/${id}`);
+    return response.data;
+  },
 };
 
 export default postService;

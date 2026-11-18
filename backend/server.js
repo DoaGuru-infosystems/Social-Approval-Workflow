@@ -10,6 +10,7 @@ const pool = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const postRoutes = require('./routes/postRoutes');
 const clientRoutes = require('./routes/clientRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const clientController = require('./controllers/clientController');
 
 const app = express();
@@ -56,6 +57,7 @@ app.get('/api/health', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/clients', clientRoutes);
+app.use('/api/admin', adminRoutes);
 app.get('/api/social/callback', clientController.handleSocialCallback);
 
 // Root route

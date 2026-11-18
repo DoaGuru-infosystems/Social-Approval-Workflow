@@ -123,5 +123,13 @@ router.post(
   postController.schedulePost
 );
 
+// 12. DELETE /api/posts/:id — Delete post, cascade AI results, and remove disk images
+router.delete(
+  '/:id',
+  authMiddleware,
+  roleMiddleware(['admin', 'manager', 'smo']),
+  postController.deletePost
+);
+
 module.exports = router;
 

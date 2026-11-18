@@ -31,6 +31,8 @@ const AnnotatedPosterOCR = ({
   ocrConfidence = 0,
   rawOcrText = '',
   realErrors = [],
+  ocrEngine = 'a2_paddleocr',
+  fallbackUsed = false,
 }) => {
   const [selectedBoxId, setSelectedBoxId] = useState(null);
   const [showRawOcr, setShowRawOcr] = useState(false);
@@ -93,11 +95,18 @@ const AnnotatedPosterOCR = ({
     <div className="space-y-4">
       {/* 1. Header Summary Stats */}
       <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-white border border-[#E5E2DA] shadow-xs">
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`w-2.5 h-2.5 rounded-full ${ocrEngine === 'gemini_ai' ? 'bg-purple-500 animate-pulse' : 'bg-amber-500 animate-pulse'}`} />
           <span className="text-xs font-bold text-[#2B2A27] flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            PaddleOCR Visual Quality Inspection
+            <Sparkles className={`w-3.5 h-3.5 ${ocrEngine === 'gemini_ai' ? 'text-purple-600' : 'text-amber-600'}`} />
+            {ocrEngine === 'gemini_ai' ? 'Gemini AI Visual Quality Inspection' : 'PaddleOCR Visual Quality Inspection'}
+          </span>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md font-mono ${
+            ocrEngine === 'gemini_ai'
+              ? 'bg-purple-50 text-purple-700 border border-purple-200'
+              : 'bg-amber-50 text-amber-800 border border-amber-200'
+          }`}>
+            {ocrEngine === 'gemini_ai' ? '✨ Gemini AI' : fallbackUsed ? '⚡ A2 PaddleOCR (Fallback)' : '⚡ A2 PaddleOCR'}
           </span>
         </div>
 

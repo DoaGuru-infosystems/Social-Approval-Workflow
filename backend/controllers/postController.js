@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const pool = require('../config/db');
 const aiService = require('../services/aiService');
 
@@ -1374,6 +1376,67 @@ const checkText = async (req, res) => {
   }
 };
 
+/**
+ * DELETE /api/posts/:id
+ * Delete post, cascade AI results/revisions, and remove disk images
+ */
+const deletePost = async (req, res) => {
+  try {
+    const postId = req.params.id;
+
+    // 1. Fetch post
+    const [posts] = await pool.query('SELECT * FROM posts WHERE id = ?', [postId]);
+    if (posts.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found.',
+      });
+    }
+
+    const post = posts[0];
+
+    // 2. Collect image paths to delete
+    const [revisions] = await pool.query(
+      'SELECT image_path FROM post_revisions WHERE post_id = ?',
+      [postId]
+    );
+
+    const filesToDelete = new Set();
+    if (post.image_path) filesToDelete.add(post.image_path);
+    revisions.forEach((r) => {
+      if (r.image_path) filesToDelete.add(r.image_path);
+    });
+
+    // 3. Delete post from DB (Foreign keys cascade to ai_check_results, post_revisions, post_approvals)
+    await pool.query('DELETE FROM posts WHERE id = ?', [postId]);
+
+    // 4. Safely delete image files from backend/uploads
+    filesToDelete.forEach((relPath) => {
+      try {
+        const fullPath = path.resolve(__dirname, '..', relPath.replace(/^[/\\]+/, ''));
+        if (fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+        }
+      } catch (fileErr) {
+        console.warn(`Failed to unlink file ${relPath}:`, fileErr.message);
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Post #${postId} deleted successfully.`,
+      deleted_post_id: Number(postId),
+    });
+  } catch (error) {
+    console.error('Error deleting post:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete post.',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createPost,
   revisePost,
@@ -1389,4 +1452,5 @@ module.exports = {
   getAiStatus,
   checkImage,
   checkText,
+  deletePost,
 };

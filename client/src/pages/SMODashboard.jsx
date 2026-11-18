@@ -31,6 +31,7 @@ import {
   Calendar,
   SlidersHorizontal,
   ChevronRight,
+  Trash2,
 } from 'lucide-react';
 import ImageCheckSkeleton from '../components/ImageCheckSkeleton';
 import AnnotatedPosterOCR from '../components/AnnotatedPosterOCR';
@@ -452,6 +453,31 @@ const SMODashboard = () => {
       fetchPosts();
     } catch (err) {
       showToast(err.response?.data?.message || 'Scheduling failed.', 'error');
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const handleDeletePost = async (postId) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete Post #${postId}? This will remove the post, all AI and OCR scan results, and its image file.`
+    );
+    if (!confirmed) return;
+
+    setActiveActionId(`delete-${postId}`);
+    try {
+      await postService.deletePost(postId);
+      showToast(`Post #${postId} deleted successfully.`, 'success');
+
+      // Remove from active state
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+
+      // Close drawer if this post is currently being inspected
+      if (inspectingPost && inspectingPost.id === postId) {
+        setInspectingPost(null);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to delete post.', 'error');
     } finally {
       setActiveActionId(null);
     }
@@ -1166,6 +1192,18 @@ const SMODashboard = () => {
                         >
                           {post.status?.replace(/_/g, ' ')}
                         </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePost(post.id);
+                          }}
+                          disabled={activeActionId !== null}
+                          title={`Delete Post #${post.id}`}
+                          className="p-1 rounded-lg hover:bg-rose-50 text-stone-400 hover:text-rose-600 transition-colors cursor-pointer ml-0.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1357,6 +1395,8 @@ const SMODashboard = () => {
                         realErrors={(inspectingPost.latest_ai_check?.spelling_issues || []).filter(
                           (s) => s.source === 'image'
                         )}
+                        ocrEngine={inspectingPost.latest_ai_check?.ocr_engine}
+                        fallbackUsed={inspectingPost.latest_ai_check?.fallback_used}
                       />
                     )}
                   </div>
@@ -1562,7 +1602,18 @@ const SMODashboard = () => {
               </div>
 
               {/* Drawer Sticky Footer */}
-              <div className="p-4 border-t border-[#E5E2DA] bg-white flex items-center justify-end gap-3 shrink-0">
+              <div className="p-4 border-t border-[#E5E2DA] bg-white flex items-center justify-between gap-3 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="!text-rose-600 !border-rose-200 hover:!bg-rose-50 font-semibold"
+                  leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                  loading={activeActionId === `delete-${inspectingPost.id}`}
+                  disabled={activeActionId !== null}
+                  onClick={() => handleDeletePost(inspectingPost.id)}
+                >
+                  Delete Post
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

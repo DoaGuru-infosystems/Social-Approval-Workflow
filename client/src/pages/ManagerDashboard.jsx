@@ -22,6 +22,7 @@ import {
   AlertOctagon,
   Phone,
   MapPin,
+  Trash2,
 } from 'lucide-react';
 
 const ManagerDashboard = () => {
@@ -68,6 +69,20 @@ const ManagerDashboard = () => {
     } catch (err) {
       const msg = err.response?.data?.message || 'Unable to process the review. Please try again.';
       showToast(msg, 'error');
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const handleDeletePost = async (postId) => {
+    if (!window.confirm(`Permanently delete Post #${postId}? This will remove its image and review records.`)) return;
+    setActiveActionId(`delete-${postId}`);
+    try {
+      await postService.deletePost(postId);
+      showToast(`Post #${postId} deleted successfully.`, 'success');
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to delete post.', 'error');
     } finally {
       setActiveActionId(null);
     }
@@ -164,10 +179,21 @@ const ManagerDashboard = () => {
                             SMO: {post.smo_name || post.creator_name || 'SMO'}
                           </span>
                         </div>
-                        <span className="text-xs text-[#6B6A63] flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-[#A8A29E]" />
-                          {formatDate(post.created_at)}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-[#6B6A63] flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-[#A8A29E]" />
+                            {formatDate(post.created_at)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePost(post.id)}
+                            disabled={activeActionId !== null}
+                            title={`Delete Post #${post.id}`}
+                            className="p-1 rounded-lg hover:bg-rose-50 text-stone-400 hover:text-rose-600 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       {/* Client Badge & Title */}
@@ -374,6 +400,8 @@ const ManagerDashboard = () => {
                                 ocrConfidence={aiReport.ocr_confidence}
                                 rawOcrText={ocrText}
                                 realErrors={spellingIssues.filter((s) => s.source === 'image')}
+                                ocrEngine={aiReport.ocr_engine}
+                                fallbackUsed={aiReport.fallback_used}
                               />
                             </div>
                           )}
