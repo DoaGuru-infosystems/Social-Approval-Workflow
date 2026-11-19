@@ -44,15 +44,20 @@ const decrypt = (cipherText) => {
   const [ivHex, tagHex, encryptedHex] = cipherText.split(':');
   if (!ivHex || !tagHex || !encryptedHex) return '';
 
-  const key = getKey();
-  const iv = Buffer.from(ivHex, 'hex');
-  const tag = Buffer.from(tagHex, 'hex');
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(tag);
+  try {
+    const key = getKey();
+    const iv = Buffer.from(ivHex, 'hex');
+    const tag = Buffer.from(tagHex, 'hex');
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(tag);
 
-  let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
+    let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (err) {
+    console.warn('[Encryption] Decryption failed:', err.message);
+    return '';
+  }
 };
 
 module.exports = {

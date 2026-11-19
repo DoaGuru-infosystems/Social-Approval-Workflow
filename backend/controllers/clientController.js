@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 const pool = require('../config/db');
 const { encrypt } = require('../utils/encryption');
 const gmbService = require('../services/gmbService');
@@ -177,7 +179,9 @@ const getClientById = async (req, res) => {
         whitelist_words: typeof g.whitelist_words === 'string' ? JSON.parse(g.whitelist_words) : g.whitelist_words || [],
         banned_words: typeof g.banned_words === 'string' ? JSON.parse(g.banned_words) : g.banned_words || [],
         mandatory_phrases: typeof g.mandatory_phrases === 'string' ? JSON.parse(g.mandatory_phrases) : g.mandatory_phrases || [],
+        reference_logo_url: g.reference_logo_url || null,
       };
+      client.reference_logo_url = g.reference_logo_url || null;
     }
 
     // Fetch connected social accounts (no tokens)
@@ -347,22 +351,42 @@ const updateClient = async (req, res) => {
 
 /**
  * DELETE /api/clients/:id
- * Soft delete Client (Admin only)
+ * Permanent Delete Client (Admin only, Deactivated clients only)
  */
 const deleteClient = async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query('UPDATE clients SET is_active = FALSE WHERE id = ?', [id]);
+
+    const [rows] = await pool.query('SELECT id, name, is_active FROM clients WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client not found.',
+      });
+    }
+
+    const client = rows[0];
+
+    // Strict rule: Only deactivated clients can be permanently deleted
+    if (Boolean(client.is_active)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Active clients cannot be deleted directly. Please deactivate the client first.',
+      });
+    }
+
+    // Cascading delete removes guidelines, posts, revisions, and connected social accounts
+    await pool.query('DELETE FROM clients WHERE id = ?', [id]);
 
     return res.status(200).json({
       success: true,
-      message: 'Client deactivated successfully (soft delete).',
+      message: `Client "${client.name}" and all associated records have been permanently deleted.`,
     });
   } catch (error) {
     console.error('Error deleting client:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to deactivate client.',
+      message: 'Failed to permanently delete client.',
       error: error.message,
     });
   }
@@ -456,6 +480,87 @@ const updateBrandGuidelines = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to update brand guidelines.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * POST /api/clients/:id/logo
+ * Upload or Replace Client Reference Logo (Admin only)
+ */
+const uploadClientLogo = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No logo file uploaded.',
+      });
+    }
+
+    const relativeUrl = `/uploads/logos/${req.file.filename}`;
+
+    await pool.query(
+      `INSERT INTO client_brand_guidelines (client_id, whitelist_words, banned_words, mandatory_phrases, reference_logo_url)
+       VALUES (?, JSON_ARRAY(), JSON_ARRAY(), JSON_ARRAY(), ?)
+       ON DUPLICATE KEY UPDATE reference_logo_url = VALUES(reference_logo_url)`,
+      [id, relativeUrl]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Official brand logo uploaded successfully.',
+      reference_logo_url: relativeUrl,
+      filename: req.file.filename,
+    });
+  } catch (error) {
+    console.error('Error uploading client logo:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload client logo.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * DELETE /api/clients/:id/logo
+ * Remove Client Reference Logo (Admin only)
+ */
+const deleteClientLogo = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await pool.query(
+      'SELECT reference_logo_url FROM client_brand_guidelines WHERE client_id = ?',
+      [id]
+    );
+
+    if (rows.length > 0 && rows[0].reference_logo_url) {
+      const logoUrl = rows[0].reference_logo_url;
+      const filePath = path.join(__dirname, '..', logoUrl.replace(/^\/+/, ''));
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (_) {}
+      }
+    }
+
+    await pool.query(
+      'UPDATE client_brand_guidelines SET reference_logo_url = NULL WHERE client_id = ?',
+      [id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Official brand logo removed successfully.',
+    });
+  } catch (error) {
+    console.error('Error removing client logo:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to remove client logo.',
       error: error.message,
     });
   }
@@ -589,9 +694,10 @@ const initiateSocialConnect = async (req, res) => {
     const redirectUri = process.env.META_REDIRECT_URI || 'http://localhost:5000/api/social/callback';
 
     // If Meta App ID is configured with real credentials, build the Meta Dialog URL
-    const metaAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${metaAppId}&redirect_uri=${encodeURIComponent(
+    const apiVer = process.env.META_API_VERSION || 'v21.0';
+    const metaAuthUrl = `https://www.facebook.com/${apiVer}/dialog/oauth?client_id=${metaAppId}&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&state=${statePayload}&scope=pages_show_list,pages_read_engagement,instagram_basic,instagram_content_publish`;
+    )}&state=${statePayload}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,instagram_business_basic,instagram_business_content_publish,business_management`;
 
     // For interactive API clients or sandbox tests, return authUrl
     if (req.query.json === 'true' || req.headers.accept?.includes('application/json')) {
@@ -786,5 +892,7 @@ module.exports = {
   handleSocialCallback,
   disconnectSocialAccount,
   syncGmbClient,
+  uploadClientLogo,
+  deleteClientLogo,
 };
 

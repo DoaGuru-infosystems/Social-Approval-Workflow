@@ -80,12 +80,17 @@ export const clientService = {
   },
 
   getOAuthUrl: async (clientId, platform) => {
-    const response = await api.get(`/clients/${clientId}/social/${platform}/connect`);
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const response = await api.get(`/clients/${clientId}/social/${platform}/connect?origin=${encodeURIComponent(origin)}`);
     return response.data;
   },
 
-  manualConnectSocial: async (clientId, data) => {
-    const response = await api.post(`/clients/${clientId}/social/manual-connect`, data);
+  manualConnectSocial: async (clientId, platformOrData, maybeData) => {
+    let payload = platformOrData;
+    if (typeof platformOrData === 'string' && maybeData) {
+      payload = { ...maybeData, platform: platformOrData };
+    }
+    const response = await api.post(`/clients/${clientId}/social/manual-connect`, payload);
     return response.data;
   },
 
@@ -94,8 +99,34 @@ export const clientService = {
     return response.data;
   },
 
+  disconnectPlatform: async (clientId, platform) => {
+    const response = await api.post(`/clients/${clientId}/social/${platform}/disconnect`);
+    return response.data;
+  },
+
   testSocialPlatform: async (clientId, platform) => {
     const response = await api.post(`/clients/${clientId}/social/${platform}/test`);
+    return response.data;
+  },
+
+  testPlatformConnection: async (clientId, platform) => {
+    const response = await api.post(`/clients/${clientId}/social/${platform}/test`);
+    return response.data;
+  },
+
+  // Upload client brand logo
+  uploadLogo: async (clientId, file) => {
+    const formData = new FormData();
+    formData.append('logo', file);
+    const response = await api.post(`/clients/${clientId}/logo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
+  // Delete client brand logo
+  deleteLogo: async (clientId) => {
+    const response = await api.delete(`/clients/${clientId}/logo`);
     return response.data;
   },
 };

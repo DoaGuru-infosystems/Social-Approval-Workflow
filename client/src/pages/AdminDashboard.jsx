@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Button from '../components/Button';
@@ -34,6 +34,8 @@ import {
   PlusCircle,
   Settings2,
   Tag,
+  Image as ImageIcon,
+  UploadCloud,
 } from 'lucide-react';
 
 const InstagramIcon = ({ className = 'w-5 h-5' }) => (
@@ -109,6 +111,12 @@ const AdminDashboard = () => {
   const [mandatoryInput, setMandatoryInput] = useState('');
   const [savingGuidelines, setSavingGuidelines] = useState(false);
 
+  // Official Brand Logo State
+  const [referenceLogoUrl, setReferenceLogoUrl] = useState('');
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+  const logoInputRef = useRef(null);
+
   // 4-Platform Social Connect System (Single Agency App)
   const [socialPlatforms, setSocialPlatforms] = useState([
     { platform: 'instagram', is_connected: false, profile_url: null },
@@ -130,6 +138,11 @@ const AdminDashboard = () => {
   const [systemHealth, setSystemHealth] = useState(null);
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [showHealthPanel, setShowHealthPanel] = useState(false);
+
+  // Client Management Filters & Deletion Modal
+  const [clientStatusFilter, setClientStatusFilter] = useState('all'); // 'all' | 'active' | 'inactive'
+  const [clientToDelete, setClientToDelete] = useState(null);
+  const [deletingClient, setDeletingClient] = useState(false);
 
   const fetchClientSocialPlatforms = useCallback(async (clientId) => {
     try {
@@ -166,6 +179,7 @@ const AdminDashboard = () => {
         setWhitelistTags(Array.isArray(g.whitelist_words) ? g.whitelist_words : []);
         setBannedTags(Array.isArray(g.banned_words) ? g.banned_words : []);
         setMandatoryInput((g.mandatory_phrases || []).join(', '));
+        setReferenceLogoUrl(g.reference_logo_url || data?.client?.reference_logo_url || '');
 
         if (data?.social_platforms && data.social_platforms.length > 0) {
           setSocialPlatforms(data.social_platforms);
@@ -197,7 +211,7 @@ const AdminDashboard = () => {
   const fetchClients = useCallback(async () => {
     setLoadingClients(true);
     try {
-      const data = await clientService.getClients();
+      const data = await clientService.getClients({ all: 'true' });
       setClients(data?.clients || []);
     } catch {
       showToast('Unable to load client list.', 'error');
@@ -205,6 +219,25 @@ const AdminDashboard = () => {
       setLoadingClients(false);
     }
   }, [showToast]);
+
+  const handlePermanentDeleteClient = async () => {
+    if (!clientToDelete) return;
+    setDeletingClient(true);
+    try {
+      await clientService.deleteClient(clientToDelete.id);
+      showToast(`Client "${clientToDelete.name}" permanently deleted.`, 'success');
+      const deletedId = clientToDelete.id;
+      setClientToDelete(null);
+      if (selectedClient?.client?.id === deletedId) {
+        handleBackToClients();
+      }
+      fetchClients();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to permanently delete client.', 'error');
+    } finally {
+      setDeletingClient(false);
+    }
+  };
 
   const fetchSystemHealth = useCallback(async () => {
     setLoadingHealth(true);
@@ -220,6 +253,19 @@ const AdminDashboard = () => {
       setLoadingHealth(false);
     }
   }, []);
+
+  const filteredClients = useMemo(() => {
+    if (clientStatusFilter === 'active') {
+      return clients.filter((c) => Boolean(c.is_active));
+    }
+    if (clientStatusFilter === 'inactive') {
+      return clients.filter((c) => !c.is_active);
+    }
+    return clients;
+  }, [clients, clientStatusFilter]);
+
+  const activeClientsCount = useMemo(() => clients.filter((c) => Boolean(c.is_active)).length, [clients]);
+  const inactiveClientsCount = useMemo(() => clients.filter((c) => !c.is_active).length, [clients]);
 
   // Initial load
   useEffect(() => {
@@ -251,6 +297,106 @@ const AdminDashboard = () => {
     return () => clearTimeout(timer);
   }, [searchParams, handleSelectClient]);
 
+  // Handle OAuth callback redirect notifications (?connected=facebook or ?error=...)
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    const errorParam = searchParams.get('error');
+    const warningParam = searchParams.get('warning');
+
+    if (connected) {
+      // If this window was opened as a target blank popup/tab by window.open
+      if (window.opener && !window.opener.closed) {
+        try {
+          window.opener.postMessage(
+            {
+              type: 'OAUTH_SUCCESS',
+              platform: connected,
+              warning: warningParam ? decodeURIComponent(warningParam) : null,
+              clientId: searchParams.get('client'),
+            },
+            '*'
+          );
+          window.close();
+          return;
+        } catch (e) {
+          console.warn('Could not postMessage to opener:', e);
+        }
+      }
+
+      const platformTitle = connected.charAt(0).toUpperCase() + connected.slice(1);
+      showToast(`${platformTitle} successfully connected via OAuth!`, 'success');
+      if (warningParam) {
+        showToast(decodeURIComponent(warningParam), 'warning');
+      }
+      const clientParam = searchParams.get('client');
+      if (clientParam) {
+        fetchClientSocialPlatforms(parseInt(clientParam, 10));
+      }
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('connected');
+      newParams.delete('success');
+      newParams.delete('warning');
+      setSearchParams(newParams, { replace: true });
+    } else if (errorParam) {
+      if (window.opener && !window.opener.closed) {
+        try {
+          window.opener.postMessage(
+            {
+              type: 'OAUTH_ERROR',
+              error: decodeURIComponent(errorParam),
+              clientId: searchParams.get('client'),
+            },
+            '*'
+          );
+          window.close();
+          return;
+        } catch (e) {
+          console.warn('Could not postMessage to opener:', e);
+        }
+      }
+
+      showToast(`OAuth Connection Failed: ${decodeURIComponent(errorParam)}`, 'error');
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('error');
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, showToast, fetchClientSocialPlatforms]);
+
+  // Listen for OAuth completion messages from target="_blank" window
+  useEffect(() => {
+    const handleOAuthMessage = (event) => {
+      if (event.data?.type === 'OAUTH_SUCCESS') {
+        const { platform, warning, clientId } = event.data;
+        const platformTitle = platform ? platform.charAt(0).toUpperCase() + platform.slice(1) : 'Account';
+        showToast(`${platformTitle} successfully connected via OAuth!`, 'success');
+        if (warning) {
+          showToast(warning, 'warning');
+        }
+        if (clientId) {
+          fetchClientSocialPlatforms(parseInt(clientId, 10));
+        } else if (selectedClient?.client?.id) {
+          fetchClientSocialPlatforms(selectedClient.client.id);
+        }
+      } else if (event.data?.type === 'OAUTH_ERROR') {
+        showToast(`OAuth Connection Failed: ${event.data.error || 'Unknown error'}`, 'error');
+      }
+    };
+
+    window.addEventListener('message', handleOAuthMessage);
+    return () => window.removeEventListener('message', handleOAuthMessage);
+  }, [showToast, fetchClientSocialPlatforms, selectedClient?.client?.id]);
+
+  // Auto-refresh social accounts when window re-focuses (e.g. after returning from another tab)
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      if (selectedClient?.client?.id) {
+        fetchClientSocialPlatforms(selectedClient.client.id);
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
+    return () => window.removeEventListener('focus', handleWindowFocus);
+  }, [selectedClient?.client?.id, fetchClientSocialPlatforms]);
+
   const handleBackToClients = () => {
     setSelectedClient(null);
     setSearchParams({ tab: 'clients' });
@@ -259,22 +405,36 @@ const AdminDashboard = () => {
   const handleOAuthConnect = async (platform) => {
     if (!selectedClient?.client?.id) return;
     const clientId = selectedClient.client.id;
+
+    // Open target blank immediately on user click to prevent popup blockers
+    const newTab = window.open('about:blank', '_blank');
+
     setActionLoading((prev) => ({ ...prev, [`oauth-${platform}`]: true }));
     try {
       const res = await clientService.getOAuthUrl(clientId, platform);
       if (!res.success) {
-        if (res.error?.code === 'OAUTH_KEY_NOT_FOUND') {
+        if (newTab) newTab.close();
+        if (res.code === 'OAUTH_KEY_NOT_FOUND' || res.error?.code === 'OAUTH_KEY_NOT_FOUND') {
           showToast(`OAuth Key Nahi Mili (${platform}) - Manual wala use karo`, 'warning');
           setManualFormPlatform(platform);
           return;
         }
-        showToast(res.message || `Failed to initiate ${platform} connect.`, 'error');
+        showToast(res.user_message || res.message || `Failed to initiate ${platform} connect.`, 'error');
         return;
       }
-      if (res.auth_url) {
-        window.location.href = res.auth_url;
+      const targetUrl = res.authUrl || res.auth_url;
+      if (targetUrl) {
+        if (newTab) {
+          newTab.location.href = targetUrl;
+        } else {
+          window.open(targetUrl, '_blank');
+        }
+      } else {
+        if (newTab) newTab.close();
+        showToast(res.user_message || res.message || `No authorization URL received for ${platform}.`, 'error');
       }
     } catch (err) {
+      if (newTab) newTab.close();
       showToast(err.response?.data?.message || `OAuth error for ${platform}.`, 'error');
     } finally {
       setActionLoading((prev) => ({ ...prev, [`oauth-${platform}`]: false }));
@@ -313,12 +473,13 @@ const AdminDashboard = () => {
     setActionLoading((prev) => ({ ...prev, [`manual-${platform}`]: true }));
     try {
       const res = await clientService.manualConnectSocial(clientId, platform, payload);
-      if (res.success) {
+      if (res.success && res.is_connected) {
         showToast(`${platform.toUpperCase()} connected successfully!`, 'success');
         setManualFormPlatform(null);
         fetchClientSocialPlatforms(clientId);
       } else {
-        showToast(res.message || 'Failed to save credentials.', 'error');
+        showToast(res.user_message || res.message || 'Token verification failed. Please verify and try again.', 'error');
+        fetchClientSocialPlatforms(clientId);
       }
     } catch (err) {
       showToast(err.response?.data?.message || 'Manual connect failed.', 'error');
@@ -332,15 +493,17 @@ const AdminDashboard = () => {
     const clientId = selectedClient.client.id;
     setActionLoading((prev) => ({ ...prev, [`test-${platform}`]: true }));
     try {
-      const res = await clientService.testPlatformConnection(clientId, platform);
-      if (res.success && res.connected) {
-        showToast(`Test passed: ${platform.toUpperCase()} connection is healthy!`, 'success');
+      const res = await clientService.testSocialPlatform(clientId, platform);
+      if (res.success && (res.valid || res.connected)) {
+        const nameStr = res.accountName ? ` [${res.accountName}]` : '';
+        showToast(`Test passed: ${platform.toUpperCase()}${nameStr} connection is healthy!`, 'success');
         setCardBanners((prev) => ({ ...prev, [platform]: null }));
       } else {
-        showToast(`Token Expired / Invalid: ${res.user_message || res.error}`, 'error');
+        const errMsg = res.user_message || res.error || 'Token Expired / Invalid';
+        showToast(`Test failed: ${errMsg}`, 'error');
         setCardBanners((prev) => ({
           ...prev,
-          [platform]: { type: 'error', message: res.user_message || res.error },
+          [platform]: { type: 'error', message: errMsg },
         }));
       }
       fetchClientSocialPlatforms(clientId);
@@ -359,7 +522,7 @@ const AdminDashboard = () => {
     const clientId = selectedClient.client.id;
     setActionLoading((prev) => ({ ...prev, [`disc-${platform}`]: true }));
     try {
-      const res = await clientService.disconnectPlatform(clientId, platform);
+      const res = await clientService.disconnectSocialPlatform(clientId, platform);
       if (res.success) {
         showToast(`${platform.toUpperCase()} disconnected. Profile URL preserved.`, 'info');
         setCardBanners((prev) => ({ ...prev, [platform]: null }));
@@ -516,6 +679,88 @@ const AdminDashboard = () => {
       showToast('Unable to save brand guidelines.', 'error');
     } finally {
       setSavingGuidelines(false);
+    }
+  };
+
+  const handleLogoFileChange = async (file) => {
+    if (!file) return;
+    if (!selectedClient?.client?.id) return;
+    const clientId = selectedClient.client.id;
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+    if (!allowedTypes.includes(file.type)) {
+      showToast('Kewal PNG ya JPG image upload karein.', 'warning');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('Logo file size 2MB se kam honi chahiye.', 'warning');
+      return;
+    }
+
+    setUploadingLogo(true);
+    try {
+      const res = await clientService.uploadLogo(clientId, file);
+      if (res.success) {
+        setReferenceLogoUrl(res.reference_logo_url);
+        showToast('Official brand logo successfully upload ho gaya!', 'success');
+        setSelectedClient((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            brand_guidelines: {
+              ...(prev.brand_guidelines || {}),
+              reference_logo_url: res.reference_logo_url,
+            },
+            client: {
+              ...(prev.client || {}),
+              reference_logo_url: res.reference_logo_url,
+            },
+          };
+        });
+      } else {
+        showToast(res.message || 'Logo upload failed.', 'error');
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Logo upload error.', 'error');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    if (!selectedClient?.client?.id) return;
+    const clientId = selectedClient.client.id;
+
+    if (!window.confirm('Kya aap sach me official brand logo hatana chahte hain?')) return;
+
+    setUploadingLogo(true);
+    try {
+      const res = await clientService.deleteLogo(clientId);
+      if (res.success) {
+        setReferenceLogoUrl('');
+        showToast('Official brand logo hata diya gaya.', 'success');
+        setSelectedClient((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            brand_guidelines: {
+              ...(prev.brand_guidelines || {}),
+              reference_logo_url: null,
+            },
+            client: {
+              ...(prev.client || {}),
+              reference_logo_url: null,
+            },
+          };
+        });
+      } else {
+        showToast(res.message || 'Logo remove failed.', 'error');
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Logo remove error.', 'error');
+    } finally {
+      setUploadingLogo(false);
     }
   };
 
@@ -1054,6 +1299,54 @@ const AdminDashboard = () => {
                   </Button>
                 </div>
 
+                {/* Filter Pills: All | Active | Deactivated */}
+                <div className="flex items-center gap-2 border-b border-[#E5E2DA] pb-3">
+                  <button
+                    type="button"
+                    onClick={() => setClientStatusFilter('all')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      clientStatusFilter === 'all'
+                        ? 'bg-[#2B2A27] text-white shadow-xs'
+                        : 'bg-white text-[#6B6A63] border border-[#E5E2DA] hover:bg-[#FAF9F6]'
+                    }`}
+                  >
+                    <span>All Clients</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${clientStatusFilter === 'all' ? 'bg-white/20 text-white' : 'bg-stone-100 text-[#6B6A63]'}`}>
+                      {clients.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setClientStatusFilter('active')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      clientStatusFilter === 'active'
+                        ? 'bg-emerald-700 text-white shadow-xs'
+                        : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-50'
+                    }`}
+                  >
+                    <span>Active</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${clientStatusFilter === 'active' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'}`}>
+                      {activeClientsCount}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setClientStatusFilter('inactive')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      clientStatusFilter === 'inactive'
+                        ? 'bg-stone-700 text-white shadow-xs'
+                        : 'bg-white text-stone-600 border border-stone-300 hover:bg-stone-50'
+                    }`}
+                  >
+                    <span>Deactivated</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${clientStatusFilter === 'inactive' ? 'bg-white/20 text-white' : 'bg-stone-100 text-stone-600'}`}>
+                      {inactiveClientsCount}
+                    </span>
+                  </button>
+                </div>
+
                 <div className="bg-[#FFFFFF] rounded-3xl border border-[#E5E2DA] overflow-hidden shadow-xs">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-[#FAF9F6] border-b border-[#E5E2DA] text-[#6B6A63] text-xs uppercase tracking-wider font-mono">
@@ -1072,14 +1365,18 @@ const AdminDashboard = () => {
                             Loading clients...
                           </td>
                         </tr>
-                      ) : clients.length === 0 ? (
+                      ) : filteredClients.length === 0 ? (
                         <tr>
                           <td colSpan="5" className="py-8 text-center text-xs text-[#6B6A63]">
-                            No clients registered. Click &quot;Add New Client&quot; to create one.
+                            {clientStatusFilter === 'inactive'
+                              ? 'No deactivated clients found.'
+                              : clientStatusFilter === 'active'
+                              ? 'No active clients found.'
+                              : 'No clients registered. Click "Add New Client" to create one.'}
                           </td>
                         </tr>
                       ) : (
-                        clients.map((c) => (
+                        filteredClients.map((c) => (
                           <tr key={c.id} className="hover:bg-[#FAF9F6] transition-colors">
                             <td className="py-4 px-6 font-bold text-[#2B2A27]">
                               <div className="flex items-center gap-2">
@@ -1123,10 +1420,22 @@ const AdminDashboard = () => {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                className={c.is_active ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'}
                                 onClick={() => handleToggleClientActive(c)}
                               >
                                 {c.is_active ? 'Deactivate' : 'Activate'}
                               </Button>
+                              {!c.is_active && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                                  leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                                  onClick={() => setClientToDelete(c)}
+                                >
+                                  Delete
+                                </Button>
+                              )}
                             </td>
                           </tr>
                         ))
@@ -1179,10 +1488,22 @@ const AdminDashboard = () => {
                     <Button
                       variant="outline"
                       size="sm"
+                      className={selectedClient.client?.is_active ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'}
                       onClick={() => handleToggleClientActive(selectedClient.client)}
                     >
                       {selectedClient.client?.is_active ? 'Deactivate' : 'Activate'}
                     </Button>
+                    {!selectedClient.client?.is_active && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                        leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                        onClick={() => setClientToDelete(selectedClient.client)}
+                      >
+                        Delete Permanently
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -1569,6 +1890,148 @@ const AdminDashboard = () => {
                           Save Brand Guidelines
                         </Button>
                       </form>
+
+                      {/* OFFICIAL BRAND LOGO BOX */}
+                      <div className="pt-5 border-t border-[#E5E2DA] space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                              <ImageIcon className="w-3.5 h-3.5" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-[#2B2A27]">Official Brand Logo</h4>
+                              <p className="text-[11px] text-[#6B6A63]">
+                                AI Vision &amp; Python Fallback isi logo ko poster me detect karenge.
+                              </p>
+                            </div>
+                          </div>
+                          {referenceLogoUrl ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Active</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                              <AlertTriangle className="w-3 h-3 text-amber-600" />
+                              <span>Not Uploaded</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <input
+                          type="file"
+                          ref={logoInputRef}
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleLogoFileChange(e.target.files[0]);
+                            }
+                            e.target.value = '';
+                          }}
+                          accept="image/png,image/jpeg,image/jpg"
+                          className="hidden"
+                        />
+
+                        {referenceLogoUrl ? (
+                          /* Live Preview Card */
+                          <div className="p-3.5 bg-[#FAF9F6] border border-[#E5E2DA] rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-16 h-16 rounded-xl border border-[#E5E2DA] bg-white p-1.5 flex items-center justify-center shadow-2xs overflow-hidden shrink-0">
+                                <img
+                                  src={
+                                    referenceLogoUrl.startsWith('http')
+                                      ? referenceLogoUrl
+                                      : `${SERVER_URL}${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}`
+                                  }
+                                  alt="Brand Logo"
+                                  className="max-h-full max-w-full object-contain"
+                                  onError={(e) => {
+                                    const target = e.currentTarget;
+                                    if (!target.dataset.fallback && !referenceLogoUrl.startsWith('http')) {
+                                      target.dataset.fallback = 'true';
+                                      target.src = `http://localhost:5001${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}`;
+                                    }
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-0.5">
+                                <span className="text-xs font-bold text-[#2B2A27]">Official Logo Preview</span>
+                                <p className="text-[11px] text-[#6B6A63]">
+                                  Transparent PNG best hai, Max 2MB
+                                </p>
+                                <span className="inline-block text-[10px] font-mono font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80">
+                                  Logo Check Active
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                loading={uploadingLogo}
+                                onClick={() => logoInputRef.current?.click()}
+                                leftIcon={<RotateCcw className="w-3 h-3" />}
+                                className="!rounded-xl text-xs font-semibold !py-1.5"
+                              >
+                                Change Logo
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="danger"
+                                size="sm"
+                                loading={uploadingLogo}
+                                onClick={handleRemoveLogo}
+                                leftIcon={<Trash2 className="w-3 h-3" />}
+                                className="!rounded-xl text-xs font-semibold !py-1.5"
+                              >
+                                Remove Logo
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Dropzone */
+                          <div
+                            onClick={() => logoInputRef.current?.click()}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              setIsDraggingLogo(true);
+                            }}
+                            onDragLeave={(e) => {
+                              e.preventDefault();
+                              setIsDraggingLogo(false);
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              setIsDraggingLogo(false);
+                              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                handleLogoFileChange(e.dataTransfer.files[0]);
+                              }
+                            }}
+                            className={`border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-1.5 ${
+                              isDraggingLogo
+                                ? 'border-emerald-500 bg-emerald-50/60'
+                                : 'border-[#D5D2CA] hover:border-emerald-600 bg-[#FAF9F6] hover:bg-emerald-50/20'
+                            }`}
+                          >
+                            <div className="w-10 h-10 rounded-xl bg-white border border-[#E5E2DA] flex items-center justify-center text-[#6B6A63] shadow-2xs">
+                              <UploadCloud className="w-5 h-5 text-emerald-600" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-[#2B2A27]">
+                                Click karke ya Drag &amp; Drop karke official logo upload karein
+                              </p>
+                              <p className="text-[11px] text-[#6B6A63] mt-0.5">
+                                Transparent PNG best hai, Max 2MB
+                              </p>
+                            </div>
+                            <div className="mt-1 px-2.5 py-1 bg-amber-50 border border-amber-200/80 rounded-xl flex items-center gap-1 text-[11px] text-amber-900 font-medium">
+                              <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                              <span>Logo upload nahi hai — Logo Check nahi chalega</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -2010,6 +2473,58 @@ const AdminDashboard = () => {
                   </Button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+        {/* PERMANENT DELETE WARNING CONFIRMATION MODAL (DEACTIVATED CLIENTS ONLY) */}
+        {clientToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-red-200">
+              <div className="flex items-center gap-3 text-red-600 mb-4">
+                <div className="w-12 h-12 rounded-2xl bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-[#2B2A27]">Permanently Delete Client?</h3>
+                  <p className="text-xs text-red-600 font-semibold">Critical Warning: Action cannot be undone</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 bg-red-50/50 border border-red-100 rounded-2xl p-4 mb-5 text-xs text-[#2B2A27]">
+                <p>
+                  You are about to permanently delete <strong className="font-bold text-red-700">{clientToDelete.name}</strong>.
+                </p>
+                <p className="text-[#6B6A63]">
+                  Because this client is deactivated, this will permanently wipe from the database:
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-[#6B6A63] pl-1 font-medium">
+                  <li>Official brand guidelines &amp; whitelist terms</li>
+                  <li>All posts, revisions &amp; AI quality inspection records</li>
+                  <li>All connected social accounts &amp; tokens</li>
+                </ul>
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={deletingClient}
+                  onClick={() => setClientToDelete(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-700 text-white border border-red-700"
+                  loading={deletingClient}
+                  leftIcon={<Trash2 className="w-4 h-4" />}
+                  onClick={handlePermanentDeleteClient}
+                >
+                  Yes, Permanently Delete
+                </Button>
+              </div>
             </div>
           </div>
         )}

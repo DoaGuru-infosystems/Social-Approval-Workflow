@@ -160,7 +160,7 @@ const testConnection = async (account) => {
     (rawToken && rawToken.startsWith('valid_mock_')) ||
     (rawRefreshToken && rawRefreshToken.startsWith('valid_mock_'))
   ) {
-    return { valid: true, channelTitle: account.platform_username || 'DOAGuru YouTube Channel' };
+    return { valid: true, channelTitle: account.platform_username || 'Connected YouTube Channel' };
   }
 
   try {

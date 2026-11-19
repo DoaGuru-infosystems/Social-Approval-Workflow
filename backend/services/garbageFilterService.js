@@ -71,7 +71,7 @@ const analyzeToken = (token, whitelist = null) => {
     };
   }
 
-  // B) INVALID SYMBOL PLACEMENT: Trailing punctuation like "Compeleted!" or "Offer?" is normal.
+  // B) INVALID SYMBOL PLACEMENT: Trailing punctuation like "Word!" or "Offer?" is normal.
   // Only flag if ! or ? is embedded inside letters (e.g. "Com!pleted" or "1?")
   const innerToken = raw.replace(/^[!?]+|[!?]+$/g, '');
   if (/[!?]/.test(innerToken)) {
@@ -132,7 +132,7 @@ const analyzeToken = (token, whitelist = null) => {
       };
     }
 
-    // 5+ consecutive consonants (allows words like 'helthcare' with 4 consonants without treating as noise)
+    // 5+ consecutive consonants (allows natural 4-consonant clusters without treating as noise)
     if (/[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]{5,}/.test(lettersOnly)) {
       return {
         isGarbage: true,

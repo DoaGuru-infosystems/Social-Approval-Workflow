@@ -54,8 +54,10 @@ const refreshIfNeeded = async (clientId, platform) => {
       return await refreshYouTubeToken(account);
     } else if (platform === 'linkedin') {
       return await refreshLinkedInToken(account);
-    } else if (platform === 'facebook' || platform === 'instagram') {
-      return await refreshMetaToken(account);
+    } else if (platform === 'facebook') {
+      return await refreshFacebookToken(account);
+    } else if (platform === 'instagram') {
+      return await refreshInstagramToken(account);
     }
 
     return { success: true, refreshed: false };
@@ -273,13 +275,13 @@ const refreshLinkedInToken = async (account) => {
 };
 
 /**
- * Refresh Meta Token
+ * Refresh Facebook Token
  */
-const refreshMetaToken = async (account) => {
+const refreshFacebookToken = async (account) => {
   const currentToken = account.access_token_encrypted ? decrypt(account.access_token_encrypted) : null;
 
   if (!currentToken) {
-    await markRevoked(account, 'Meta token missing');
+    await markRevoked(account, 'Facebook token missing');
     return {
       success: false,
       code: 'TOKEN_REVOKED',
@@ -288,7 +290,7 @@ const refreshMetaToken = async (account) => {
   }
 
   if (currentToken.includes('revoked') || currentToken.includes('invalid')) {
-    await markRevoked(account, 'Mock Meta token revoked');
+    await markRevoked(account, 'Mock Facebook token revoked');
     return {
       success: false,
       code: 'TOKEN_REVOKED',
@@ -297,7 +299,7 @@ const refreshMetaToken = async (account) => {
   }
 
   if (currentToken.includes('valid_mock') || currentToken.startsWith('valid_')) {
-    const newAccessToken = `valid_mock_meta_access_${Date.now()}`;
+    const newAccessToken = `valid_mock_fb_access_${Date.now()}`;
     const encAccessToken = encrypt(newAccessToken);
     await pool.query(
       `UPDATE client_social_accounts 
@@ -325,7 +327,8 @@ const refreshMetaToken = async (account) => {
   }
 
   try {
-    const url = `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${currentToken}`;
+    const apiVer = process.env.META_API_VERSION || 'v21.0';
+    const url = `https://graph.facebook.com/${apiVer}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${currentToken}`;
     const res = await fetch(url);
     const data = await res.json();
 
@@ -365,6 +368,162 @@ const refreshMetaToken = async (account) => {
 };
 
 /**
+ * Refresh Instagram Token (via Instagram Graph API refresh_access_token)
+ */
+const refreshInstagramToken = async (account) => {
+  const currentToken = account.access_token_encrypted ? decrypt(account.access_token_encrypted) : null;
+
+  if (!currentToken) {
+    await markRevoked(account, 'Instagram token missing');
+    return {
+      success: false,
+      code: 'TOKEN_REVOKED',
+      user_message: 'Token Expired - Dobara Connect Karo',
+    };
+  }
+
+  if (currentToken.includes('revoked') || currentToken.includes('invalid')) {
+    await markRevoked(account, 'Mock Instagram token revoked');
+    return {
+      success: false,
+      code: 'TOKEN_REVOKED',
+      user_message: 'Token Expired - Dobara Connect Karo',
+    };
+  }
+
+  if (currentToken.includes('valid_mock') || currentToken.startsWith('valid_')) {
+    const newAccessToken = `valid_mock_ig_access_${Date.now()}`;
+    const encAccessToken = encrypt(newAccessToken);
+    await pool.query(
+      `UPDATE client_social_accounts 
+       SET access_token_encrypted = ?, 
+           token_expires_at = DATE_ADD(NOW(), INTERVAL 60 DAY), 
+           is_connected = TRUE, 
+           last_tested_at = NOW(), 
+           last_error = NULL 
+       WHERE id = ?`,
+      [encAccessToken, account.id]
+    );
+    return { success: true, refreshed: true };
+  }
+
+  try {
+    // 1. Try Instagram Graph API refresh endpoint (for Instagram Login tokens)
+    const url = `https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${currentToken}`;
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (data.access_token) {
+      const newAccessToken = data.access_token;
+      const expiresIn = data.expires_in || 5184000;
+      const encAccessToken = encrypt(newAccessToken);
+
+      await pool.query(
+        `UPDATE client_social_accounts 
+         SET access_token_encrypted = ?, 
+             token_expires_at = DATE_ADD(NOW(), INTERVAL ? SECOND), 
+             is_connected = TRUE, 
+             last_tested_at = NOW(), 
+             last_error = NULL 
+         WHERE id = ?`,
+        [encAccessToken, expiresIn, account.id]
+      );
+
+      return { success: true, refreshed: true };
+    }
+
+    // 2. If it failed, try fb_exchange_token fallback (in case token is a Facebook User/Page token)
+    const appId = process.env.META_APP_ID;
+    const appSecret = process.env.META_APP_SECRET;
+    if (appId && appSecret) {
+      const apiVer = process.env.META_API_VERSION || 'v21.0';
+      const fbUrl = `https://graph.facebook.com/${apiVer}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${currentToken}`;
+      const fbRes = await fetch(fbUrl);
+      const fbData = await fbRes.json();
+      if (fbData.access_token) {
+        const encAccessToken = encrypt(fbData.access_token);
+        const expiresIn = fbData.expires_in || 5184000;
+        await pool.query(
+          `UPDATE client_social_accounts 
+           SET access_token_encrypted = ?, 
+               token_expires_at = DATE_ADD(NOW(), INTERVAL ? SECOND), 
+               is_connected = TRUE, 
+               last_tested_at = NOW(), 
+               last_error = NULL 
+           WHERE id = ?`,
+          [encAccessToken, expiresIn, account.id]
+        );
+        return { success: true, refreshed: true };
+      }
+    }
+
+    const errMsg = data.error?.message || 'Instagram refresh failed';
+    await markRevoked(account, errMsg);
+    return {
+      success: false,
+      code: 'TOKEN_REVOKED',
+      user_message: 'Token Expired - Dobara Connect Karo',
+    };
+  } catch (err) {
+    await markRevoked(account, err.message);
+    return {
+      success: false,
+      code: 'TOKEN_REVOKED',
+      user_message: 'Token Expired - Dobara Connect Karo',
+    };
+  }
+};
+
+/**
+ * Auto-refresh background job to refresh tokens before 60-day expiry.
+ * Runs on startup and periodically (every 12 hours).
+ */
+const runTokenAutoRefreshBatch = async () => {
+  console.log('[TokenAutoRefresh] Checking for social tokens nearing expiration (< 15 days)...');
+  try {
+    const [accounts] = await pool.query(
+      `SELECT id, client_id, platform, token_expires_at 
+       FROM client_social_accounts 
+       WHERE is_connected = TRUE 
+         AND (access_token_encrypted IS NOT NULL OR refresh_token_encrypted IS NOT NULL)
+         AND (token_expires_at IS NULL OR token_expires_at <= DATE_ADD(NOW(), INTERVAL 15 DAY))`
+    );
+
+    if (!accounts || accounts.length === 0) {
+      console.log('[TokenAutoRefresh] No tokens need refresh right now.');
+      return;
+    }
+
+    console.log(`[TokenAutoRefresh] Found ${accounts.length} account(s) to refresh.`);
+    for (const acc of accounts) {
+      try {
+        console.log(`[TokenAutoRefresh] Refreshing ${acc.platform} token for client ${acc.client_id}...`);
+        const result = await refreshIfNeeded(acc.client_id, acc.platform);
+        console.log(`[TokenAutoRefresh] Result for ${acc.platform} (client ${acc.client_id}):`, result.success ? 'Success' : `Failed: ${result.user_message || result.code}`);
+      } catch (err) {
+        console.error(`[TokenAutoRefresh] Error refreshing account ${acc.id} (${acc.platform}):`, err.message);
+      }
+    }
+  } catch (error) {
+    console.error('[TokenAutoRefresh] Batch check failed:', error.message);
+  }
+};
+
+const startTokenAutoRefreshJob = () => {
+  // Initial check after 30 seconds
+  setTimeout(() => {
+    runTokenAutoRefreshBatch();
+  }, 30000);
+
+  // Run every 12 hours
+  setInterval(() => {
+    runTokenAutoRefreshBatch();
+  }, 12 * 60 * 60 * 1000);
+
+  console.log('[TokenAutoRefresh] Auto-refresh background job registered (runs every 12 hours).');
+};
+
+/**
  * Mark an account as revoked / invalid, but NEVER delete profile_url or platform_id
  */
 const markRevoked = async (account, reason) => {
@@ -383,4 +542,7 @@ const markRevoked = async (account, reason) => {
 
 module.exports = {
   refreshIfNeeded,
+  refreshFacebookToken,
+  refreshInstagramToken,
+  startTokenAutoRefreshJob,
 };

@@ -122,9 +122,12 @@ router.get('/:id/social/:platform/connect', authMiddleware, async (req, res) => 
       });
     }
 
+    const frontendOrigin = req.query.origin || req.headers.origin || null;
     let authResult;
-    if (lowerPlatform === 'instagram' || lowerPlatform === 'facebook') {
-      authResult = metaService.getAuthUrl(clientId, lowerPlatform);
+    if (lowerPlatform === 'facebook') {
+      authResult = metaService.getFacebookAuthUrl(clientId, frontendOrigin);
+    } else if (lowerPlatform === 'instagram') {
+      authResult = metaService.getInstagramAuthUrl(clientId, frontendOrigin);
     } else if (lowerPlatform === 'youtube') {
       authResult = youtubeService.getAuthUrl(clientId);
     } else if (lowerPlatform === 'linkedin') {
@@ -144,6 +147,7 @@ router.get('/:id/social/:platform/connect', authMiddleware, async (req, res) => 
       platform: lowerPlatform,
       clientId,
       authUrl: authResult.authUrl,
+      auth_url: authResult.authUrl,
     });
   } catch (error) {
     console.error('Error initiating OAuth connect:', error);
@@ -234,20 +238,24 @@ router.post('/:id/social/manual-connect', authMiddleware, async (req, res) => {
     }
 
     if (testResult && testResult.valid) {
+      const resolvedName = testResult?.accountName || testResult?.channelTitle || account.platform_username;
       await pool.query(
         `UPDATE client_social_accounts 
          SET is_connected = TRUE, 
+             platform_username = COALESCE(?, platform_username),
              last_tested_at = NOW(), 
              last_error = NULL 
          WHERE id = ?`,
-        [account.id]
+        [resolvedName, account.id]
       );
 
       return res.status(200).json({
         success: true,
         is_connected: true,
+        connected: true,
         message: 'Platform connected and verified successfully.',
         masked_access_token: maskToken(access_token),
+        accountName: resolvedName,
         testResult,
       });
     } else {
@@ -348,21 +356,24 @@ router.post('/:id/social/:platform/test', authMiddleware, async (req, res) => {
     }
 
     const isValid = Boolean(testResult?.valid);
+    const resolvedName = testResult?.accountName || testResult?.channelTitle || account.platform_username;
     await pool.query(
       `UPDATE client_social_accounts 
        SET is_connected = ?, 
+           platform_username = COALESCE(?, platform_username),
            last_tested_at = NOW(), 
            last_error = ? 
        WHERE id = ?`,
-      [isValid, isValid ? null : testResult?.error || 'Test failed', account.id]
+      [isValid, isValid ? resolvedName : null, isValid ? null : testResult?.error || 'Test failed', account.id]
     );
 
     return res.status(200).json({
       success: true,
       valid: isValid,
+      connected: isValid,
       error: testResult?.error || null,
-      accountName: testResult?.accountName || testResult?.channelTitle || account.platform_username,
-      user_message: isValid ? 'Token Sahi Hai' : 'Token Invalid Hai',
+      accountName: resolvedName,
+      user_message: isValid ? 'Token Sahi Hai' : (testResult?.error || 'Token Invalid Hai'),
     });
   } catch (error) {
     console.error('Error testing social connection:', error);

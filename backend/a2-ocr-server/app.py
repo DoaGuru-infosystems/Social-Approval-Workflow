@@ -266,6 +266,9 @@ def handle_check_post(environ, start_response):
     per_block_confidence_threshold = data.get("per_block_confidence_threshold")
     expected_phones = data.get("expected_phones", [])
     whitelist_words = data.get("whitelist_words", [])
+    reference_logo_path = data.get("reference_logo_path")
+    reference_logo_base64 = data.get("reference_logo_base64")
+    reference_logo = data.get("reference_logo")
 
     # 7. Validate & Decode Image if provided
     temp_image_path = None
@@ -341,6 +344,9 @@ def handle_check_post(environ, start_response):
             "per_block_confidence_threshold": per_block_confidence_threshold,
             "expected_phones": expected_phones,
             "whitelist_words": whitelist_words,
+            "reference_logo_path": reference_logo_path,
+            "reference_logo_base64": reference_logo_base64,
+            "reference_logo": reference_logo,
         }
 
         result = process_post.process_post(post_input, reader=reader)

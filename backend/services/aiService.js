@@ -36,7 +36,7 @@ const getClientGuidelines = async (clientId) => {
 
   // Fetch brand guidelines and client official identity (including GMB synced data)
   const [rows] = await pool.query(
-    'SELECT whitelist_words, banned_words, mandatory_phrases FROM client_brand_guidelines WHERE client_id = ?',
+    'SELECT whitelist_words, banned_words, mandatory_phrases, reference_logo_url FROM client_brand_guidelines WHERE client_id = ?',
     [clientId]
   );
 
@@ -146,6 +146,7 @@ const getClientGuidelines = async (clientId) => {
     gmb_official_name: gmbSnapshot?.officialName || '',
     gmb_phone: gmbSnapshot?.nationalPhoneNumber || gmbSnapshot?.internationalPhoneNumber || '',
     gmb_address: gmbSnapshot?.formattedAddress || '',
+    reference_logo_url: g?.reference_logo_url || null,
   };
 };
 
@@ -183,6 +184,16 @@ const runRemoteAICheck = async (inputData) => {
     imageFilename = path.basename(resolvedPath);
   }
 
+  let referenceLogoBase64 = null;
+  if (inputData.reference_logo_path) {
+    const resolvedLogo = path.resolve(inputData.reference_logo_path);
+    if (fs.existsSync(resolvedLogo)) {
+      referenceLogoBase64 = fs.readFileSync(resolvedLogo).toString('base64');
+    }
+  } else if (inputData.reference_logo_base64) {
+    referenceLogoBase64 = inputData.reference_logo_base64;
+  }
+
   const payload = {
     title: inputData.title || '',
     caption: inputData.caption || '',
@@ -192,6 +203,7 @@ const runRemoteAICheck = async (inputData) => {
     banned_words: inputData.banned_words || [],
     mandatory_phrases: inputData.mandatory_phrases || [],
     expected_phones: inputData.expected_phones || [],
+    reference_logo_base64: referenceLogoBase64,
   };
 
   let response;
@@ -1281,13 +1293,51 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       String(p.found_phone || '').replace(/\D/g, '').length === 10
   );
 
+  // Brand Logo Verification (AI First, Python Fallback)
+  const brandLogoService = require('./brandLogoService');
+  let logoCheck = remoteResult?.logo_check || null;
+  if (!logoCheck) {
+    try {
+      logoCheck = await brandLogoService.checkBrandLogo({
+        postImagePath: resolvedImagePath,
+        referenceLogoPath: guidelines.reference_logo_url,
+      });
+    } catch (logoErr) {
+      console.warn('[runImageCheck] Logo check notice:', logoErr.message);
+      if (!guidelines.reference_logo_url) {
+        logoCheck = {
+          status: 'SKIPPED',
+          found: false,
+          score: 0.0,
+          location: 'unknown',
+          location_hindi: 'Kahin nahi mila',
+          size_percent: 0,
+          reason: 'SKIPPED',
+          suggestion: 'Logo Check skipped - Brand Guidelines me logo upload nahi hai',
+        };
+      } else {
+        logoCheck = {
+          status: 'FAIL',
+          found: false,
+          score: 0.0,
+          location: 'unknown',
+          location_hindi: 'Kahin nahi mila',
+          size_percent: 0,
+          reason: 'MISSING',
+          suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+        };
+      }
+    }
+  }
+
+  const hasLogoError = Boolean(logoCheck && logoCheck.status === 'FAIL');
   const ocrUnreliable = !ocrReliable;
   const hasSpellingIssues = realSpellingIssues.length > 0;
   const hasBannedWords = bannedWordsFound.length > 0;
   const hasBrandNameError = Boolean(brandIdentityCheck.possible_brand_name_error);
   const hasPhoneIssues = validPhoneWarnings.length > 0;
 
-  const passed = !ocrUnreliable && !hasSpellingIssues && !hasBannedWords && !hasBrandNameError && !hasPhoneIssues;
+  const passed = !ocrUnreliable && !hasSpellingIssues && !hasBannedWords && !hasBrandNameError && !hasPhoneIssues && !hasLogoError;
 
   let summary = 'Image Check Clean';
   if (ocrUnreliable) {
@@ -1298,6 +1348,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     summary = `Image Flagged: Banned brand terms found (${bannedWordsFound.join(', ')})`;
   } else if (hasBrandNameError) {
     summary = `Brand Identity Error in Image: ${brandIdentityCheck.possible_brand_name_error}`;
+  } else if (hasLogoError) {
+    summary = `Brand Logo Check: ${logoCheck.suggestion || 'Logo missing or invalid'}`;
   } else if (hasPhoneIssues) {
     summary = `Phone Mismatch in Image: ${validPhoneWarnings[0].message}`;
   } else if (hasSpellingIssues) {
@@ -1326,6 +1378,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     noise_tokens: noiseTokens,
     banned_words_found: bannedWordsFound,
     brand_identity_check: brandIdentityCheck,
+    logo_check: logoCheck,
   };
 };
 
@@ -1478,6 +1531,7 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     missing_mandatory_phrases: missingMandatoryPhrases,
     brand_identity_check: mergedBrandIdentity,
     brand_rules_applied: textResult?.brand_rules_applied || {},
+    logo_check: imageResult?.logo_check || null,
     text_result: textResult,
     image_result: imageResult,
   };

@@ -16,16 +16,54 @@ const clientController = require('./controllers/clientController');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// CORS Configuration: Support localhost and ngrok tunneling
+const allowedOrigins = [
+  'https://boaster-virtuous-pristine.ngrok-free.dev',
+  'http://boaster-virtuous-pristine.ngrok-free.dev',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+  'http://localhost:5001',
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    const cleanOrigin = origin.replace(/\/+$/, '');
+    if (
+      allowedOrigins.includes(cleanOrigin) ||
+      cleanOrigin.endsWith('.ngrok-free.dev') ||
+      cleanOrigin.endsWith('.ngrok.io') ||
+      cleanOrigin.includes('localhost') ||
+      cleanOrigin.includes('127.0.0.1')
+    ) {
+      return callback(null, true);
+    }
+    // Fallback: reflect requesting origin so tunneling or custom ports don't break
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'ngrok-skip-browser-warning',
+    'bypass-tunnel-reminder',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Request-Headers',
+    'Access-Control-Request-Method',
+    'X-API-Key',
+  ],
+  exposedHeaders: ['ngrok-skip-browser-warning'],
+};
+
 // Middleware
 app.use(morgan('dev'));
-app.use(
-  cors({
-    origin: true, // Allow any requesting origin (localhost:5173, localhost:5174, etc.)
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -58,7 +96,43 @@ app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/admin', adminRoutes);
-app.get('/api/social/callback', clientController.handleSocialCallback);
+// Legacy and alternative OAuth callback route
+app.get('/api/social/callback', async (req, res) => {
+  const metaService = require('./services/metaService');
+  const { code, state, error, error_description } = req.query;
+
+  let redirectBase = process.env.CLIENT_REDIRECT_URL || 'http://localhost:5173';
+  let clientId = null;
+  if (state) {
+    try {
+      const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+      if (decoded.frontendOrigin) redirectBase = decoded.frontendOrigin;
+      if (decoded.clientId) clientId = decoded.clientId;
+    } catch {}
+  }
+  const clientParam = clientId ? `&client=${clientId}` : '';
+
+  if (error) {
+    const errorMsg = error_description || req.query.error_reason || error || 'oauth_cancelled';
+    return res.redirect(`${redirectBase}/admin?tab=clients${clientParam}&error=${encodeURIComponent(errorMsg)}`);
+  }
+
+  if (!code || !state) {
+    return res.redirect(`${redirectBase}/admin?tab=clients${clientParam}&error=${encodeURIComponent('No authorization code or state received')}`);
+  }
+
+  try {
+    const result = await metaService.handleCallback(code, state, req);
+    const targetBase = result.frontendOrigin || redirectBase;
+    const warningParam = result.warning ? `&warning=${encodeURIComponent(result.warning)}` : '';
+    return res.redirect(
+      `${targetBase}/admin?tab=clients&client=${result.clientId}&connected=${result.platform}&success=true${warningParam}`
+    );
+  } catch (err) {
+    console.error('Callback error at /api/social/callback:', err);
+    return res.redirect(`${redirectBase}/admin?tab=clients${clientParam}&error=${encodeURIComponent(err.message)}`);
+  }
+});
 
 // Root route
 app.get('/', (req, res) => {
@@ -149,6 +223,15 @@ const startServer = async () => {
       initSchedulerJob();
     } catch (err) {
       console.warn(`⚠️ Post scheduler job initialization notice: ${err.message}`);
+    }
+
+    // Initialize Social Token Auto-Refresh Job
+    try {
+      const { startTokenAutoRefreshJob } = require('./services/tokenRefreshService');
+      startTokenAutoRefreshJob();
+      console.log('✅ Social token auto-refresh worker initialized (runs every 12 hours).');
+    } catch (err) {
+      console.warn(`⚠️ Token auto-refresh job initialization notice: ${err.message}`);
     }
   });
 

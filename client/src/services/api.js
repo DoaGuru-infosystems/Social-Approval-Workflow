@@ -1,15 +1,18 @@
 import axios from 'axios';
+import { API_BASE_URL } from '../utils/constants';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api',
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
   },
 });
 
-// Request Interceptor: Attach token if available
+// Request Interceptor: Attach token if available and bypass ngrok warning
 api.interceptors.request.use(
   (config) => {
+    config.headers['ngrok-skip-browser-warning'] = 'true';
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
