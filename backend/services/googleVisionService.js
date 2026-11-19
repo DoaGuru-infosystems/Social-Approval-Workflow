@@ -1,13 +1,55 @@
 const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
+const { buildPostCheckPrompt } = require('./postCheckPrompt');
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
-const MODEL_NAME = 'gemini-flash-lite-latest';
+/**
+ * Check whether a GEMINI_API_KEY is missing, dummy, or invalid placeholder.
+ * DUMMY mode must NEVER return PASS. It must be skipped and routed to Python fallback.
+ */
+const isDummyKey = (key) => {
+  if (!key || typeof key !== 'string') return true;
+  const k = key.trim().toLowerCase();
+  return (
+    k === '' ||
+    k === 'your_gemini_api_key' ||
+    k.startsWith('dummy') ||
+    k.startsWith('test') ||
+    k.includes('dummy') ||
+    k.includes('test')
+  );
+};
 
 /**
- * Extract image dimensions from standard PNG/JPEG buffer header
+ * Foolproof asset path resolver across Windows and POSIX environments.
+ */
+const resolveAssetPath = (rawPath) => {
+  if (!rawPath || typeof rawPath !== 'string') return null;
+
+  try {
+    if (fs.existsSync(rawPath)) return path.resolve(rawPath);
+  } catch (_) {}
+
+  const clean = rawPath.replace(/^[/\\]+/, '');
+  const candBackend = path.resolve(__dirname, '..', clean);
+  if (fs.existsSync(candBackend)) return candBackend;
+
+  const candCwd = path.resolve(process.cwd(), clean);
+  if (fs.existsSync(candCwd)) return candCwd;
+
+  const candCwdBackend = path.resolve(process.cwd(), 'backend', clean);
+  if (fs.existsSync(candCwdBackend)) return candCwdBackend;
+
+  const candDirname = path.resolve(__dirname, clean);
+  if (fs.existsSync(candDirname)) return candDirname;
+
+  return null;
+};
+
+/**
+ * Extract image dimensions from standard PNG/JPEG buffer header in RAM.
  */
 const getImageDimensions = (buffer) => {
   try {
@@ -18,7 +60,7 @@ const getImageDimensions = (buffer) => {
       const height = buffer.readUInt32BE(20);
       return { width: width || 1000, height: height || 1000 };
     }
-    // JPEG (rough probe)
+    // JPEG
     if (buffer[0] === 0xff && buffer[1] === 0xd8) {
       let offset = 2;
       while (offset < buffer.length - 8) {
@@ -33,155 +75,222 @@ const getImageDimensions = (buffer) => {
         offset += 2 + len;
       }
     }
-  } catch (err) {
-    // fallback
-  }
+  } catch (_) {}
   return { width: 1000, height: 1000 };
 };
 
+const getMimeType = (filePath, buffer) => {
+  if (filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.png') return 'image/png';
+    if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+    if (ext === '.webp') return 'image/webp';
+  }
+  if (buffer && buffer.length > 8) {
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
+    if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return 'image/webp';
+  }
+  return 'image/jpeg';
+};
+
+const LOCATION_HINDI_MAP = {
+  'top-left': 'Upar Left corner me',
+  'top-right': 'Upar Right corner me',
+  'bottom-left': 'Neeche Left corner me',
+  'bottom-right': 'Neeche Right corner me',
+  center: 'Beech me (Center)',
+  unknown: 'Kahin nahi mila',
+};
+
+const SUGGESTION_RULES = {
+  MISSING: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+  WRONG_LOGO: 'Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein.',
+  TOO_SMALL: 'Logo bahut chhota hai. Logo ko kam se kam 10% bada karein.',
+  HIDDEN: 'Logo text ke peeche chhup gaya hai. Logo ko khali jagah pe le jayein.',
+  COLOR_CHANGED: 'Logo ka rang badal gaya hai. Logo ka original rang wapas rakhein.',
+  CORRECT: 'Logo bilkul sahi jagah aur size me laga hua hai.',
+  SKIPPED: 'Logo Check Skipped - Logo upload nahi hai',
+};
+
 /**
- * Execute Google Vision OCR on a poster image.
- * Uses Google's Gemini Vision multimodal engine (gemini-flash-lite-latest).
- * Accepts 1 single original image (no multi-variant explosion needed).
+ * Execute Full 5-in-1 Multimodal Quality Check with Gemini PRIMARY.
  *
  * @param {Object} params
- * @param {string} [params.imagePath] Absolute path to local image file
- * @param {string} [params.imageBase64] Optional pre-encoded base64 string
- * @param {string} [params.mimeType] Image mime type
- * @returns {Promise<Object>} Formatted PaddleOCR-compatible OCR result
+ * @param {string} [params.imagePath] Local path to poster creative
+ * @param {Buffer} [params.imageBuffer] Optional poster buffer
+ * @param {string} [params.referenceLogoPath] Local path to reference logo (if uploaded)
+ * @param {Buffer} [params.referenceLogoBuffer] Optional reference logo buffer
+ * @param {Object} [params.brandRules] Brand guidelines (whitelist, banned, mandatory, phone, name)
+ * @returns {Promise<Object>}
  */
-const runGoogleVisionOCR = async ({ imagePath, imageBase64, mimeType = 'image/jpeg' }) => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_VISION_API_KEY;
-  if (!apiKey) {
-    const err = new Error('GEMINI_API_KEY or GOOGLE_VISION_API_KEY not found in environment.');
-    err.isKeyError = true;
-    err.code = 'VISION_KEY_EXPIRED';
-    throw err;
+const runGoogleVisionPostCheck = async ({
+  imagePath,
+  imageBuffer,
+  referenceLogoPath,
+  referenceLogoBuffer,
+  brandRules = {},
+}) => {
+  const apiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_VISION_API_KEY || '').trim();
+
+  // 1. DUMMY MODE GUARD: If missing or dummy, DO NOT PASS. Throw to route immediately to Python.
+  if (isDummyKey(apiKey)) {
+    console.warn('[Gemini] Gemini DUMMY mode me hai - skipping Gemini and routing to Python Fallback.');
+    const dummyErr = new Error('Gemini DUMMY mode me hai');
+    dummyErr.isDummy = true;
+    dummyErr.isKeyError = true;
+    dummyErr.code = 'GEMINI_DUMMY_MODE';
+    throw dummyErr;
   }
 
-  let base64Data = imageBase64;
-  let dims = { width: 1000, height: 1000 };
+  // 2. Load Poster Image into RAM (NO-DISK Policy)
+  let posterBuf = imageBuffer;
+  let posterDims = { width: 1000, height: 1000 };
+  let posterMime = 'image/jpeg';
 
-  if (!base64Data && imagePath) {
-    const resolvedPath = path.resolve(imagePath);
-    if (!fs.existsSync(resolvedPath)) {
-      throw new Error(`Image file does not exist on disk: ${resolvedPath}`);
+  if (!posterBuf && imagePath) {
+    const resolvedPath = resolveAssetPath(imagePath);
+    if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+      throw new Error(`Poster image file does not exist on disk: ${imagePath}`);
     }
-    const buf = fs.readFileSync(resolvedPath);
-    base64Data = buf.toString('base64');
-    dims = getImageDimensions(buf);
-
-    const ext = path.extname(resolvedPath).toLowerCase();
-    if (ext === '.png') mimeType = 'image/png';
-    else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-    else if (ext === '.webp') mimeType = 'image/webp';
+    posterBuf = fs.readFileSync(resolvedPath);
+    posterMime = getMimeType(resolvedPath, posterBuf);
+    posterDims = getImageDimensions(posterBuf);
   }
 
-  if (!base64Data) {
-    throw new Error('No image path or base64 provided to Google Vision OCR.');
+  if (!posterBuf || posterBuf.length === 0) {
+    throw new Error('No poster image data provided to Gemini Post Check.');
   }
 
-  const systemInstruction = `You are an expert Optical Character Recognition (OCR) engine specialized in bilingual (Hindi / English) Indian posters.
-Your task is to accurately transcribe all visible text in the image into structured JSON format.
-CRITICAL: Transcribe characters EXACTLY as they appear visually on the poster. Do NOT autocorrect any typos, misspellings, or unusual character sequences in brand names, titles, or logos (e.g. if a logo or word has an unusual spelling or typo, transcribe it faithfully character-by-character as printed, do NOT auto-fix or guess intended words).
-Preserve exact spellings, diacritics, and ligatures in both Latin and Devanagari scripts.
+  // 3. Load Reference Logo into RAM if configured
+  let logoBuf = referenceLogoBuffer;
+  let logoMime = 'image/png';
+  let hasLogo = false;
 
-Return STRICT JSON matching this schema:
-{
-  "ocr_text": "all extracted text separated by newlines",
-  "ocr_boxes": [
-    {
-      "text": "transcribed text of this visual block or line",
-      "confidence": 0.98,
-      "rect": {
-        "left": 10.5,
-        "top": 15.0,
-        "width": 30.0,
-        "height": 5.0
+  if (!logoBuf && referenceLogoPath) {
+    const resolvedLogo = resolveAssetPath(referenceLogoPath);
+    if (resolvedLogo && fs.existsSync(resolvedLogo)) {
+      try {
+        logoBuf = fs.readFileSync(resolvedLogo);
+        logoMime = getMimeType(resolvedLogo, logoBuf);
+        hasLogo = logoBuf && logoBuf.length > 0;
+      } catch (_) {
+        hasLogo = false;
       }
     }
-  ]
-}
-Where rect coordinates are percentages from 0.0 to 100.0 relative to image width and height.`;
+  } else if (logoBuf && logoBuf.length > 0) {
+    hasLogo = true;
+  }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
-  const requestBody = JSON.stringify({
-    contents: [
-      {
-        parts: [
-          { text: systemInstruction },
-          {
-            inline_data: {
-              mime_type: mimeType,
-              data: base64Data,
-            },
-          },
-        ],
+  const effectiveBrandRules = {
+    ...brandRules,
+    has_reference_logo: hasLogo,
+  };
+
+  // 4. Build Unified 5-in-1 Prompt
+  const promptText = buildPostCheckPrompt(effectiveBrandRules);
+
+  const parts = [{ text: promptText }];
+
+  if (hasLogo && logoBuf) {
+    parts.push({ text: 'Image 1: Official Client Brand Reference Logo:' });
+    parts.push({
+      inline_data: {
+        mime_type: logoMime,
+        data: logoBuf.toString('base64'),
       },
-    ],
+    });
+  }
+
+  parts.push({ text: hasLogo ? 'Image 2: Poster Creative to Inspect:' : 'Poster Creative to Inspect:' });
+  parts.push({
+    inline_data: {
+      mime_type: posterMime,
+      data: posterBuf.toString('base64'),
+    },
+  });
+
+  const modelName = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+  const requestBody = JSON.stringify({
+    contents: [{ parts }],
     generationConfig: {
       response_mime_type: 'application/json',
       temperature: 0.1,
     },
   });
 
+  // 5. Execute with 30s Timeout and 1 Retry on 429/503
   let response;
-  const maxAttempts = 4;
+  const maxAttempts = 2; // Initial + 1 retry
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const attemptController = new AbortController();
-    const attemptTimeout = setTimeout(() => attemptController.abort(), 35000);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
     try {
       response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: requestBody,
-        signal: attemptController.signal,
+        signal: controller.signal,
       });
-      clearTimeout(attemptTimeout);
+      clearTimeout(timeout);
 
-      if (response.status === 503 || response.status === 429) {
-        if (attempt < maxAttempts) {
-          const delay = attempt * 2000;
-          console.warn(`[GoogleVisionService] Attempt ${attempt} returned status ${response.status}. Retrying in ${delay}ms...`);
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
+      if ((response.status === 503 || response.status === 429) && attempt < maxAttempts) {
+        console.warn(`[Gemini PostCheck] Attempt ${attempt} returned status ${response.status}. Retrying in 2000ms...`);
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
       }
       break;
     } catch (netErr) {
-      clearTimeout(attemptTimeout);
+      clearTimeout(timeout);
       if (attempt < maxAttempts) {
-        const delay = attempt * 2000;
-        console.warn(`[GoogleVisionService] Attempt ${attempt} error (${netErr.message}). Retrying in ${delay}ms...`);
-        await new Promise((r) => setTimeout(r, delay));
+        console.warn(`[Gemini PostCheck] Attempt ${attempt} network error (${netErr.message}). Retrying in 2000ms...`);
+        await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
       throw netErr;
     }
   }
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    const err = new Error(`Google Vision OCR failed with status ${response.status}: ${errText.slice(0, 150)}`);
-    if (response.status === 400 || response.status === 401 || response.status === 403 || /api_key|expired|billing|permission/i.test(errText)) {
+  if (!response || !response.ok) {
+    const errText = await response?.text().catch(() => '') || '';
+    const err = new Error(`Gemini check failed with status ${response?.status || 'network_error'}: ${errText.slice(0, 150)}`);
+    if (response?.status === 400 || response?.status === 401 || response?.status === 403 || /api_key|expired|billing|permission/i.test(errText)) {
       err.isKeyError = true;
-      err.code = 'VISION_KEY_EXPIRED';
+      err.code = 'GEMINI_KEY_EXPIRED';
     }
     throw err;
   }
 
+  // 6. Parse and Validate JSON
   const resJson = await response.json();
   const rawText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText) {
-    throw new Error('Google Vision OCR returned an empty candidate payload.');
+    throw new Error('Gemini API returned an empty candidate payload.');
   }
 
-  const parsed = JSON.parse(rawText);
-  const ocrText = String(parsed.ocr_text || '').trim();
-  const rawBoxes = Array.isArray(parsed.ocr_boxes) ? parsed.ocr_boxes : [];
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json\s*/, '');
+  if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\s*/, '');
+  if (cleaned.endsWith('```')) cleaned = cleaned.replace(/```$/, '');
+  cleaned = cleaned.trim();
 
-  // Normalize bounding boxes to strict 0..100 percentage floats
-  const normalizedBoxes = rawBoxes.map((b) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (parseErr) {
+    throw new Error(`Gemini returned invalid JSON: ${parseErr.message}`);
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Gemini JSON output is not a valid object');
+  }
+
+  // 7. Normalize OCR Boxes to strict percentages
+  const rawBoxes = Array.isArray(parsed.ocr_boxes) ? parsed.ocr_boxes : [];
+  const normalizedBoxes = rawBoxes.map((b, idx) => {
     const text = String(b.text || '').trim();
     let conf = Number(b.confidence ?? 0.95);
     if (conf > 1.0) conf = conf / 100.0;
@@ -193,12 +302,12 @@ Where rect coordinates are percentages from 0.0 to 100.0 relative to image width
     let width = Number(r.width ?? 100);
     let height = Number(r.height ?? 10);
 
-    // If coordinates are in pixel space (> 100), convert to percentage
+    // If coordinates were returned in pixel space (> 100), convert to percentage
     if (left > 100 || width > 100 || top > 100) {
-      left = Math.round((left / dims.width) * 10000) / 100;
-      top = Math.round((top / dims.height) * 10000) / 100;
-      width = Math.round((width / dims.width) * 10000) / 100;
-      height = Math.round((height / dims.height) * 10000) / 100;
+      left = Math.round((left / posterDims.width) * 10000) / 100;
+      top = Math.round((top / posterDims.height) * 10000) / 100;
+      width = Math.round((width / posterDims.width) * 10000) / 100;
+      height = Math.round((height / posterDims.height) * 10000) / 100;
     }
 
     left = Math.max(0, Math.min(99, left));
@@ -207,6 +316,7 @@ Where rect coordinates are percentages from 0.0 to 100.0 relative to image width
     height = Math.max(1, Math.min(100 - top, height));
 
     return {
+      id: idx + 1,
       text,
       confidence: conf,
       rect: {
@@ -218,25 +328,132 @@ Where rect coordinates are percentages from 0.0 to 100.0 relative to image width
     };
   }).filter((b) => b.text.length > 0);
 
-  // Compute average confidence
-  let avgConf = 0.95;
-  if (normalizedBoxes.length > 0) {
-    const sum = normalizedBoxes.reduce((acc, cur) => acc + cur.confidence, 0);
-    avgConf = sum / normalizedBoxes.length;
+  let avgConf = Number(parsed.ocr_confidence_avg);
+  if (!Number.isFinite(avgConf) || avgConf <= 0) {
+    if (normalizedBoxes.length > 0) {
+      const sum = normalizedBoxes.reduce((acc, cur) => acc + cur.confidence, 0);
+      avgConf = sum / normalizedBoxes.length;
+    } else {
+      avgConf = 0.95;
+    }
+  }
+  if (avgConf > 1.0) avgConf = avgConf / 100.0;
+
+  // 8. Normalize Logo Check
+  let logoCheck = null;
+  if (!hasLogo) {
+    logoCheck = {
+      status: 'SKIPPED',
+      found: false,
+      score: 0.0,
+      location: 'unknown',
+      location_hindi: LOCATION_HINDI_MAP.unknown,
+      size_percent: 0,
+      reason: 'SKIPPED',
+      suggestion: SUGGESTION_RULES.SKIPPED,
+      checked_by: 'Gemini',
+    };
+  } else {
+    const rawLc = parsed.logo_check || {};
+    const found = Boolean(rawLc.found);
+    let score = Number(rawLc.score ?? (found ? 0.95 : 0.0));
+    if (score > 1.0) score = score / 100.0;
+    score = Math.max(0.0, Math.min(1.0, score));
+
+    const rawLoc = String(rawLc.location || 'unknown').toLowerCase().replace('_', '-');
+    let locKey = 'unknown';
+    for (const k of Object.keys(LOCATION_HINDI_MAP)) {
+      if (rawLoc.includes(k)) {
+        locKey = k;
+        break;
+      }
+    }
+    const locHindi = rawLc.location_hindi || LOCATION_HINDI_MAP[locKey] || LOCATION_HINDI_MAP.unknown;
+    const sizePct = Math.max(0, parseInt(rawLc.size_percent ?? 0, 10));
+
+    let reason = String(rawLc.reason || '').toUpperCase().trim();
+    if (!SUGGESTION_RULES[reason]) {
+      reason = (found && score >= 0.85) ? 'CORRECT' : 'MISSING';
+    }
+
+    const isPass = found && score >= 0.85 && reason === 'CORRECT';
+    const status = isPass ? 'PASS' : 'FAIL';
+    const suggestion = rawLc.suggestion && String(rawLc.suggestion).trim()
+      ? String(rawLc.suggestion).trim()
+      : SUGGESTION_RULES[reason] || SUGGESTION_RULES.MISSING;
+
+    logoCheck = {
+      status,
+      found,
+      score: Math.round(score * 100) / 100,
+      location: locKey,
+      location_hindi: locHindi,
+      size_percent: sizePct,
+      reason,
+      suggestion,
+      checked_by: 'Gemini',
+    };
   }
 
+  // 9. Normalize Spelling Issues
+  const rawSpelling = Array.isArray(parsed.spelling_issues) ? parsed.spelling_issues : [];
+  const normalizedSpelling = rawSpelling
+    .filter((s) => s && (s.word || s.original))
+    .map((s) => ({
+      word: String(s.word || s.original || '').trim(),
+      suggestions: Array.isArray(s.suggestions)
+        ? s.suggestions.map(String)
+        : s.suggestion
+        ? [String(s.suggestion).trim()]
+        : [],
+      script: String(s.script || 'en').toLowerCase(),
+      reason: String(s.reason || 'Spelling check').trim(),
+      source: 'image',
+    }));
+
+  // 10. Normalize Banned Words & Mandatory
+  const bannedFound = Array.isArray(parsed.banned_words_found)
+    ? parsed.banned_words_found.map(String).filter(Boolean)
+    : [];
+  const missingMandatory = Array.isArray(parsed.missing_mandatory_phrases)
+    ? parsed.missing_mandatory_phrases.map(String).filter(Boolean)
+    : [];
+
+  const brandIdentityCheck = parsed.brand_identity_check && typeof parsed.brand_identity_check === 'object'
+    ? parsed.brand_identity_check
+    : { possible_brand_name_error: null, phone_verification: [] };
+
   return {
-    ocr_text: ocrText,
-    ocr_extracted_text: ocrText,
+    ocr_text: String(parsed.ocr_text || '').trim(),
+    ocr_extracted_text: String(parsed.ocr_text || '').trim(),
     ocr_boxes: normalizedBoxes,
+    ocr_issues: normalizedBoxes,
     ocr_confidence: Math.round(avgConf * 10000) / 100,
     ocr_confidence_avg: Math.round(avgConf * 100) / 100,
     ocr_reliable: avgConf >= 0.8,
+    spelling_issues: normalizedSpelling,
+    banned_words_found: bannedFound,
+    missing_mandatory_phrases: missingMandatory,
+    brand_identity_check: brandIdentityCheck,
+    logo_check: logoCheck,
+    suggestion: String(parsed.suggestion || '').trim(),
+    ai_provider: 'gemini',
+    fallback_used: false,
+    fallback_reason: 'none',
     image_status: 'completed',
-    engine: 'google_vision',
+    engine: 'gemini_multimodal',
   };
 };
 
+/**
+ * Backward compatibility wrapper for runGoogleVisionOCR
+ */
+const runGoogleVisionOCR = async (params) => {
+  return runGoogleVisionPostCheck(params);
+};
+
 module.exports = {
+  isDummyKey,
+  runGoogleVisionPostCheck,
   runGoogleVisionOCR,
 };

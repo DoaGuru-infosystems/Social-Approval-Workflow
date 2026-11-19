@@ -5,10 +5,36 @@ const fs = require('fs');
 const PYTHON_SCRIPT_PATH = path.resolve(__dirname, '..', 'a2-ocr-server', 'brand_logo_check.py');
 
 /**
+ * Foolproof asset path resolver across Windows and POSIX environments.
+ */
+const resolveAssetPath = (rawPath) => {
+  if (!rawPath || typeof rawPath !== 'string') return null;
+
+  try {
+    if (fs.existsSync(rawPath)) return path.resolve(rawPath);
+  } catch (_) {}
+
+  const clean = rawPath.replace(/^[/\\]+/, '');
+  const candBackend = path.resolve(__dirname, '..', clean);
+  if (fs.existsSync(candBackend)) return candBackend;
+
+  const candCwd = path.resolve(process.cwd(), clean);
+  if (fs.existsSync(candCwd)) return candCwd;
+
+  const candCwdBackend = path.resolve(process.cwd(), 'backend', clean);
+  if (fs.existsSync(candCwdBackend)) return candCwdBackend;
+
+  const candDirname = path.resolve(__dirname, clean);
+  if (fs.existsSync(candDirname)) return candDirname;
+
+  return null;
+};
+
+/**
  * Check Brand Logo in Post Image.
  * Flow:
  * - If reference logo is not configured / not on disk: returns SKIPPED (not FAIL).
- * - If reference logo is configured: executes brand_logo_check.py (AI FIRST, PYTHON FALLBACK).
+ * - If reference logo is configured: executes brand_logo_check.py (SIFT + ORB + Template Matching).
  *
  * @param {Object} params
  * @param {string} params.postImagePath Absolute or relative path to post image
@@ -26,16 +52,15 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
       location_hindi: 'Kahin nahi mila',
       size_percent: 0,
       reason: 'SKIPPED',
-      suggestion: 'Logo Check skipped - Brand Guidelines me logo upload nahi hai',
+      suggestion: 'Logo Check Skipped - Logo upload nahi hai',
+      checked_by: 'Python',
     };
   }
 
   // Resolve reference logo path
-  let resolvedLogoPath = path.isAbsolute(referenceLogoPath)
-    ? referenceLogoPath
-    : path.resolve(path.join(__dirname, '..', referenceLogoPath.replace(/^\/+/, '')));
+  const resolvedLogoPath = resolveAssetPath(referenceLogoPath);
 
-  if (!fs.existsSync(resolvedLogoPath)) {
+  if (!resolvedLogoPath || !fs.existsSync(resolvedLogoPath)) {
     return {
       status: 'SKIPPED',
       found: false,
@@ -44,16 +69,15 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
       location_hindi: 'Kahin nahi mila',
       size_percent: 0,
       reason: 'SKIPPED',
-      suggestion: 'Logo Check skipped - Brand Guidelines me logo upload nahi hai',
+      suggestion: 'Logo Check Skipped - Logo upload nahi hai',
+      checked_by: 'Python',
     };
   }
 
   // Resolve post image path
-  let resolvedPostPath = path.isAbsolute(postImagePath)
-    ? postImagePath
-    : path.resolve(path.join(__dirname, '..', postImagePath.replace(/^\/+/, '')));
+  const resolvedPostPath = resolveAssetPath(postImagePath);
 
-  if (!fs.existsSync(resolvedPostPath)) {
+  if (!resolvedPostPath || !fs.existsSync(resolvedPostPath)) {
     return {
       status: 'FAIL',
       found: false,
@@ -62,11 +86,12 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
       location_hindi: 'Kahin nahi mila',
       size_percent: 0,
       reason: 'MISSING',
-      suggestion: 'Post image file not found on disk for logo inspection.',
+      suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+      checked_by: 'Python',
     };
   }
 
-  // 2. Execute Python brand_logo_check.py (AI First, Python Fallback)
+  // 2. Execute Python brand_logo_check.py (SIFT + ORB + Multi-scale Template Matching)
   return new Promise((resolve) => {
     const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
     execFile(
@@ -90,6 +115,9 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
             const jsonEnd = stdout.lastIndexOf('}');
             if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
               const parsed = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
+              if (!parsed.checked_by) {
+                parsed.checked_by = 'Python';
+              }
               return resolve(parsed);
             }
           } catch (parseErr) {
@@ -107,6 +135,7 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
           size_percent: 0,
           reason: 'MISSING',
           suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+          checked_by: 'Python',
         });
       }
     );

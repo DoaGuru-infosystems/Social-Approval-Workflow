@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import ImageCheckSkeleton from '../components/ImageCheckSkeleton';
 import AnnotatedPosterOCR from '../components/AnnotatedPosterOCR';
+import LogoCheckCard from '../components/LogoCheckCard';
 
 const SMODashboard = () => {
   const { showToast } = useToast();
@@ -126,6 +127,10 @@ const SMODashboard = () => {
                       banned_words_found: res.banned_words_found,
                       missing_mandatory_phrases: res.missing_mandatory_phrases,
                       brand_identity_check: res.brand_identity_check,
+                      logo_check: res.logo_check || res.combined_ai_check?.logo_check || null,
+                      ai_provider: res.ai_provider || res.combined_ai_check?.ai_provider || 'gemini',
+                      fallback_used: res.fallback_used ?? res.combined_ai_check?.fallback_used ?? false,
+                      fallback_reason: res.fallback_reason || res.combined_ai_check?.fallback_reason || 'none',
                     },
                   };
                 }
@@ -1399,6 +1404,14 @@ const SMODashboard = () => {
                         fallbackUsed={inspectingPost.latest_ai_check?.fallback_used}
                       />
                     )}
+                    {/* Dedicated Brand Logo Verification Card */}
+                    <div className="pt-2">
+                      <LogoCheckCard
+                        logoCheck={inspectingPost.latest_ai_check?.logo_check}
+                        aiProvider={inspectingPost.latest_ai_check?.ai_provider}
+                        fallbackUsed={inspectingPost.latest_ai_check?.fallback_used}
+                      />
+                    </div>
                   </div>
                 ) : null}
 

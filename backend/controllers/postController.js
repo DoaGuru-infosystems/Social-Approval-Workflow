@@ -98,7 +98,11 @@ const executeBackgroundImageCheck = async ({
            image_error = ?,
            banned_words_found = ?,
            missing_mandatory_phrases = ?,
-           brand_identity_check = ?
+           brand_identity_check = ?,
+           logo_check = ?,
+           ai_provider = ?,
+           fallback_used = ?,
+           fallback_reason = ?
        WHERE post_id = ? AND revision_id = ?`,
       [
         JSON.stringify(combinedResult.spelling_issues),
@@ -113,6 +117,10 @@ const executeBackgroundImageCheck = async ({
         JSON.stringify(combinedResult.banned_words_found),
         JSON.stringify(combinedResult.missing_mandatory_phrases),
         JSON.stringify(combinedResult.brand_identity_check || null),
+        JSON.stringify(combinedResult.logo_check || null),
+        combinedResult.ai_provider || 'gemini',
+        combinedResult.fallback_used ? 1 : 0,
+        combinedResult.fallback_reason || 'none',
         postId,
         revisionId,
       ]
@@ -227,8 +235,8 @@ const createPost = async (req, res) => {
     await pool.query(
       `INSERT INTO ai_check_results (
          post_id, revision_id, spelling_issues, grammar_suggestions, key_error, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
-         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check, logo_check, ai_provider, fallback_used, fallback_reason
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
@@ -245,6 +253,12 @@ const createPost = async (req, res) => {
         JSON.stringify(initialAiCheck.banned_words_found),
         JSON.stringify(initialAiCheck.missing_mandatory_phrases),
         JSON.stringify(initialAiCheck.brand_identity_check || null),
+        JSON.stringify(initialAiCheck.logo_check || null),
+        initialAiCheck.ai_provider || 'gemini',
+        initialAiCheck.fallback_used ? 1 : 0,
+        initialAiCheck.fallback_reason || 'none',
+      ]
+    );
       ]
     );
 
@@ -408,8 +422,8 @@ const revisePost = async (req, res) => {
     await pool.query(
       `INSERT INTO ai_check_results (
          post_id, revision_id, spelling_issues, grammar_suggestions, key_error, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
-         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check, logo_check, ai_provider, fallback_used, fallback_reason
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
@@ -426,6 +440,12 @@ const revisePost = async (req, res) => {
         JSON.stringify(initialAiCheck.banned_words_found),
         JSON.stringify(initialAiCheck.missing_mandatory_phrases),
         JSON.stringify(initialAiCheck.brand_identity_check || null),
+        JSON.stringify(initialAiCheck.logo_check || null),
+        initialAiCheck.ai_provider || 'gemini',
+        initialAiCheck.fallback_used ? 1 : 0,
+        initialAiCheck.fallback_reason || 'none',
+      ]
+    );
       ]
     );
 
@@ -1180,6 +1200,11 @@ const getAiStatus = async (req, res) => {
     const bannedWords = typeof ai.banned_words_found === 'string' ? JSON.parse(ai.banned_words_found) : (ai.banned_words_found || []);
     const missingMandatory = typeof ai.missing_mandatory_phrases === 'string' ? JSON.parse(ai.missing_mandatory_phrases) : (ai.missing_mandatory_phrases || []);
     const brandIdentity = typeof ai.brand_identity_check === 'string' ? JSON.parse(ai.brand_identity_check) : (ai.brand_identity_check || null);
+    const logoCheck = typeof ai.logo_check === 'string' ? JSON.parse(ai.logo_check) : (ai.logo_check || null);
+    const aiProvider = ai.ai_provider || 'gemini';
+    const fallbackUsed = Boolean(Number(ai.fallback_used));
+    const fallbackReason = ai.fallback_reason || 'none';
+    const hasLogoError = Boolean(logoCheck && logoCheck.status === 'FAIL');
 
     const imageStatus = ai.image_status || 'completed';
     const textStatus = ai.text_status || 'completed';
@@ -1194,6 +1219,7 @@ const getAiStatus = async (req, res) => {
         spellingIssues.length === 0 &&
         bannedWords.length === 0 &&
         missingMandatory.length === 0 &&
+        !hasLogoError &&
         !brandIdentity?.possible_brand_name_error &&
         !(brandIdentity?.phone_verification || []).some((p) => p.status === 'mismatch_warning' || p.status === 'unknown_phone'),
       spelling_issues: spellingIssues,
@@ -1210,6 +1236,10 @@ const getAiStatus = async (req, res) => {
       banned_words_found: bannedWords,
       missing_mandatory_phrases: missingMandatory,
       brand_identity_check: brandIdentity,
+      logo_check: logoCheck,
+      ai_provider: aiProvider,
+      fallback_used: fallbackUsed,
+      fallback_reason: fallbackReason,
     };
 
     return res.json({
@@ -1227,6 +1257,10 @@ const getAiStatus = async (req, res) => {
       banned_words_found: bannedWords,
       missing_mandatory_phrases: missingMandatory,
       brand_identity_check: brandIdentity,
+      logo_check: logoCheck,
+      ai_provider: aiProvider,
+      fallback_used: fallbackUsed,
+      fallback_reason: fallbackReason,
       combined_ai_check: combinedAiCheck,
     });
   } catch (error) {

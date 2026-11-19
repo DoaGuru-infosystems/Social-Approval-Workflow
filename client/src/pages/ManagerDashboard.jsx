@@ -6,6 +6,7 @@ import { SERVER_URL } from '../utils/constants';
 import { formatDate } from '../utils/helpers';
 import { useToast } from '../context/ToastContext';
 import AnnotatedPosterOCR from '../components/AnnotatedPosterOCR';
+import LogoCheckCard from '../components/LogoCheckCard';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -389,6 +390,17 @@ const ManagerDashboard = () => {
                               <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                               <span>No Hindi or English spelling issues were found.</span>
                             </p>
+                          )}
+
+                          {/* Brand Logo Verification Card */}
+                          {imgSrc && (
+                            <div className="pt-2">
+                              <LogoCheckCard
+                                logoCheck={aiReport.logo_check}
+                                aiProvider={aiReport.ai_provider}
+                                fallbackUsed={aiReport.fallback_used}
+                              />
+                            </div>
                           )}
 
                           {/* PaddleOCR Annotated Poster Box */}

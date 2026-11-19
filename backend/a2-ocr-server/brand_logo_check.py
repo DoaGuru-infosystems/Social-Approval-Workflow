@@ -25,11 +25,12 @@ PASS_THRESHOLD = 0.85
 # Suggestion Rules (System fallback if AI gives no suggestion or on Python fallback)
 SUGGESTION_RULES = {
     "MISSING": "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
-    "WRONG_LOGO": "Ye galat / purana logo hai. Brand Rules se naya logo download karke wahi lagayein.",
+    "WRONG_LOGO": "Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein.",
     "TOO_SMALL": "Logo bahut chhota hai. Logo ko kam se kam 10% bada karein.",
     "HIDDEN": "Logo text ke peeche chhup gaya hai. Logo ko khali jagah pe le jayein.",
     "COLOR_CHANGED": "Logo ka rang badal gaya hai. Logo ka original rang wapas rakhein.",
     "CORRECT": "Logo bilkul sahi jagah aur size me laga hua hai.",
+    "SKIPPED": "Logo Check Skipped - Logo upload nahi hai",
 }
 
 LOCATION_HINDI_MAP = {
@@ -46,10 +47,17 @@ LOCATION_HINDI_MAP = {
 }
 
 
+def _is_dummy_key(key):
+    if not key or not isinstance(key, str):
+        return True
+    k = key.strip().lower()
+    return k == "" or k == "your_gemini_api_key" or "dummy" in k or "test" in k
+
+
 def _get_api_key():
-    """Retrieve Gemini API key from environment or local .env file."""
+    """Retrieve Gemini API key from environment or local .env file. Skips dummy/test keys."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if api_key and not api_key.startswith("DUMMY"):
+    if api_key and not _is_dummy_key(api_key):
         return api_key.strip()
 
     # Try loading from backend/.env if not present in os.environ
@@ -67,7 +75,7 @@ def _get_api_key():
                         line = line.strip()
                         if line.startswith("GEMINI_API_KEY="):
                             val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                            if val and not val.startswith("DUMMY"):
+                            if val and not _is_dummy_key(val):
                                 return val
             except Exception:
                 pass
@@ -507,6 +515,7 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
                 "size_percent": size_pct,
                 "reason": "CORRECT",
                 "suggestion": suggestion,
+                "checked_by": "Gemini",
             }
 
     # ==========================================================================
@@ -543,6 +552,7 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
         "size_percent": size_pct,
         "reason": reason,
         "suggestion": suggestion,
+        "checked_by": "Python",
     }
 
 

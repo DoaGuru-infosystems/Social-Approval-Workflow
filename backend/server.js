@@ -181,6 +181,11 @@ const startServer = async () => {
     if (result && result.affectedRows > 0) {
       console.log(`⚠️ Recovered ${result.affectedRows} pending AI check(s) interrupted by server restart.`);
     }
+    // Auto-migration for logo_check and fallback tracking columns
+    await pool.query('ALTER TABLE ai_check_results ADD COLUMN IF NOT EXISTS logo_check JSON NULL');
+    await pool.query('ALTER TABLE ai_check_results ADD COLUMN IF NOT EXISTS ai_provider VARCHAR(20) DEFAULT "gemini"');
+    await pool.query('ALTER TABLE ai_check_results ADD COLUMN IF NOT EXISTS fallback_used BOOLEAN DEFAULT FALSE');
+    await pool.query('ALTER TABLE ai_check_results ADD COLUMN IF NOT EXISTS fallback_reason VARCHAR(50) DEFAULT "none"');
   } catch (err) {
     console.warn(`⚠️ Startup recovery query notice: ${err.message}`);
   }

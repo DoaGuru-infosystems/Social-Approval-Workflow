@@ -301,15 +301,17 @@ def process_post(data, reader=None, dictionaries=None):
         if img_width <= 0:
             img_width = 1
 
-        # 2. Generate TOP 10 diverse families in RAM (Original, Grayscale, CLAHE Soft, CLAHE Enhanced, CLAHE Strong, Retinex, Contrast Normalized, Otsu, Adaptive, Sharpened)
-        top10_variants, _scores, top10_names = get_top10_variants(bgr_image)
-        top10_used = list(top10_names)
+        # 2. Generate TOP 7 diverse families in RAM via cv2_preprocess.get_top7_variants
+        top7_variants, _scores, top7_names = get_top7_variants(bgr_image)
+        top7_used = list(top7_names)
 
-        # Brand Logo Verification (AI FIRST, PYTHON FALLBACK) - RAM only, downscaled before check
+        # Brand Logo Verification (OpenCV Python SIFT + ORB + Template Matching) - RAM only, downscaled before check
         ref_logo = data.get("reference_logo_path") or data.get("reference_logo_base64") or data.get("reference_logo")
         if ref_logo:
             try:
                 logo_check_result = check_brand_logo(bgr_image, ref_logo)
+                if not logo_check_result.get("checked_by"):
+                    logo_check_result["checked_by"] = "Python"
             except Exception as err:
                 print(f"[ProcessPost] Logo check error: {err}", file=sys.stderr)
                 logo_check_result = {
@@ -321,6 +323,7 @@ def process_post(data, reader=None, dictionaries=None):
                     "size_percent": 0,
                     "reason": "MISSING",
                     "suggestion": "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
+                    "checked_by": "Python",
                 }
 
         # 3. Initialize reader (use provided reader if available, else load hi)
@@ -332,7 +335,7 @@ def process_post(data, reader=None, dictionaries=None):
         t_ocr_start = time.perf_counter()
         try:
             # a) Run TOP 1 variant with hi reader
-            top1_name, top1_img = top10_variants[0]
+            top1_name, top1_img = top7_variants[0]
             top1_detections = hi_reader.ocr(top1_img, cls=True)
             top1_accepted, top1_rejected = _parse_detections(top1_detections, per_block_threshold)
             top1_text = " ".join([b[0] for b in top1_accepted + top1_rejected])
@@ -351,14 +354,14 @@ def process_post(data, reader=None, dictionaries=None):
                     except Exception:
                         en_reader = hi_reader
 
-                # Re-run all 10 variants with en reader
-                for var_name, var_img in top10_variants:
+                # Re-run all 7 variants with en reader
+                for var_name, var_img in top7_variants:
                     det = en_reader.ocr(var_img, cls=True)
                     all_variant_results.append(_parse_detections(det, per_block_threshold))
             else:
-                # Keep TOP 1 result, run remaining 9 variants with hi reader
+                # Keep TOP 1 result, run remaining 6 variants with hi reader
                 all_variant_results.append((top1_accepted, top1_rejected))
-                for var_name, var_img in top10_variants[1:]:
+                for var_name, var_img in top7_variants[1:]:
                     det = hi_reader.ocr(var_img, cls=True)
                     all_variant_results.append(_parse_detections(det, per_block_threshold))
 
@@ -389,7 +392,7 @@ def process_post(data, reader=None, dictionaries=None):
         for norm_w, cand_dict in word_candidates_map.items():
             if len(cand_dict) > 1:
                 winner_word, winner_conf, winner_score = vote_best_word_reading(
-                    cand_dict, hindi_dict, whitelist_set, total_variants=len(top10_variants)
+                    cand_dict, hindi_dict, whitelist_set, total_variants=len(top7_variants)
                 )
                 for cand in cand_dict.keys():
                     if cand != winner_word:
@@ -565,6 +568,8 @@ def process_post(data, reader=None, dictionaries=None):
             ocr_confidence_avg = 0.0
             ocr_reliable = False
 
+    fallback_reason = data.get("fallback_reason") or "gemini_failed"
+
     return {
         "ocr_text": ocr_text,
         "ocr_boxes": ocr_boxes,
@@ -573,9 +578,12 @@ def process_post(data, reader=None, dictionaries=None):
         "ocr_blocks_total": ocr_blocks_total,
         "ocr_blocks_excluded_low_confidence": ocr_blocks_excluded_low_confidence,
         "detected_language": detected_language,
-        "top7_used": top10_used,
-        "top10_used": top10_used,
+        "top7_used": top7_used,
+        "top10_used": top7_used,
         "logo_check": logo_check_result,
+        "ai_provider": "python",
+        "fallback_used": True,
+        "fallback_reason": fallback_reason,
         "_internal_timings": {
             "ocr_inference_ms": round(ocr_inference_ms, 2),
         },

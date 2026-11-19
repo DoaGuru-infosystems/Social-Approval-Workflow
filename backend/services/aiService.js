@@ -7,6 +7,8 @@ const brandRulesService = require('./brandRulesService');
 const textCorrectionService = require('./textCorrectionService');
 const brandIdentityVerificationService = require('./brandIdentityVerificationService');
 const geminiOcrService = require('./geminiOcrService');
+const googleVisionService = require('./googleVisionService');
+const brandLogoService = require('./brandLogoService');
 const grammarService = require('./grammarService');
 const fuzzball = require('fuzzball');
 
@@ -253,11 +255,31 @@ const runRemoteAICheck = async (inputData) => {
   return result;
 };
 
+const resolveAssetPath = (rawPath) => {
+  if (!rawPath || typeof rawPath !== 'string') return null;
+
+  try {
+    if (fs.existsSync(rawPath)) return path.resolve(rawPath);
+  } catch (_) {}
+
+  const clean = rawPath.replace(/^[/\\]+/, '');
+  const candBackend = path.resolve(backendRoot, clean);
+  if (fs.existsSync(candBackend)) return candBackend;
+
+  const candCwd = path.resolve(process.cwd(), clean);
+  if (fs.existsSync(candCwd)) return candCwd;
+
+  const candCwdBackend = path.resolve(process.cwd(), 'backend', clean);
+  if (fs.existsSync(candCwdBackend)) return candCwdBackend;
+
+  const candDirname = path.resolve(__dirname, clean);
+  if (fs.existsSync(candDirname)) return candDirname;
+
+  return null;
+};
+
 const resolveImagePath = (imagePath) => {
-  if (!imagePath) return null;
-  if (path.isAbsolute(imagePath)) return path.resolve(imagePath);
-  if (fs.existsSync(path.resolve(imagePath))) return path.resolve(imagePath);
-  return path.resolve(path.join(backendRoot, imagePath));
+  return resolveAssetPath(imagePath);
 };
 
 /**
@@ -985,6 +1007,26 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   let ocrEngineUsed = '';
   let keyError = null;
   let fallbackUsed = false;
+  let fallbackReason = 'none';
+  let aiProvider = 'gemini';
+
+  // Resolve reference logo path on disk
+  let resolvedLogoPath = null;
+  if (guidelines.reference_logo_url) {
+    resolvedLogoPath = resolveAssetPath(guidelines.reference_logo_url);
+    if (!resolvedLogoPath || !fs.existsSync(resolvedLogoPath)) {
+      resolvedLogoPath = null;
+    }
+  }
+
+  const brandRules = {
+    brand_name: guidelines.organization_name,
+    whitelist: guidelines.whitelist,
+    banned: guidelines.banned,
+    mandatory: guidelines.mandatory,
+    expected_phones: expectedPhones,
+    has_reference_logo: Boolean(resolvedLogoPath),
+  };
 
   const tryA2PaddleOCR = async () => {
     return await runRemoteAICheck({
@@ -995,43 +1037,67 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       banned_words: guidelines.banned,
       mandatory_phrases: guidelines.mandatory,
       expected_phones: expectedPhones,
+      reference_logo_path: resolvedLogoPath,
     });
   };
 
-  const tryGeminiOCR = async () => {
-    return await geminiOcrService.runGeminiOCR({
-      imagePath: resolvedImagePath,
-    });
-  };
+  const geminiApiKey = (process.env.GEMINI_API_KEY || '').trim();
+  const isDummy = googleVisionService.isDummyKey(geminiApiKey);
 
-  try {
-    // 1. PRIMARY: Gemini Multimodal AI OCR (gemini-flash-latest)
-    const aiResult = await tryGeminiOCR();
-    const extractedText = (aiResult?.ocr_text || aiResult?.text || '').trim();
-    if (!extractedText) {
-      throw new Error('Gemini AI returned empty text');
-    }
-    remoteResult = aiResult;
-    ocrEngineUsed = 'gemini_ai';
-    fallbackUsed = false;
-  } catch (aiError) {
-    // 2. FALLBACK (only if Gemini AI fails, errors, or returns empty text): A2 Remote PaddleOCR
-    console.log('[OCR Pipeline] Gemini AI OCR failed, falling back to A2 PaddleOCR:', aiError.message);
+  if (isDummy) {
+    // 3. DUMMY MODE = NO PASS: Skip Gemini, never return PASS in dummy mode, guaranteed Python fallback.
+    console.log('[Post Check] Gemini DUMMY mode me hai - Skipping Gemini, routing to guaranteed Python Fallback.');
     fallbackUsed = true;
-    ocrEngineUsed = 'a2_paddleocr';
+    fallbackReason = 'dummy_mode';
+    aiProvider = 'python';
     keyError = {
       service: 'gemini_ai',
-      code: 'GEMINI_KEY_EXPIRED',
-      user_message:
-        'AI se check nahi hua, A2 PaddleOCR se check kiya gaya (Warning: Hindi matra aur OCR text ki accuracy kam ho sakti hai, kripya poster manually verify karein).',
+      code: 'GEMINI_DUMMY_MODE',
+      user_message: 'Gemini DUMMY mode me hai, Python fallback se check kiya gaya.',
     };
+  } else {
+    try {
+      // 2. GEMINI PRIMARY: Multimodal 5-in-1 check via googleVisionService
+      const aiResult = await googleVisionService.runGoogleVisionPostCheck({
+        imagePath: resolvedImagePath,
+        referenceLogoPath: resolvedLogoPath,
+        brandRules,
+      });
+
+      const extractedText = (aiResult?.ocr_text || aiResult?.text || '').trim();
+      if (!extractedText) {
+        throw new Error('Gemini AI returned empty text');
+      }
+      remoteResult = aiResult;
+      ocrEngineUsed = 'gemini_multimodal';
+      aiProvider = 'gemini';
+      fallbackUsed = false;
+      fallbackReason = 'none';
+    } catch (aiError) {
+      // 4. PYTHON FALLBACK - GUARANTEED: Only if Gemini fails, errors, or returns empty text
+      console.log('[OCR Pipeline] Gemini AI check failed, falling back to Python PaddleOCR:', aiError.message);
+      fallbackUsed = true;
+      fallbackReason = aiError.isDummy ? 'dummy_mode' : 'gemini_failed';
+      aiProvider = 'python';
+      keyError = {
+        service: 'gemini_ai',
+        code: aiError.code || 'GEMINI_KEY_EXPIRED',
+        user_message:
+          'AI se check nahi hua, Python PaddleOCR se check kiya gaya (Warning: Hindi matra aur OCR text ki accuracy kam ho sakti hai, kripya poster manually verify karein).',
+      };
+    }
+  }
+
+  if (fallbackUsed || !remoteResult) {
+    ocrEngineUsed = 'a2_paddleocr';
+    aiProvider = 'python';
     try {
       remoteResult = await tryA2PaddleOCR();
     } catch (a2Err) {
-      console.error('[OCR Pipeline] Both Gemini AI OCR and A2 PaddleOCR failed:', a2Err.message);
+      console.error('[OCR Pipeline] Both Gemini AI and A2 PaddleOCR failed:', a2Err.message);
       return {
         image_status: 'failed',
-        image_error: `Gemini AI OCR failed (${aiError.message}) and A2 PaddleOCR fallback failed (${a2Err.message})`,
+        image_error: `Gemini AI failed and A2 PaddleOCR fallback failed (${a2Err.message})`,
         passed: false,
         summary: `Image OCR failed: Both Gemini AI and A2 fallback unreachable`,
         ocr_extracted_text: '',
@@ -1044,8 +1110,11 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
         noise_tokens: [],
         banned_words_found: [],
         brand_identity_check: null,
+        logo_check: null,
         ocr_engine: 'none',
+        ai_provider: 'python',
         fallback_used: true,
+        fallback_reason: fallbackReason,
         key_error: keyError,
       };
     }
@@ -1293,40 +1362,50 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       String(p.found_phone || '').replace(/\D/g, '').length === 10
   );
 
-  // Brand Logo Verification (AI First, Python Fallback)
-  const brandLogoService = require('./brandLogoService');
+  // Brand Logo Verification (Gemini Primary, Guaranteed Python Fallback)
   let logoCheck = remoteResult?.logo_check || null;
-  if (!logoCheck) {
+
+  if (!resolvedLogoPath) {
+    // 5. Logo upload nahi hai to SKIPPED dikhao, FAIL mat maano
+    logoCheck = {
+      status: 'SKIPPED',
+      found: false,
+      score: 0.0,
+      location: 'unknown',
+      location_hindi: 'Kahin nahi mila',
+      size_percent: 0,
+      reason: 'SKIPPED',
+      suggestion: 'Logo Check Skipped - Logo upload nahi hai',
+      checked_by: aiProvider === 'gemini' ? 'Gemini' : 'Python',
+    };
+  } else if (fallbackUsed || !logoCheck) {
+    // Python Fallback: guaranteed SIFT + ORB + Template Matching
     try {
       logoCheck = await brandLogoService.checkBrandLogo({
         postImagePath: resolvedImagePath,
-        referenceLogoPath: guidelines.reference_logo_url,
+        referenceLogoPath: resolvedLogoPath,
       });
+      if (!logoCheck.checked_by) {
+        logoCheck.checked_by = 'Python';
+      }
     } catch (logoErr) {
       console.warn('[runImageCheck] Logo check notice:', logoErr.message);
-      if (!guidelines.reference_logo_url) {
-        logoCheck = {
-          status: 'SKIPPED',
-          found: false,
-          score: 0.0,
-          location: 'unknown',
-          location_hindi: 'Kahin nahi mila',
-          size_percent: 0,
-          reason: 'SKIPPED',
-          suggestion: 'Logo Check skipped - Brand Guidelines me logo upload nahi hai',
-        };
-      } else {
-        logoCheck = {
-          status: 'FAIL',
-          found: false,
-          score: 0.0,
-          location: 'unknown',
-          location_hindi: 'Kahin nahi mila',
-          size_percent: 0,
-          reason: 'MISSING',
-          suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
-        };
-      }
+      logoCheck = {
+        status: 'FAIL',
+        found: false,
+        score: 0.0,
+        location: 'unknown',
+        location_hindi: 'Kahin nahi mila',
+        size_percent: 0,
+        reason: 'MISSING',
+        suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+        checked_by: 'Python',
+      };
+    }
+  } else {
+    // Checked by Gemini
+    if (!logoCheck.checked_by) {
+      logoCheck.checked_by = 'Gemini';
     }
   }
 
@@ -1370,8 +1449,10 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     spelling_issues: realSpellingIssues,
     grammar_suggestions: imageGrammarSuggestions,
     ocr_engine: ocrEngineUsed,
-    key_error: imageKeyError,
+    ai_provider: aiProvider,
     fallback_used: fallbackUsed,
+    fallback_reason: fallbackReason,
+    key_error: imageKeyError,
     ocr_doubts: ocrDoubts,
     ocr_issues: annotatedBoxes,
     ocr_boxes: annotatedBoxes,
@@ -1472,6 +1553,7 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     (p) => p.status === 'mismatch_warning' || p.status === 'unknown_phone'
   );
   const hasPhoneIssues = phoneWarnings.length > 0;
+  const hasLogoError = Boolean(imageResult?.logo_check && imageResult.logo_check.status === 'FAIL');
 
   const passed =
     (textResult?.passed !== false) &&
@@ -1480,7 +1562,8 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     !hasBannedWords &&
     !hasMissingMandatory &&
     !hasBrandNameError &&
-    !hasPhoneIssues;
+    !hasPhoneIssues &&
+    !hasLogoError;
 
   let summary = 'Verified Clean';
   if (isImageFailed) {
@@ -1493,6 +1576,8 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     summary = `Flagged: Banned brand terms found (${bannedWordsFound.join(', ')})`;
   } else if (hasBrandNameError) {
     summary = `Brand Identity Error: ${mergedBrandIdentity.possible_brand_name_error}`;
+  } else if (hasLogoError) {
+    summary = `Brand Logo Check: ${imageResult.logo_check.suggestion || 'Logo missing or invalid'}`;
   } else if (hasPhoneIssues) {
     summary = `Phone Verification Alert: ${phoneWarnings[0].message}`;
   } else if (hasMissingMandatory) {
@@ -1504,14 +1589,18 @@ const mergeAiCheckResults = (textResult, imageResult) => {
   }
 
   const activeKeyError = imageResult?.key_error || textResult?.key_error || null;
-  const isFallbackUsed = Boolean(imageResult?.fallback_used);
+  const isFallbackUsed = Boolean(imageResult?.fallback_used || textResult?.fallback_used);
+  const aiProvider = imageResult?.ai_provider || textResult?.ai_provider || 'gemini';
+  const fallbackReason = imageResult?.fallback_reason || textResult?.fallback_reason || 'none';
 
   return {
     passed,
     summary,
     engine: `Hybrid Engine (${imageResult?.ocr_engine || 'auto'}) + Gemini Grammar Check`,
     ocr_engine: imageResult?.ocr_engine || 'auto',
+    ai_provider: aiProvider,
     fallback_used: isFallbackUsed,
+    fallback_reason: fallbackReason,
     key_error: activeKeyError,
     spelling_issues: mergedSpelling,
     grammar_suggestions: mergedGrammar,
