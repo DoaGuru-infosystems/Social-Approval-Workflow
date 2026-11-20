@@ -1477,7 +1477,7 @@ const AdminDashboard = () => {
                               const target = e.currentTarget;
                               if (!target.dataset.fallback && !referenceLogoUrl.startsWith('http')) {
                                 target.dataset.fallback = 'true';
-                                target.src = `http://localhost:5001${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}`;
+                                target.src = `${SERVER_URL}${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}`;
                               }
                             }}
                           />

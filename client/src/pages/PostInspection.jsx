@@ -707,30 +707,65 @@ const PostInspection = () => {
 
               {/* Strict 2-Tier Enforcement Gate Banners */}
               {post.latest_ai_check?.enforcement_state === 'red_block' && (
-                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 space-y-1.5">
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 space-y-2">
                   <div className="flex items-center gap-2">
                     <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
                     <span className="text-xs font-bold uppercase tracking-wider text-rose-900">
                       Submission Blocked (RED BLOCK)
                     </span>
                   </div>
-                  <p className="text-xs text-rose-900 leading-relaxed">
-                    {post.latest_ai_check?.summary || 'Is post me critical brand compliance violations hain (Cross-client mismatch, missing official logo, ya brand mismatch). Post ko submit karne ke liye pehle revise karein.'}
-                  </p>
+
+                  {/* Clarification on Logo Status */}
+                  {post.latest_ai_check?.logo_check?.status === 'PASS' && (
+                    <div className="text-[11px] font-medium text-emerald-800 bg-emerald-50/80 border border-emerald-200 px-2 py-1 rounded-lg flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                      <span><strong>Logo Check PASS:</strong> Logo mil gaya hai ({post.latest_ai_check.logo_check.location_hindi || post.latest_ai_check.logo_check.location || 'Top-Left'}). Block poster ke content/spelling ki wajah se hai.</span>
+                    </div>
+                  )}
+
+                  {/* Dynamic Violation Reasons */}
+                  <div className="text-xs text-rose-900 leading-relaxed space-y-1">
+                    {Array.isArray(post.latest_ai_check?.enforcement_reasons) && post.latest_ai_check.enforcement_reasons.length > 0 ? (
+                      post.latest_ai_check.enforcement_reasons.map((reason, idx) => (
+                        <p key={idx} className="flex items-start gap-1.5">
+                          <span className="font-semibold text-rose-600">•</span>
+                          <span>{reason}</span>
+                        </p>
+                      ))
+                    ) : (
+                      <p>
+                        {post.latest_ai_check?.summary ||
+                          (post.latest_ai_check?.logo_check?.status === 'PASS'
+                            ? 'Poster par spelling mistakes ya brand mismatch detect hua hai. Submit karne ke liye pehle revise karein.'
+                            : 'Is post me critical brand compliance violations hain. Submit karne ke liye pehle revise karein.')}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
               {post.latest_ai_check?.enforcement_state === 'yellow_alert' && (
-                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 space-y-1.5">
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 space-y-2">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                     <span className="text-xs font-bold uppercase tracking-wider text-amber-900">
                       Yellow Zone Warning (Soft Gate)
                     </span>
                   </div>
-                  <p className="text-xs text-amber-900 leading-relaxed">
-                    {post.latest_ai_check?.summary || 'Logo ya Brand Name me se sirf ek mila hai. Submission ke liye explicit confirmation zaroori hai.'}
-                  </p>
+                  <div className="text-xs text-amber-900 leading-relaxed space-y-1">
+                    {Array.isArray(post.latest_ai_check?.enforcement_reasons) && post.latest_ai_check.enforcement_reasons.length > 0 ? (
+                      post.latest_ai_check.enforcement_reasons.map((reason, idx) => (
+                        <p key={idx} className="flex items-start gap-1.5">
+                          <span className="font-semibold text-amber-600">•</span>
+                          <span>{reason}</span>
+                        </p>
+                      ))
+                    ) : (
+                      <p>
+                        {post.latest_ai_check?.summary || 'Client identity verify ho gayi hai. Is post ko review ke liye aage submit kiya ja sakta hai.'}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 

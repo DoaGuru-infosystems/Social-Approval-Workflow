@@ -64,7 +64,15 @@ const getClientsIndex = async (forceRefresh = false) => {
     'hospital', 'clinic', 'speciality', 'multi', 'systems', 'infosystems',
     'organics', 'centre', 'center', 'doctor', 'dr', 'solutions', 'services',
     'pvt', 'ltd', 'limited', 'care', 'health', 'wellness', 'technologies',
-    'technically', 'transforming', 'jabalpur', 'india', 'mp'
+    'technically', 'transforming', 'jabalpur', 'india', 'mp',
+    // Common medical degrees, qualifications, and roles
+    'mbbs', 'dnb', 'fcps', 'bams', 'bhms', 'bds', 'mch', 'dm', 'frcs', 'fico',
+    'bpt', 'mpt', 'consultant', 'visiting', 'surgeon', 'physician', 'specialist',
+    'fellowship', 'experience', 'timing', 'anubhav', 'opd', 'icu', 'nicu', 'picu',
+    // Common dictionary & healthcare terms (not proprietary brand names)
+    'life', 'best', 'good', 'super', 'child', 'children', 'neuro', 'eye', 'aankh',
+    'netra', 'operation', 'surgery', 'treatment', 'ilaj', 'swasthya', 'emergency',
+    'critical', 'cardiac', 'heart', 'joint', 'pain', 'laser', 'dialysis', 'infertility'
   ]);
 
   const index = clientRows.map((c) => {
@@ -74,10 +82,14 @@ const getClientsIndex = async (forceRefresh = false) => {
     // Extract distinctive tokens (length >= 4 and not in genericStopWords)
     const nameTokens = cleanName.split(' ').filter((t) => t.length >= 4 && !genericStopWords.has(t));
 
-    // Extract distinctive whitelist roots
+    // Extract distinctive whitelist roots ONLY if they contain or match the client's brand name tokens
     const whitelistRoots = (guide.whitelist || [])
       .map((w) => normalizeText(w))
-      .filter((w) => w.length >= 4 && !genericStopWords.has(w));
+      .filter((w) => {
+        if (w.length < 4 || genericStopWords.has(w)) return false;
+        // Must contain or match at least one nameToken to be considered proprietary to this client
+        return nameTokens.some((nt) => w.includes(nt) || nt.includes(w));
+      });
 
     // Combine distinct roots
     const distinctRoots = Array.from(new Set([...nameTokens, ...whitelistRoots]));
@@ -189,7 +201,8 @@ const detectCrossClientCollisions = async ({
           if (!root || root.length < 4) continue;
           if (currentClient && currentClient.distinctRoots.includes(root)) continue;
           const rRegex = new RegExp(`\\b${root}\\b`, 'i');
-          if (rRegex.test(boxNorm) || fuzzball.partial_ratio(boxNorm, root) >= 90) {
+          const isFuzzyMatch = root.length >= 6 && fuzzball.partial_ratio(boxNorm, root) >= 95;
+          if (rRegex.test(boxNorm) || isFuzzyMatch) {
             collidingBoxIds.add(box.id);
             clientCollisionFound = true;
             reasons.push(`Box #${box.id} contains brand '${root}' from '${other.name}'`);

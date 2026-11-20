@@ -1153,6 +1153,84 @@ const getPosts = async (req, res) => {
  * GET /api/posts/:id
  * Full detail with client, revisions, AI reports, and approvals
  */
+/**
+ * Helper to enrich and synthesize consistent summary and enforcement reasons for AI reports.
+ */
+const enrichAiReport = (r) => {
+  if (!r) return null;
+  const spellingIssues = typeof r.spelling_issues === 'string' ? JSON.parse(r.spelling_issues) : (r.spelling_issues || []);
+  const grammarSuggestions = typeof r.grammar_suggestions === 'string' ? JSON.parse(r.grammar_suggestions) : (r.grammar_suggestions || []);
+  const keyError = typeof r.key_error === 'string' ? JSON.parse(r.key_error) : (r.key_error || null);
+  const ocrIssues = typeof r.ocr_issues === 'string' ? JSON.parse(r.ocr_issues) : (r.ocr_issues || []);
+  const bannedWords = typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : (r.banned_words_found || []);
+  const missingMandatory = typeof r.missing_mandatory_phrases === 'string' ? JSON.parse(r.missing_mandatory_phrases) : (r.missing_mandatory_phrases || []);
+  const brandIdentity = typeof r.brand_identity_check === 'string' ? JSON.parse(r.brand_identity_check) : (r.brand_identity_check || null);
+  const logoCheck = typeof r.logo_check === 'string' ? JSON.parse(r.logo_check) : (r.logo_check || null);
+
+  const realErrorsOnPoster = Array.isArray(ocrIssues) ? ocrIssues.filter((b) => b.status === 'red') : [];
+  const logoPass = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found);
+  const brandPass = Boolean(brandIdentity && (brandIdentity.brand_name_correct || (brandIdentity.brand_name_match_score || 0) >= 80));
+  const phonePass = Boolean((brandIdentity?.phone_verification || []).some((p) => p.status === 'clean'));
+
+  const passedAnchors = [];
+  if (logoPass) passedAnchors.push('Official Logo');
+  if (brandPass) passedAnchors.push('Brand Name');
+  if (phonePass) passedAnchors.push('Registered Phone');
+  const anchorsCount = passedAnchors.length;
+
+  const reasons = [];
+
+  if (anchorsCount === 0) {
+    reasons.push(
+      'Cross-Client / Brand Compliance Block: Post me na to official logo mila, na brand name mila, aur na hi registered phone number mila (Teeno mandatory checks fail ho gaye).'
+    );
+  } else if (realErrorsOnPoster.length > 0) {
+    const errorWords = realErrorsOnPoster.map((e) => {
+      const match = (e.reason || '').match(/"([^"]+)"/);
+      return match ? match[1] : (e.ocr_read || 'Error');
+    }).slice(0, 4).join(', ');
+    reasons.push(`Poster par ${realErrorsOnPoster.length} real spelling mistake(s) detect huye hain (${errorWords}). Pehle creative me theek karein.`);
+  }
+
+  let enforcementState = r.enforcement_state;
+  if (anchorsCount === 0 || realErrorsOnPoster.length > 0) {
+    enforcementState = 'red_block';
+  } else if (anchorsCount >= 1 && anchorsCount < 3) {
+    enforcementState = 'yellow_alert';
+    const missing = [];
+    if (!logoPass) missing.push('Logo');
+    if (!brandPass) missing.push('Brand Name');
+    if (!phonePass) missing.push('Phone');
+    reasons.push(`Identity Warning: Post me ${passedAnchors.join(', ')} verify ho gaya hai (${missing.join(', ')} missing). Confirm karke aage proceed karein.`);
+  } else {
+    enforcementState = 'green_clean';
+  }
+
+  let summary = r.summary || (reasons.length > 0 ? reasons[0] : 'All checks verified clean.');
+
+  return {
+    ...r,
+    spelling_issues: spellingIssues,
+    grammar_suggestions: grammarSuggestions,
+    key_error: keyError,
+    ocr_issues: ocrIssues,
+    ocr_unreliable: Boolean(Number(r.ocr_unreliable)),
+    banned_words_found: bannedWords,
+    missing_mandatory_phrases: missingMandatory,
+    brand_identity_check: brandIdentity,
+    logo_check: logoCheck,
+    ai_provider: r.ai_provider || 'gemini',
+    fallback_used: Boolean(Number(r.fallback_used)),
+    fallback_reason: r.fallback_reason || 'none',
+    image_status: r.image_status || 'completed',
+    text_status: r.text_status || 'completed',
+    image_error: r.image_error || null,
+    enforcement_state: enforcementState,
+    enforcement_reasons: reasons,
+    summary,
+  };
+};
+
 const getPostById = async (req, res) => {
   try {
     const postId = parseInt(req.params.id, 10);
@@ -1186,24 +1264,7 @@ const getPostById = async (req, res) => {
       [postId]
     );
 
-    const parsedAiReports = aiReports.map((r) => ({
-      ...r,
-      spelling_issues: typeof r.spelling_issues === 'string' ? JSON.parse(r.spelling_issues) : r.spelling_issues || [],
-      grammar_suggestions: typeof r.grammar_suggestions === 'string' ? JSON.parse(r.grammar_suggestions) : r.grammar_suggestions || [],
-      key_error: typeof r.key_error === 'string' ? JSON.parse(r.key_error) : r.key_error || null,
-      ocr_issues: typeof r.ocr_issues === 'string' ? JSON.parse(r.ocr_issues) : r.ocr_issues || [],
-      ocr_unreliable: Boolean(Number(r.ocr_unreliable)),
-      banned_words_found: typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : r.banned_words_found || [],
-      missing_mandatory_phrases: typeof r.missing_mandatory_phrases === 'string' ? JSON.parse(r.missing_mandatory_phrases) : r.missing_mandatory_phrases || [],
-      brand_identity_check: typeof r.brand_identity_check === 'string' ? JSON.parse(r.brand_identity_check) : r.brand_identity_check || null,
-      logo_check: typeof r.logo_check === 'string' ? JSON.parse(r.logo_check) : r.logo_check || null,
-      ai_provider: r.ai_provider || 'gemini',
-      fallback_used: Boolean(Number(r.fallback_used)),
-      fallback_reason: r.fallback_reason || 'none',
-      image_status: r.image_status || 'completed',
-      text_status: r.text_status || 'completed',
-      image_error: r.image_error || null,
-    }));
+    const parsedAiReports = aiReports.map(enrichAiReport);
 
     const [approvals] = await pool.query(
       `SELECT pa.*, u.name AS approver_name, u.email AS approver_email
@@ -1276,75 +1337,34 @@ const getAiStatus = async (req, res) => {
     }
 
     const ai = aiRows[0];
-    const spellingIssues = typeof ai.spelling_issues === 'string' ? JSON.parse(ai.spelling_issues) : (ai.spelling_issues || []);
-    const grammarSuggestions = typeof ai.grammar_suggestions === 'string' ? JSON.parse(ai.grammar_suggestions) : (ai.grammar_suggestions || []);
-    const keyError = typeof ai.key_error === 'string' ? JSON.parse(ai.key_error) : (ai.key_error || null);
-    const ocrIssues = typeof ai.ocr_issues === 'string' ? JSON.parse(ai.ocr_issues) : (ai.ocr_issues || []);
-    const bannedWords = typeof ai.banned_words_found === 'string' ? JSON.parse(ai.banned_words_found) : (ai.banned_words_found || []);
-    const missingMandatory = typeof ai.missing_mandatory_phrases === 'string' ? JSON.parse(ai.missing_mandatory_phrases) : (ai.missing_mandatory_phrases || []);
-    const brandIdentity = typeof ai.brand_identity_check === 'string' ? JSON.parse(ai.brand_identity_check) : (ai.brand_identity_check || null);
-    const logoCheck = typeof ai.logo_check === 'string' ? JSON.parse(ai.logo_check) : (ai.logo_check || null);
-    const aiProvider = ai.ai_provider || 'gemini';
-    const fallbackUsed = Boolean(Number(ai.fallback_used));
-    const fallbackReason = ai.fallback_reason || 'none';
-    const hasLogoError = Boolean(logoCheck && logoCheck.status === 'FAIL');
-
-    const imageStatus = ai.image_status || 'completed';
-    const textStatus = ai.text_status || 'completed';
-    const isImageCompleted = imageStatus === 'completed';
-    const isImagePending = imageStatus === 'pending';
-    const isImageFailed = imageStatus === 'failed';
-    const ocrUnreliable = Boolean(Number(ai.ocr_unreliable));
-
-    const combinedAiCheck = {
-      passed:
-        (imageStatus === 'not_applicable' || (isImageCompleted && !ocrUnreliable)) &&
-        spellingIssues.length === 0 &&
-        bannedWords.length === 0 &&
-        missingMandatory.length === 0 &&
-        !hasLogoError &&
-        !brandIdentity?.possible_brand_name_error &&
-        !(brandIdentity?.phone_verification || []).some((p) => p.status === 'mismatch_warning' || p.status === 'unknown_phone'),
-      spelling_issues: spellingIssues,
-      grammar_suggestions: grammarSuggestions,
-      key_error: keyError,
-      ocr_extracted_text: ai.ocr_extracted_text || '',
-      ocr_issues: ocrIssues,
-      ocr_confidence: Number(ai.ocr_confidence) || 0,
-      ocr_unreliable: ocrUnreliable,
-      ocr_reliable: !ocrUnreliable,
-      image_status: imageStatus,
-      text_status: textStatus,
-      image_error: ai.image_error || null,
-      banned_words_found: bannedWords,
-      missing_mandatory_phrases: missingMandatory,
-      brand_identity_check: brandIdentity,
-      logo_check: logoCheck,
-      ai_provider: aiProvider,
-      fallback_used: fallbackUsed,
-      fallback_reason: fallbackReason,
-    };
+    const enrichedAi = enrichAiReport(ai);
 
     return res.json({
       success: true,
       post_id: postId,
-      text_status: textStatus,
-      image_status: imageStatus,
-      image_error: ai.image_error || null,
-      ocr_extracted_text: ai.ocr_extracted_text || '',
-      ocr_confidence: Number(ai.ocr_confidence) || 0,
-      ocr_unreliable: ocrUnreliable,
-      spelling_issues: spellingIssues,
-      ocr_issues: ocrIssues,
-      ocr_doubts: Array.isArray(ocrIssues) ? ocrIssues.filter((b) => b.status === 'yellow') : [],
-      banned_words_found: bannedWords,
-      missing_mandatory_phrases: missingMandatory,
-      brand_identity_check: brandIdentity,
-      logo_check: logoCheck,
-      ai_provider: aiProvider,
-      fallback_used: fallbackUsed,
-      fallback_reason: fallbackReason,
-      combined_ai_check: combinedAiCheck,
+      text_status: enrichedAi.text_status,
+      image_status: enrichedAi.image_status,
+      image_error: enrichedAi.image_error,
+      ocr_extracted_text: enrichedAi.ocr_extracted_text || '',
+      ocr_confidence: Number(enrichedAi.ocr_confidence) || 0,
+      ocr_unreliable: enrichedAi.ocr_unreliable,
+      spelling_issues: enrichedAi.spelling_issues,
+      ocr_issues: enrichedAi.ocr_issues,
+      ocr_doubts: Array.isArray(enrichedAi.ocr_issues) ? enrichedAi.ocr_issues.filter((b) => b.status === 'yellow') : [],
+      banned_words_found: enrichedAi.banned_words_found,
+      missing_mandatory_phrases: enrichedAi.missing_mandatory_phrases,
+      brand_identity_check: enrichedAi.brand_identity_check,
+      logo_check: enrichedAi.logo_check,
+      ai_provider: enrichedAi.ai_provider,
+      fallback_used: enrichedAi.fallback_used,
+      fallback_reason: enrichedAi.fallback_reason,
+      enforcement_state: enrichedAi.enforcement_state,
+      enforcement_reasons: enrichedAi.enforcement_reasons,
+      summary: enrichedAi.summary,
+      combined_ai_check: {
+        ...enrichedAi,
+        passed: enrichedAi.enforcement_state === 'green_clean' && enrichedAi.spelling_issues.length === 0,
+      },
     });
   } catch (error) {
     console.error('Error fetching AI status:', error);

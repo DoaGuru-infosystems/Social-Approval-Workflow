@@ -57,6 +57,12 @@ const analyzeToken = (token, whitelist = null) => {
     return { isGarbage: false, reason: null };
   }
 
+  // Pure typography / bullets / symbols / punctuation (e.g. "•", "&", "+", "-", "/", "★", "✓")
+  // These are standard typographic elements on posters and should NEVER be marked as OCR garbage/noise.
+  if (/^[•·\u2022\u00B7\u25CF\u25CB\u25A0\u25A1\u2605\u2606&+\-%#@\/\\|:;,.!?'"()[\]{}~–—*]+$/.test(raw)) {
+    return { isGarbage: false, reason: null };
+  }
+
   // Pure numbers, valid punctuation, or dates (e.g. "2026", "0761-4927230", "14")
   if (/^[\d\s,.\-+/:()]+$/.test(raw)) {
     // Lone single punctuation symbol like "-" or "?" or "1?"

@@ -2,13 +2,15 @@ const isBrowser = typeof window !== 'undefined';
 const isLocalhost =
   isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
-export const API_BASE_URL = isLocalhost
-  ? 'http://localhost:5001/api'
-  : (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || 'http://localhost:5001/api';
+// Prioritize environment variables from client/.env (VITE_API_BASE_URL & VITE_SERVER_URL)
+const envApiBase = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_API_BASE_URL : null;
+const envServerUrl = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SERVER_URL : null;
 
-export const SERVER_URL = isLocalhost
-  ? 'http://localhost:5001'
-  : (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SERVER_URL) || 'http://localhost:5001';
+export const API_BASE_URL =
+  envApiBase || (isLocalhost ? 'http://localhost:5001/api' : '/api');
+
+export const SERVER_URL =
+  envServerUrl || (isLocalhost ? 'http://localhost:5001' : (isBrowser ? window.location.origin : ''));
 
 export const GOOGLE_PROJECT_ID =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_PROJECT_ID) || 'socel-workflow';
