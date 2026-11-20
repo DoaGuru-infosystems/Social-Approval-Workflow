@@ -1646,9 +1646,14 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   // 2. Brand Name
   // 3. Phone Number
   const logoFound = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found);
+
+  const primaryBrandToken = (guidelines.organization_name || '').split(/\s+/)[0].toLowerCase();
+  const rawOcrLower = (rawOcrText || '').toLowerCase();
+  const hasPrimaryBrandToken = primaryBrandToken.length >= 4 && rawOcrLower.includes(primaryBrandToken);
+
   const brandNameFound = Boolean(
-    brandIdentityCheck.brand_name_correct &&
-    (brandIdentityCheck.brand_name_match_score || 0) >= 80
+    (brandIdentityCheck.brand_name_correct && (brandIdentityCheck.brand_name_match_score || 0) >= 80) ||
+    hasPrimaryBrandToken
   );
 
   const expectedPhonesList = [

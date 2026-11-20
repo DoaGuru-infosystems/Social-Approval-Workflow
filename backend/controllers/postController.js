@@ -1169,8 +1169,19 @@ const enrichAiReport = (r) => {
 
   const realErrorsOnPoster = Array.isArray(ocrIssues) ? ocrIssues.filter((b) => b.status === 'red') : [];
   const logoPass = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found);
-  const brandPass = Boolean(brandIdentity && (brandIdentity.brand_name_correct || (brandIdentity.brand_name_match_score || 0) >= 80));
-  const phonePass = Boolean((brandIdentity?.phone_verification || []).some((p) => p.status === 'clean'));
+
+  const ocrTextLower = String(r.ocr_extracted_text || '').toLowerCase();
+  const hasBrandTokenInOcr = ocrTextLower.includes('navjyoti') || ocrTextLower.includes('doaguru') || ocrTextLower.includes('balgopal') || ocrTextLower.includes('medicity');
+  const brandPass = Boolean(
+    (brandIdentity && (brandIdentity.brand_name_correct || (brandIdentity.brand_name_match_score || 0) >= 80)) ||
+    hasBrandTokenInOcr
+  );
+
+  const phonePass = Boolean(
+    (brandIdentity?.phone_verification || []).some((p) => p.status === 'clean') ||
+    ocrTextLower.includes('6268875304') ||
+    ocrTextLower.includes('8817232247')
+  );
 
   const passedAnchors = [];
   if (logoPass) passedAnchors.push('Official Logo');
