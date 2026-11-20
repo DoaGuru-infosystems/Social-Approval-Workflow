@@ -55,7 +55,7 @@ class TestBrandLogoCheck(unittest.TestCase):
         )
         self.assertEqual(
             SUGGESTION_RULES["WRONG_LOGO"],
-            "Ye galat / purana logo hai. Brand Rules se naya logo download karke wahi lagayein.",
+            "Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein.",
         )
         self.assertEqual(
             SUGGESTION_RULES["TOO_SMALL"],
