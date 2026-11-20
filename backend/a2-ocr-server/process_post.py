@@ -349,38 +349,49 @@ def _run_variant_ocr_and_merge(
     combined_dict,
     whitelist_set,
     whitelist_lower_set,
+    existing_variant_results=None,
+    detected_language=None,
 ):
     """
     Executes PaddleOCR on a set of image variants, runs word-level weighted voting
     and relative fuzzy dictionary correction, merges missing words against TOP 1 baseline,
     and returns parsed OCR boxes, confidence, and metadata.
+    Supports incremental variant merging (deduplication) without re-running earlier variants.
     """
     t_ocr_start = time.perf_counter()
     try:
-        top1_name, top1_img = variants[0]
-        top1_detections = hi_reader.ocr(top1_img, cls=True)
-        top1_accepted, top1_rejected = _parse_detections(top1_detections, per_block_threshold)
-        top1_text = " ".join([b[0] for b in top1_accepted + top1_rejected])
-
-        detected_language = detect_language_from_text(top1_text)
-
-        all_variant_results = []
-        if detected_language == "en":
-            active_en_reader = en_reader_factory(hi_reader)
-            if active_en_reader is not hi_reader:
-                en_det1 = active_en_reader.ocr(top1_img, cls=True)
-                all_variant_results.append(_parse_detections(en_det1, per_block_threshold))
-            else:
-                all_variant_results.append((top1_accepted, top1_rejected))
-
-            for var_name, var_img in variants[1:]:
-                det = active_en_reader.ocr(var_img, cls=True)
+        if existing_variant_results is not None:
+            # Incremental escalation pass: reuse existing results and only scan remaining variants
+            all_variant_results = list(existing_variant_results)
+            active_reader = en_reader_factory(hi_reader) if detected_language == "en" else hi_reader
+            for var_name, var_img in variants:
+                det = active_reader.ocr(var_img, cls=True)
                 all_variant_results.append(_parse_detections(det, per_block_threshold))
         else:
-            all_variant_results.append((top1_accepted, top1_rejected))
-            for var_name, var_img in variants[1:]:
-                det = hi_reader.ocr(var_img, cls=True)
-                all_variant_results.append(_parse_detections(det, per_block_threshold))
+            top1_name, top1_img = variants[0]
+            top1_detections = hi_reader.ocr(top1_img, cls=True)
+            top1_accepted, top1_rejected = _parse_detections(top1_detections, per_block_threshold)
+            top1_text = " ".join([b[0] for b in top1_accepted + top1_rejected])
+
+            detected_language = detect_language_from_text(top1_text)
+
+            all_variant_results = []
+            if detected_language == "en":
+                active_en_reader = en_reader_factory(hi_reader)
+                if active_en_reader is not hi_reader:
+                    en_det1 = active_en_reader.ocr(top1_img, cls=True)
+                    all_variant_results.append(_parse_detections(en_det1, per_block_threshold))
+                else:
+                    all_variant_results.append((top1_accepted, top1_rejected))
+
+                for var_name, var_img in variants[1:]:
+                    det = active_en_reader.ocr(var_img, cls=True)
+                    all_variant_results.append(_parse_detections(det, per_block_threshold))
+            else:
+                all_variant_results.append((top1_accepted, top1_rejected))
+                for var_name, var_img in variants[1:]:
+                    det = hi_reader.ocr(var_img, cls=True)
+                    all_variant_results.append(_parse_detections(det, per_block_threshold))
 
         ocr_inference_ms = (time.perf_counter() - t_ocr_start) * 1000
     except Exception as error:
@@ -645,6 +656,7 @@ def _run_variant_ocr_and_merge(
         "detected_language": detected_language,
         "inference_ms": ocr_inference_ms,
         "accepted_lines": accepted_lines,
+        "all_variant_results": all_variant_results,
     }
 
 
@@ -737,7 +749,7 @@ def process_post(data, reader=None, dictionaries=None):
                 "location_hindi": "Kahin nahi mila",
                 "size_percent": 0,
                 "reason": "MISSING",
-                "suggestion": "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
+                "suggestion": "Logo post me kahin nahi mila. Logo ko post me lagayein.",
                 "checked_by": "Python",
             }
 
@@ -782,58 +794,78 @@ def process_post(data, reader=None, dictionaries=None):
         whitelist_lower_set,
     )
 
-    # Escalation signals evaluation:
-    # a. ocr_confidence_avg < 0.75
-    # b. out-of-dictionary tokens proportion > 25% (catches matra-breaking like "दिवस" -> "दवस")
-    # c. detected_language == "hi" and out_of_dict_ratio > 0.25
-    eval_tokens = []
-    for box in res7["ocr_boxes"]:
-        box_text = box.get("text", "")
-        for tok in extract_tokens(box_text):
-            clean_tok = tok.strip()
-            if len(clean_tok) <= 1 or clean_tok.isdigit():
-                continue
-            if tag_pattern_tokens(clean_tok):
-                continue
-            eval_tokens.append(clean_tok)
-
-    if eval_tokens:
-        out_of_dict_count = sum(
-            1 for tok in eval_tokens
-            if tok not in combined_dict
-            and tok.lower() not in combined_dict
-            and tok not in whitelist_set
-            and tok.lower() not in whitelist_lower_set
-        )
-        out_of_dict_ratio = out_of_dict_count / len(eval_tokens)
+    # Deduplication & Smart Escalation:
+    # Rule 1: Agar Top-7 variants me confidence already acchi hai (>= 75%), to Top-10 par escalate na karein.
+    if res7["ocr_confidence_avg"] >= 0.75:
+        escalate_to_top10 = False
     else:
-        out_of_dict_ratio = 0.0
+        eval_tokens = []
+        for box in res7["ocr_boxes"]:
+            box_text = box.get("text", "")
+            for tok in extract_tokens(box_text):
+                clean_tok = tok.strip()
+                if len(clean_tok) <= 1 or clean_tok.isdigit():
+                    continue
+                if tag_pattern_tokens(clean_tok):
+                    continue
+                eval_tokens.append(clean_tok)
 
-    cond_a = res7["ocr_confidence_avg"] < 0.75
-    cond_b = out_of_dict_ratio > 0.25
-    cond_c = (res7["detected_language"] == "hi") and cond_b
+        if eval_tokens:
+            out_of_dict_count = sum(
+                1 for tok in eval_tokens
+                if tok not in combined_dict
+                and tok.lower() not in combined_dict
+                and tok not in whitelist_set
+                and tok.lower() not in whitelist_lower_set
+            )
+            out_of_dict_ratio = out_of_dict_count / len(eval_tokens)
+        else:
+            out_of_dict_ratio = 0.0
 
-    escalate_to_top10 = cond_a or cond_b or cond_c
+        cond_a = res7["ocr_confidence_avg"] < 0.75
+        cond_b = out_of_dict_ratio > 0.25
+        cond_c = (res7["detected_language"] == "hi") and cond_b
+
+        escalate_to_top10 = cond_a and (cond_b or cond_c or res7["ocr_confidence_avg"] < 0.60)
 
     if escalate_to_top10:
-        # Tier 2 Escalation: clean full run on all 10 variants from get_top10_variants()
+        # Tier 2 Smart Escalation:
+        # Purane 7 variants ko dobara run na karein — sirf bache hue 3 naye variants (8, 9, 10) ko scan karke merge karein.
         top10_variants, _scores10, top10_names = get_top10_variants(bgr_image)
-        res10 = _run_variant_ocr_and_merge(
-            top10_variants,
-            hi_reader,
-            en_reader_factory,
-            per_block_threshold,
-            data,
-            img_width,
-            img_height,
-            combined_dict,
-            whitelist_set,
-            whitelist_lower_set,
-        )
-        final_res = res10
-        variants_used = 10
-        used_names = top10_names
-        total_inference_ms = res7["inference_ms"] + res10["inference_ms"]
+        scanned_names = set(top7_names)
+
+        remaining_variants = [
+            (short_name, img) for short_name, img in top10_variants
+            if short_name not in scanned_names
+        ]
+        # Keep at most 3 remaining variants (8, 9, 10) so total passes <= 10
+        if len(remaining_variants) > 3:
+            remaining_variants = remaining_variants[:3]
+
+        if remaining_variants:
+            res10 = _run_variant_ocr_and_merge(
+                remaining_variants,
+                hi_reader,
+                en_reader_factory,
+                per_block_threshold,
+                data,
+                img_width,
+                img_height,
+                combined_dict,
+                whitelist_set,
+                whitelist_lower_set,
+                existing_variant_results=res7.get("all_variant_results"),
+                detected_language=res7.get("detected_language"),
+            )
+            final_res = res10
+            variants_used = len(top7_names) + len(remaining_variants)
+            used_names = top7_names + [n for n, _ in remaining_variants]
+            total_inference_ms = res7["inference_ms"] + res10["inference_ms"]
+        else:
+            final_res = res7
+            variants_used = 7
+            used_names = top7_names
+            total_inference_ms = res7["inference_ms"]
     else:
         final_res = res7
         variants_used = 7

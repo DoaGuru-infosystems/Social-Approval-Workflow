@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Button from '../components/Button';
 import ImageUpload from '../components/ImageUpload';
@@ -38,6 +39,7 @@ import AnnotatedPosterOCR from '../components/AnnotatedPosterOCR';
 import LogoCheckCard from '../components/LogoCheckCard';
 
 const SMODashboard = () => {
+  const navigate = useNavigate();
   const { showToast } = useToast();
 
   // Multi-Client State
@@ -1219,9 +1221,9 @@ const SMODashboard = () => {
                       {/* Clickable Thumbnail */}
                       {imgSrc ? (
                         <div
-                          onClick={() => setInspectingPost(post)}
+                          onClick={() => navigate(`/posts/${post.id}/inspection`)}
                           className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border border-[#E5E2DA] bg-stone-50 shrink-0 relative cursor-pointer group/thumb hover:ring-2 hover:ring-emerald-500 transition-all flex items-center justify-center shadow-xs"
-                          title="Click to inspect poster and OCR text"
+                          title="Click to inspect poster on dedicated full page"
                         >
                           <img
                             src={imgSrc}
@@ -1250,7 +1252,7 @@ const SMODashboard = () => {
                       {/* Title & Caption */}
                       <div className="flex-1 min-w-0">
                         <h4
-                          onClick={() => setInspectingPost(post)}
+                          onClick={() => navigate(`/posts/${post.id}/inspection`)}
                           className="text-sm font-bold text-[#2B2A27] truncate hover:text-emerald-700 cursor-pointer transition-colors"
                         >
                           {post.title}
@@ -1308,7 +1310,7 @@ const SMODashboard = () => {
                     {/* Inspection Trigger Button */}
                     <button
                       type="button"
-                      onClick={() => setInspectingPost(post)}
+                      onClick={() => navigate(`/posts/${post.id}/inspection`)}
                       className="w-full py-2 px-3 rounded-xl bg-stone-50 hover:bg-stone-100 border border-[#E5E2DA] text-xs font-semibold text-[#2B2A27] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5 text-emerald-600" />

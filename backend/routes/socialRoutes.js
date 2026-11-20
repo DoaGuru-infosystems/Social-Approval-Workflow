@@ -357,22 +357,33 @@ router.post('/:id/social/:platform/test', authMiddleware, async (req, res) => {
 
     const isValid = Boolean(testResult?.valid);
     const resolvedName = testResult?.accountName || testResult?.channelTitle || account.platform_username;
+    const resolvedPlatformId = testResult?.platformId || account.platform_id;
+    const resolvedProfileUrl = testResult?.profileUrl || account.profile_url || (resolvedName ? `https://instagram.com/${resolvedName}` : null);
+
+    // Rule: Never arbitrarily disconnect an account unless token is confirmed revoked / expired
+    const isExplicitlyRevoked = testResult?.error?.toLowerCase().includes('revoked') || testResult?.error?.toLowerCase().includes('expired');
+    const newConnectedState = isValid ? true : (isExplicitlyRevoked ? false : Boolean(account.is_connected));
+
     await pool.query(
       `UPDATE client_social_accounts 
        SET is_connected = ?, 
            platform_username = COALESCE(?, platform_username),
+           platform_id = COALESCE(?, platform_id),
+           profile_url = COALESCE(?, profile_url),
            last_tested_at = NOW(), 
            last_error = ? 
        WHERE id = ?`,
-      [isValid, isValid ? resolvedName : null, isValid ? null : testResult?.error || 'Test failed', account.id]
+      [newConnectedState, resolvedName, resolvedPlatformId, resolvedProfileUrl, isValid ? null : testResult?.error || 'Test failed', account.id]
     );
 
     return res.status(200).json({
       success: true,
       valid: isValid,
-      connected: isValid,
+      connected: newConnectedState,
       error: testResult?.error || null,
       accountName: resolvedName,
+      platformId: resolvedPlatformId,
+      profileUrl: resolvedProfileUrl,
       user_message: isValid ? 'Token Sahi Hai' : (testResult?.error || 'Token Invalid Hai'),
     });
   } catch (error) {

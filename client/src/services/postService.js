@@ -27,13 +27,13 @@ export const postService = {
     return response.data;
   },
 
-  submitPost: async (id) => {
-    const response = await api.post(`/posts/${id}/submit`);
+  submitPost: async (id, data = {}) => {
+    const response = await api.post(`/posts/${id}/submit`, data);
     return response.data;
   },
 
-  submitForReview: async (id) => {
-    const response = await api.post(`/posts/${id}/submit`);
+  submitForReview: async (id, data = {}) => {
+    const response = await api.post(`/posts/${id}/submit`, data);
     return response.data;
   },
 

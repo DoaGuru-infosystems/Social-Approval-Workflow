@@ -1,17 +1,34 @@
 const pool = require('../config/db');
 const { encrypt, decrypt } = require('../utils/encryption');
+const { ensureJpegForInstagram } = require('../utils/imageConverter');
 
 const GRAPH_API_VERSION = process.env.META_API_VERSION || 'v21.0';
 
-const isKeyConfigured = () => {
+const isFacebookKeyConfigured = () => {
   const appId = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
   if (!appId || !appSecret) return false;
   const cleanId = appId.trim();
   const cleanSecret = appSecret.trim();
   if (cleanId === '' || cleanSecret === '') return false;
-  if (cleanId.startsWith('DUMMY') || cleanSecret.startsWith('DUMMY')) return false;
+  if (cleanId.startsWith('DUMMY') || cleanSecret.startsWith('DUMMY') || cleanId.startsWith('YOUR_')) return false;
   return true;
+};
+
+const isInstagramKeyConfigured = () => {
+  const appId = process.env.INSTAGRAM_APP_ID;
+  const appSecret = process.env.INSTAGRAM_APP_SECRET;
+  if (!appId || !appSecret) return false;
+  const cleanId = appId.trim();
+  const cleanSecret = appSecret.trim();
+  if (cleanId === '' || cleanSecret === '') return false;
+  if (cleanId.startsWith('DUMMY') || cleanSecret.startsWith('DUMMY') || cleanId.startsWith('YOUR_')) return false;
+  return true;
+};
+
+const isKeyConfigured = (platform = 'facebook') => {
+  if (platform === 'instagram') return isInstagramKeyConfigured();
+  return isFacebookKeyConfigured();
 };
 
 /**
@@ -20,7 +37,7 @@ const isKeyConfigured = () => {
  * Scope: pages_show_list,pages_manage_posts,pages_read_engagement,business_management
  */
 const getFacebookAuthUrl = (clientId, frontendOrigin = null) => {
-  if (!isKeyConfigured()) {
+  if (!isFacebookKeyConfigured()) {
     return {
       success: false,
       code: 'OAUTH_KEY_NOT_FOUND',
@@ -28,7 +45,7 @@ const getFacebookAuthUrl = (clientId, frontendOrigin = null) => {
     };
   }
 
-  const appId = process.env.META_APP_ID;
+  const appId = process.env.META_APP_ID.trim();
   const redirectUri =
     process.env.META_FB_REDIRECT_URI ||
     process.env.META_REDIRECT_URI ||
@@ -45,7 +62,7 @@ const getFacebookAuthUrl = (clientId, frontendOrigin = null) => {
   ).toString('base64');
 
   const scopes = [
-    'pages_show_list',
+   /*  */ 'pages_show_list',
     'pages_manage_posts',
     'pages_read_engagement',
     'business_management',
@@ -68,15 +85,15 @@ const getFacebookAuthUrl = (clientId, frontendOrigin = null) => {
  * Scope: instagram_business_basic,instagram_business_content_publish
  */
 const getInstagramAuthUrl = (clientId, frontendOrigin = null) => {
-  if (!isKeyConfigured()) {
+  if (!isInstagramKeyConfigured()) {
     return {
       success: false,
       code: 'OAUTH_KEY_NOT_FOUND',
-      user_message: 'OAuth Key Nahi Mili - Manual wala use karo',
+      user_message: 'Instagram OAuth Key Nahi Mili - Manual wala use karo',
     };
   }
 
-  const appId = process.env.META_APP_ID;
+  const appId = process.env.INSTAGRAM_APP_ID.trim();
   const redirectUri =
     process.env.META_IG_REDIRECT_URI ||
     process.env.META_REDIRECT_URI ||
@@ -262,141 +279,155 @@ const handleInstagramCallback = async (code, state, req = null) => {
   }
 
   const { clientId } = decoded;
-  const appId = process.env.META_APP_ID;
-  const appSecret = process.env.META_APP_SECRET;
+  if (!clientId) {
+    throw new Error('OAuth state missing clientId');
+  }
+
+  const appId = process.env.INSTAGRAM_APP_ID?.trim();
+  const appSecret = process.env.INSTAGRAM_APP_SECRET?.trim();
+
+  if (!appId || !appSecret) {
+    throw new Error('INSTAGRAM_APP_ID or INSTAGRAM_APP_SECRET is not configured in .env');
+  }
 
   // Instagram sometimes appends #_ to the code parameter
   const cleanCode = code ? String(code).replace(/#_$/, '').trim() : '';
+  if (!cleanCode) {
+    throw new Error('Missing authorization code from Instagram');
+  }
 
-  let redirectUri =
+  const redirectUri =
     decoded.redirectUri ||
-    (req?.headers?.host ? `http://${req.headers.host}/api/auth/meta/instagram/callback` : null) ||
     process.env.META_IG_REDIRECT_URI ||
     process.env.META_REDIRECT_URI ||
+    (req?.headers?.host ? `http://${req.headers.host}/api/auth/meta/instagram/callback` : null) ||
     `http://localhost:${process.env.PORT || 5001}/api/auth/meta/instagram/callback`;
 
-  let igAccessToken = null;
-  let igUserId = null;
-  let igUsername = null;
-  let tokenExpiresIn = 5184000; // 60 days default
+  // Exchange authorization code for short-lived token via api.instagram.com
+  const params = new URLSearchParams();
+  params.append('client_id', appId);
+  params.append('client_secret', appSecret);
+  params.append('grant_type', 'authorization_code');
+  params.append('redirect_uri', redirectUri);
+  params.append('code', cleanCode);
 
-  // Strategy A: Instagram API with Instagram Login (api.instagram.com)
+  let tokenRes;
   try {
-    const params = new URLSearchParams();
-    params.append('client_id', appId);
-    params.append('client_secret', appSecret);
-    params.append('grant_type', 'authorization_code');
-    params.append('redirect_uri', redirectUri);
-    params.append('code', cleanCode);
-
-    const tokenRes = await fetch('https://api.instagram.com/oauth/access_token', {
+    tokenRes = await fetch('https://api.instagram.com/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString(),
     });
-    const tokenData = await tokenRes.json();
+  } catch (netErr) {
+    throw new Error(`Failed to connect to Instagram token endpoint: ${netErr.message}`);
+  }
 
-    if (tokenData.access_token) {
-      const shortToken = tokenData.access_token;
-      igUserId = tokenData.user_id;
+  const tokenData = await tokenRes.json();
 
-      // Exchange short-lived token for long-lived (60-day) token via graph.instagram.com
-      const longRes = await fetch(
-        `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${appSecret}&access_token=${encodeURIComponent(shortToken)}`
+  if (!tokenRes.ok || !tokenData.access_token) {
+    const errorMsg =
+      tokenData.error_message ||
+      tokenData.error_description ||
+      (typeof tokenData.error === 'string' ? tokenData.error : tokenData.error?.message) ||
+      `Instagram token exchange failed with status ${tokenRes.status}`;
+    console.error('[Instagram OAuth] Code exchange failed:', errorMsg);
+    throw new Error(`Instagram token exchange failed: ${errorMsg}`);
+  }
+
+  const shortToken = tokenData.access_token;
+  let igUserId = tokenData.user_id ? String(tokenData.user_id) : null;
+  let igAccessToken = shortToken;
+  let tokenExpiresIn = 5184000; // 60 days default
+
+  // Exchange short-lived token for long-lived (60-day) token via graph.instagram.com
+  try {
+    const longRes = await fetch(
+      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${encodeURIComponent(appSecret)}&access_token=${encodeURIComponent(shortToken)}`
+    );
+    const longData = await longRes.json();
+    if (longData.access_token) {
+      igAccessToken = longData.access_token;
+      if (longData.expires_in) tokenExpiresIn = Number(longData.expires_in);
+    } else if (longData.error) {
+      console.warn('[Instagram OAuth] Long-lived token exchange warning:', longData.error.message || longData.error);
+    }
+  } catch (longErr) {
+    console.warn('[Instagram OAuth] Long-lived token exchange request failed:', longErr.message);
+  }
+
+  // Retrieve Instagram account ID and username
+  let igUsername = null;
+  try {
+    const meRes = await fetch(
+      `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${encodeURIComponent(igAccessToken)}`
+    );
+    const meData = await meRes.json();
+    if (meData.username) igUsername = meData.username;
+    if (meData.id || meData.user_id) igUserId = String(meData.id || meData.user_id);
+  } catch (meErr) {
+    console.warn('[Instagram OAuth] Could not fetch profile from graph.instagram.com:', meErr.message);
+  }
+
+  // Fallback: If username could not be fetched (e.g. dev mode restriction on /me),
+  // preserve existing username from database or derive from client name / guidelines
+  if (!igUsername) {
+    try {
+      const [existingRows] = await pool.query(
+        'SELECT platform_username, profile_url FROM client_social_accounts WHERE client_id = ? AND platform = "instagram"',
+        [clientId]
       );
-      const longData = await longRes.json();
-      igAccessToken = longData.access_token || shortToken;
-      if (longData.expires_in) tokenExpiresIn = longData.expires_in;
-
-      // Fetch Instagram profile details
-      try {
-        const meRes = await fetch(
-          `https://graph.instagram.com/${GRAPH_API_VERSION}/me?fields=user_id,username,name,account_type&access_token=${encodeURIComponent(igAccessToken)}`
+      if (existingRows.length > 0 && existingRows[0].platform_username) {
+        igUsername = existingRows[0].platform_username;
+      } else {
+        const [guideRows] = await pool.query(
+          'SELECT whitelist_words FROM client_brand_guidelines WHERE client_id = ?',
+          [clientId]
         );
-        const meData = await meRes.json();
-        if (meData.username) igUsername = meData.username;
-        if (meData.user_id) igUserId = meData.user_id;
-      } catch (meErr) {
-        console.warn('[Instagram OAuth] Could not fetch me profile from graph.instagram.com:', meErr.message);
-      }
-    }
-  } catch (err) {
-    console.warn('[Instagram OAuth] api.instagram.com token exchange attempt failed:', err.message);
-  }
-
-  // Strategy B: Fallback via graph.facebook.com if Strategy A did not yield a token
-  if (!igAccessToken) {
-    let tokenUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(
-      redirectUri
-    )}&client_secret=${appSecret}&code=${cleanCode}`;
-
-    let fbTokenRes = await fetch(tokenUrl);
-    let fbTokenData = await fbTokenRes.json();
-
-    if (fbTokenData.error && (fbTokenData.error.message.includes('redirect_uri') || fbTokenData.error.code === 100)) {
-      const altUris = [];
-      if (redirectUri.includes('5001')) altUris.push(redirectUri.replace('5001', '5000'));
-      if (redirectUri.includes('5000')) altUris.push(redirectUri.replace('5000', '5001'));
-      if (redirectUri.includes('/instagram/callback')) altUris.push(redirectUri.replace('/instagram/callback', '/callback'));
-
-      for (const altUri of altUris) {
-        const retryUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(
-          altUri
-        )}&client_secret=${appSecret}&code=${cleanCode}`;
-        const retryRes = await fetch(retryUrl);
-        const retryData = await retryRes.json();
-        if (!retryData.error) {
-          fbTokenData = retryData;
-          break;
+        if (guideRows.length > 0 && guideRows[0].whitelist_words) {
+          try {
+            const words = JSON.parse(guideRows[0].whitelist_words);
+            const igHandle = words.find((w) => w.includes('hospital') || w.includes('navjyoti') || w.includes('doaguru'));
+            if (igHandle) igUsername = igHandle.toLowerCase().replace(/[^a-z0-9._]/g, '');
+          } catch {}
+        }
+        if (!igUsername) {
+          const [clientRows] = await pool.query('SELECT name FROM clients WHERE id = ?', [clientId]);
+          if (clientRows.length > 0 && clientRows[0].name) {
+            igUsername = clientRows[0].name.toLowerCase().replace(/[^a-z0-9._]/g, '');
+          }
         }
       }
-    }
-
-    if (fbTokenData.access_token) {
-      const shortToken = fbTokenData.access_token;
-      const longLivedUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortToken}`;
-      const longLivedRes = await fetch(longLivedUrl);
-      const longLivedData = await longLivedRes.json();
-      const longToken = longLivedData.access_token || shortToken;
-
-      // Find Instagram Business Account linked
-      const accountsUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username}&access_token=${longToken}`;
-      const accountsRes = await fetch(accountsUrl);
-      const accountsData = await accountsRes.json();
-      const pages = accountsData.data || [];
-
-      for (const p of pages) {
-        if (p.instagram_business_account) {
-          igUserId = p.instagram_business_account.id;
-          igUsername = p.instagram_business_account.username;
-          igAccessToken = p.access_token || longToken;
-          break;
-        }
-      }
-
-      if (!igAccessToken && pages.length > 0) {
-        igAccessToken = pages[0].access_token || longToken;
-      }
-    }
+    } catch {}
   }
 
-  if (!igAccessToken) {
-    throw new Error('Failed to obtain Instagram Access Token. Please verify permissions and account setup.');
-  }
-
+  const profileUrl = igUsername ? `https://instagram.com/${igUsername}` : null;
   const encToken = encrypt(igAccessToken);
 
-  // Save ONLY in instagram row - DO NOT TOUCH FACEBOOK!
+  // Encrypt token and save ONLY the Instagram account record (never overwrite Facebook)
   await pool.query(
-    `INSERT INTO client_social_accounts (client_id, platform, platform_id, platform_username, access_token_encrypted, token_expires_at, connection_method, is_connected, last_tested_at)
-     VALUES (?, 'instagram', ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), 'oauth', TRUE, NOW())
-     ON DUPLICATE KEY UPDATE platform_id = VALUES(platform_id), platform_username = VALUES(platform_username), access_token_encrypted = VALUES(access_token_encrypted), token_expires_at = VALUES(token_expires_at), connection_method = 'oauth', is_connected = TRUE, last_tested_at = NOW(), last_error = NULL`,
-    [clientId, igUserId || null, igUsername || null, encToken, tokenExpiresIn]
+    `INSERT INTO client_social_accounts (
+       client_id, platform, platform_id, platform_username, profile_url,
+       access_token_encrypted, token_expires_at, connection_method, is_connected, last_tested_at, last_error
+     )
+     VALUES (?, 'instagram', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), 'oauth', TRUE, NOW(), NULL)
+     ON DUPLICATE KEY UPDATE 
+       platform_id = VALUES(platform_id), 
+       platform_username = COALESCE(VALUES(platform_username), platform_username), 
+       profile_url = COALESCE(VALUES(profile_url), profile_url), 
+       access_token_encrypted = VALUES(access_token_encrypted), 
+       token_expires_at = VALUES(token_expires_at), 
+       connection_method = 'oauth', 
+       is_connected = TRUE, 
+       last_tested_at = NOW(), 
+       last_error = NULL`,
+    [clientId, igUserId || null, igUsername || null, profileUrl, encToken, tokenExpiresIn]
   );
 
   return {
     clientId,
     platform: 'instagram',
+    platformId: igUserId,
+    username: igUsername,
     frontendOrigin: decoded.frontendOrigin || null,
   };
 };
@@ -438,24 +469,59 @@ const testConnection = async (account) => {
 
   try {
     if (account.platform === 'instagram') {
-      // Test via graph.instagram.com first
-      const igUrl = `https://graph.instagram.com/${GRAPH_API_VERSION}/me?fields=user_id,username,name&access_token=${encodeURIComponent(rawToken)}`;
-      const res = await fetch(igUrl);
-      const data = await res.json();
-      if (!data.error) {
-        return { valid: true, accountName: data.username || data.name || account.platform_username };
+      // 1. Test via graph.instagram.com/me with standard professional fields
+      let igData = null;
+      try {
+        const igUrl = `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${encodeURIComponent(rawToken)}`;
+        const res = await fetch(igUrl);
+        igData = await res.json();
+      } catch (e) {
+        console.warn('[Instagram Test] /me fetch warning:', e.message);
       }
 
-      // Fallback for Page Token with Instagram platform_id
-      if (account.platform_id) {
-        const fbUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(account.platform_id)}?fields=id,username,name&access_token=${encodeURIComponent(rawToken)}`;
-        const fbRes = await fetch(fbUrl);
-        const fbData = await fbRes.json();
-        if (!fbData.error) {
-          return { valid: true, accountName: fbData.username || fbData.name || account.platform_username };
-        }
+      if (igData && !igData.error && (igData.username || igData.id)) {
+        const accName = igData.username || account.platform_username || `Instagram User #${igData.id}`;
+        return {
+          valid: true,
+          accountName: accName,
+          platformId: igData.id || account.platform_id,
+          profileUrl: igData.username ? `https://instagram.com/${igData.username}` : account.profile_url,
+        };
       }
-      return { valid: false, error: data.error?.message || 'Instagram token verification failed' };
+
+      // 2. Fallback for Page Token with Instagram platform_id on graph.facebook.com
+      if (account.platform_id) {
+        try {
+          const fbUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(account.platform_id)}?fields=id,username,name&access_token=${encodeURIComponent(rawToken)}`;
+          const fbRes = await fetch(fbUrl);
+          const fbData = await fbRes.json();
+          if (fbData && !fbData.error && (fbData.username || fbData.name || fbData.id)) {
+            const accName = fbData.username || fbData.name || account.platform_username;
+            return {
+              valid: true,
+              accountName: accName,
+              platformId: fbData.id || account.platform_id,
+              profileUrl: fbData.username ? `https://instagram.com/${fbData.username}` : account.profile_url,
+            };
+          }
+        } catch (fbErr) {}
+      }
+
+      // 3. Inspect Meta error response:
+      if (igData?.error) {
+        return {
+          valid: false,
+          error: igData.error.message || `Meta API Error ${igData.error.code || 100}`,
+          code: igData.error.code,
+          type: igData.error.type,
+          fbtrace_id: igData.error.fbtrace_id,
+          accountName: account.platform_username || null,
+          platformId: account.platform_id || null,
+          profileUrl: account.profile_url || null,
+        };
+      }
+
+      return { valid: false, error: 'Instagram token verification failed (No profile data returned)' };
     }
 
     // Facebook test
@@ -465,7 +531,11 @@ const testConnection = async (account) => {
     if (data.error) {
       return { valid: false, error: data.error.message || 'Facebook token verification failed' };
     }
-    return { valid: true, accountName: data.name || account.platform_username };
+    return {
+      valid: true,
+      accountName: data.name || account.platform_username,
+      platformId: data.id || account.platform_id,
+    };
   } catch (err) {
     return { valid: false, error: err.message };
   }
@@ -508,6 +578,13 @@ const publishFacebook = async (account, post) => {
 /**
  * Publish post to Instagram - uses ONLY Instagram Token via graph.instagram.com
  */
+/**
+ * Publish post to Instagram - uses ONLY Instagram Token via graph.instagram.com
+ * Implements the documented 3-step Instagram Graph API Publishing Flow:
+ * 1. POST /{IG_USER_ID}/media (creates media container with JPEG image)
+ * 2. GET /{CONTAINER_ID}?fields=status_code (polls until container status is FINISHED)
+ * 3. POST /{IG_USER_ID}/media_publish (publishes container to live Instagram profile)
+ */
 const publishInstagram = async (account, post) => {
   const token = decrypt(account.access_token_encrypted);
   if (!token) throw new Error('Instagram access token missing');
@@ -521,47 +598,181 @@ const publishInstagram = async (account, post) => {
   }
 
   const igUserId = account.platform_id || 'me';
+  const apiHost = 'graph.instagram.com';
+  const apiVersion = GRAPH_API_VERSION;
 
-  // 1. Create media container via graph.instagram.com
-  let containerUrl = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igUserId}/media?image_url=${encodeURIComponent(
-    post.image_url
-  )}&caption=${encodeURIComponent(post.caption)}&access_token=${encodeURIComponent(token)}`;
-  let cRes = await fetch(containerUrl, { method: 'POST' });
-  let cData = await cRes.json();
+  // 1. Ensure image is JPEG format (Meta Instagram API strictly rejects PNG images)
+  let rawImagePath = post.image_path;
+  if (rawImagePath && !rawImagePath.startsWith('http')) {
+    rawImagePath = await ensureJpegForInstagram(rawImagePath);
+  }
 
-  // Fallback to graph.facebook.com if token is Page token
-  if (cData.error && (cData.error.message.includes('not supported') || cData.error.code === 100 || cData.error.code === 190)) {
-    const fbContainerUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${igUserId}/media?image_url=${encodeURIComponent(
-      post.image_url
-    )}&caption=${encodeURIComponent(post.caption)}&access_token=${encodeURIComponent(token)}`;
-    const fbCRes = await fetch(fbContainerUrl, { method: 'POST' });
-    const fbCData = await fbCRes.json();
-    if (!fbCData.error) {
-      cData = fbCData;
+  // Resolve public image URL from post.image_url or converted post.image_path
+  let imageUrl = post.image_url;
+  if (!imageUrl && rawImagePath) {
+    if (rawImagePath.startsWith('http://') || rawImagePath.startsWith('https://')) {
+      imageUrl = rawImagePath;
+    } else {
+      let publicOrigin = process.env.PUBLIC_URL;
+      if (!publicOrigin && process.env.META_REDIRECT_URI) {
+        try {
+          const parsed = new URL(process.env.META_REDIRECT_URI);
+          publicOrigin = `${parsed.protocol}//${parsed.host}`;
+        } catch {}
+      }
+      if (!publicOrigin) {
+        publicOrigin = `http://localhost:${process.env.PORT || 5001}`;
+      }
+      const cleanPath = rawImagePath.replace(/^[\\/]+/, '').replace(/\\/g, '/');
+      imageUrl = `${publicOrigin}/${cleanPath}`;
     }
   }
 
-  if (cData.error) throw new Error(cData.error.message);
+  if (!imageUrl) {
+    throw new Error('Image URL is required for Instagram publication');
+  }
 
-  // 2. Publish container via graph.instagram.com
-  let publishUrl = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igUserId}/media_publish?creation_id=${cData.id}&access_token=${encodeURIComponent(
-    token
-  )}`;
-  let pRes = await fetch(publishUrl, { method: 'POST' });
-  let pData = await pRes.json();
+  // STEP 1: POST /{IG_ID}/media - Create Media Container
+  const containerEndpoint = `/${igUserId}/media`;
+  console.log('[Instagram Publish - Step 1/3] Initiating media container creation:', {
+    hostname: apiHost,
+    version: apiVersion,
+    endpoint: containerEndpoint,
+    method: 'POST',
+    paramNames: ['image_url', 'caption', 'access_token'],
+    imageUrlHost: new URL(imageUrl).hostname,
+    imageUrlPath: new URL(imageUrl).pathname,
+    hasCaption: Boolean(post.caption),
+  });
+
+  const containerParams = new URLSearchParams({
+    image_url: imageUrl,
+    caption: post.caption || '',
+    access_token: token,
+  });
+
+  let cRes;
+  let cData;
+  try {
+    cRes = await fetch(`https://${apiHost}/${apiVersion}${containerEndpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: containerParams.toString(),
+    });
+    cData = await cRes.json();
+  } catch (netErr) {
+    console.error('[Instagram Publish - Step 1/3] Network failure contacting Meta API:', netErr.message);
+    throw new Error(`Failed to contact Meta Instagram API: ${netErr.message}`);
+  }
+
+  console.log('[Instagram Publish - Step 1/3] Meta Container Response:', {
+    status: cRes.status,
+    hasError: Boolean(cData?.error),
+    errorCode: cData?.error?.code || null,
+    errorType: cData?.error?.type || null,
+    errorMessage: cData?.error?.message || null,
+    fbtrace_id: cData?.error?.fbtrace_id || null,
+    containerId: cData?.id || null,
+  });
+
+  if (cData.error) {
+    const errorMsg = cData.error.message || `Meta API Error ${cData.error.code || 100}`;
+    throw new Error(`Instagram publishing failed at container creation (Step 1): ${errorMsg}`);
+  }
+
+  const containerId = cData.id;
+  if (!containerId) {
+    throw new Error('Failed to obtain creation_id container ID from Meta API');
+  }
+
+  // STEP 2: GET /{CONTAINER_ID}?fields=status_code - Verify Container Status
+  const statusEndpoint = `/${containerId}`;
+  console.log('[Instagram Publish - Step 2/3] Checking container status:', {
+    hostname: apiHost,
+    version: apiVersion,
+    endpoint: statusEndpoint,
+    method: 'GET',
+    paramNames: ['fields', 'access_token'],
+  });
+
+  let isReady = false;
+  let attempts = 0;
+  const maxAttempts = 5;
+
+  while (!isReady && attempts < maxAttempts) {
+    attempts++;
+    try {
+      const sRes = await fetch(
+        `https://${apiHost}/${apiVersion}${statusEndpoint}?fields=status_code&access_token=${encodeURIComponent(token)}`
+      );
+      const sData = await sRes.json();
+      console.log(`[Instagram Publish - Step 2/3] Status attempt ${attempts}/${maxAttempts}:`, {
+        status_code: sData.status_code || null,
+        error: sData.error?.message || null,
+      });
+
+      if (sData.status_code === 'FINISHED') {
+        isReady = true;
+        break;
+      } else if (sData.status_code === 'ERROR') {
+        throw new Error(`Media container processing failed on Meta with status ERROR`);
+      } else if (sData.status_code === 'IN_PROGRESS') {
+        await new Promise((r) => setTimeout(r, 2000));
+      } else {
+        // Instant container or endpoint without status_code
+        isReady = true;
+        break;
+      }
+    } catch (statusErr) {
+      console.warn(`[Instagram Publish - Step 2/3] Status check warning: ${statusErr.message}`);
+      break;
+    }
+  }
+
+  // STEP 3: POST /{IG_ID}/media_publish - Publish Container
+  const publishEndpoint = `/${igUserId}/media_publish`;
+  console.log('[Instagram Publish - Step 3/3] Triggering media publication:', {
+    hostname: apiHost,
+    version: apiVersion,
+    endpoint: publishEndpoint,
+    method: 'POST',
+    paramNames: ['creation_id', 'access_token'],
+    containerId,
+  });
+
+  const publishParams = new URLSearchParams({
+    creation_id: containerId,
+    access_token: token,
+  });
+
+  let pRes;
+  let pData;
+  try {
+    pRes = await fetch(`https://${apiHost}/${apiVersion}${publishEndpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: publishParams.toString(),
+    });
+    pData = await pRes.json();
+  } catch (pubNetErr) {
+    console.error('[Instagram Publish - Step 3/3] Network failure during publication:', pubNetErr.message);
+    throw new Error(`Failed to contact Meta publish endpoint: ${pubNetErr.message}`);
+  }
+
+  console.log('[Instagram Publish - Step 3/3] Meta Publication Response:', {
+    status: pRes.status,
+    hasError: Boolean(pData?.error),
+    errorCode: pData?.error?.code || null,
+    errorType: pData?.error?.type || null,
+    errorMessage: pData?.error?.message || null,
+    fbtrace_id: pData?.error?.fbtrace_id || null,
+    publishedPostId: pData?.id || null,
+  });
 
   if (pData.error) {
-    const fbPublishUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${igUserId}/media_publish?creation_id=${cData.id}&access_token=${encodeURIComponent(
-      token
-    )}`;
-    const fbPRes = await fetch(fbPublishUrl, { method: 'POST' });
-    const fbPData = await fbPRes.json();
-    if (!fbPData.error) {
-      pData = fbPData;
-    }
+    const errorMsg = pData.error.message || `Meta API Error ${pData.error.code || 100}`;
+    throw new Error(`Instagram publishing failed at media_publish (Step 3): ${errorMsg}`);
   }
-
-  if (pData.error) throw new Error(pData.error.message);
 
   return {
     success: true,
@@ -572,6 +783,8 @@ const publishInstagram = async (account, post) => {
 
 module.exports = {
   isKeyConfigured,
+  isFacebookKeyConfigured,
+  isInstagramKeyConfigured,
   getAuthUrl,
   getFacebookAuthUrl,
   getInstagramAuthUrl,

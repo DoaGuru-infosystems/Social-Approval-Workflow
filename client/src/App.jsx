@@ -8,6 +8,7 @@ import Login from './pages/Login';
 import SMODashboard from './pages/SMODashboard';
 import ManagerDashboard from './pages/ManagerDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import PostInspection from './pages/PostInspection';
 
 // Root redirect handler based on authenticated user's role
 const RootRedirect = () => {
@@ -71,6 +72,24 @@ function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin', 'manager', 'smo']}>
                   <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Dedicated Post Inspection Route (No nav link, ID-scoped) */}
+            <Route
+              path="/posts/:id/inspection"
+              element={
+                <ProtectedRoute allowedRoles={['smo', 'manager', 'admin']}>
+                  <PostInspection />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/posts/:id"
+              element={
+                <ProtectedRoute allowedRoles={['smo', 'manager', 'admin']}>
+                  <PostInspection />
                 </ProtectedRoute>
               }
             />

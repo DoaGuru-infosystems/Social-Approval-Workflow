@@ -8,7 +8,7 @@ import { ShieldCheck, AlertOctagon, Info, Sparkles, Binary } from 'lucide-react'
  * Rules:
  * - SKIPPED: "Logo Check Skipped - Logo upload nahi hai" (Neutral, does NOT fail post)
  * - PASS: "PASS - Logo mil gaya - Neeche Right corner me hai - Score 0.94 - Checked By: Gemini"
- * - FAIL: "FAIL - Logo post me kahin nahi mila. Suggestion: Logo ko neeche right corner me saaf jagah pe lagayein. - Checked By: Python"
+ * - FAIL: "FAIL - Logo post me kahin nahi mila. Suggestion: Logo ko post me lagayein. - Checked By: Python"
  */
 const LogoCheckCard = ({ logoCheck, aiProvider, fallbackUsed }) => {
   if (!logoCheck || logoCheck.status === 'SKIPPED') {

@@ -51,7 +51,7 @@ class TestBrandLogoCheck(unittest.TestCase):
         """Verify suggestion rules match exact required Hindi text."""
         self.assertEqual(
             SUGGESTION_RULES["MISSING"],
-            "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
+            "Logo post me kahin nahi mila. Logo ko post me lagayein.",
         )
         self.assertEqual(
             SUGGESTION_RULES["WRONG_LOGO"],
@@ -116,7 +116,7 @@ class TestBrandLogoCheck(unittest.TestCase):
             self.assertEqual(res["reason"], "MISSING")
             self.assertEqual(
                 res["suggestion"],
-                "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
+                "Logo post me kahin nahi mila. Logo ko post me lagayein.",
             )
         finally:
             brand_logo_check._get_api_key = orig_key_fn

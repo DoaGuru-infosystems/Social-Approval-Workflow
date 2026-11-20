@@ -168,27 +168,51 @@ exports.getSystemHealth = async (req, res) => {
       });
     }
 
-    // 4. META DEVELOPER APP (INSTAGRAM + FACEBOOK)
+    // 4. META DEVELOPER APP (FACEBOOK)
     const metaId = env.META_APP_ID || '';
     const metaSecret = env.META_APP_SECRET || '';
     if (isDummyOrMissing(metaId) || isDummyOrMissing(metaSecret)) {
       services.push({
         id: 'meta_oauth',
-        label: 'Meta Developer App (Instagram & Facebook)',
+        label: 'Meta Developer App (Facebook)',
         status: 'dummy',
         severity: 'warning',
         message: 'META_APP_ID ya META_APP_SECRET .env me DUMMY hai.',
-        impact: '1-Click OAuth popup kaam nahi karega ("OAuth Key Nahi Mili"). Lekin "Manual se Jodo" kaam karega.',
+        impact: '1-Click Facebook OAuth kaam nahi karega ("OAuth Key Nahi Mili"). Lekin "Manual se Jodo" kaam karega.',
         action: 'Meta Developers Console se Agency App banakar credentials .env me dalein.',
       });
     } else {
       services.push({
         id: 'meta_oauth',
-        label: 'Meta Developer App (Instagram & Facebook)',
+        label: 'Meta Developer App (Facebook)',
         status: 'active',
         severity: 'ok',
         message: `App ID: ${metaId.substring(0, 6)}... configured.`,
-        impact: '1-Click Meta OAuth ready for all clients.',
+        impact: '1-Click Facebook OAuth ready for all clients.',
+      });
+    }
+
+    // 4b. INSTAGRAM LOGIN APP
+    const igId = env.INSTAGRAM_APP_ID || '';
+    const igSecret = env.INSTAGRAM_APP_SECRET || '';
+    if (isDummyOrMissing(igId) || isDummyOrMissing(igSecret)) {
+      services.push({
+        id: 'instagram_oauth',
+        label: 'Instagram Developer App (Instagram Login)',
+        status: 'dummy',
+        severity: 'warning',
+        message: 'INSTAGRAM_APP_ID ya INSTAGRAM_APP_SECRET .env me DUMMY ya missing hai.',
+        impact: '1-Click Instagram OAuth kaam nahi karega ("OAuth Key Nahi Mili"). Lekin "Manual se Jodo" kaam karega.',
+        action: 'Meta Developers Console se Instagram App banakar credentials .env me dalein.',
+      });
+    } else {
+      services.push({
+        id: 'instagram_oauth',
+        label: 'Instagram Developer App (Instagram Login)',
+        status: 'active',
+        severity: 'ok',
+        message: `App ID: ${igId.substring(0, 6)}... configured.`,
+        impact: '1-Click Instagram OAuth ready for all clients.',
       });
     }
 

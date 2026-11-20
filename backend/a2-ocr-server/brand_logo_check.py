@@ -24,7 +24,7 @@ PASS_THRESHOLD = 0.85
 
 # Suggestion Rules (System fallback if AI gives no suggestion or on Python fallback)
 SUGGESTION_RULES = {
-    "MISSING": "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
+    "MISSING": "Logo post me kahin nahi mila. Logo ko post me lagayein.",
     "WRONG_LOGO": "Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein.",
     "TOO_SMALL": "Logo bahut chhota hai. Logo ko kam se kam 10% bada karein.",
     "HIDDEN": "Logo text ke peeche chhup gaya hai. Logo ko khali jagah pe le jayein.",
@@ -182,18 +182,20 @@ def _check_logo_with_vision_ai(post_bgr, logo_bgr, api_key=None, timeout_sec=12)
     post_b64 = base64.b64encode(post_buf).decode("utf-8")
 
     prompt = (
-        "You are an expert brand logo verification system for social media posters.\n"
-        "Image 1 is the official reference logo of the client brand.\n"
-        "Image 2 is the social media post image to inspect.\n\n"
+        "You are a strict brand logo auditor.\n"
+        "Image 1 is the official reference brand logo of the client.\n"
+        "Image 2 is a social media poster to inspect.\n\n"
         "TASK:\n"
-        "Find this reference logo anywhere in this post image. "
-        "Search the WHOLE image, the logo can be ANYWHERE, do NOT assume position.\n"
-        "Examine if the logo is present, matching, altered, missing, hidden, or wrong.\n\n"
+        "Determine whether the EXACT brand logo shown in Image 1 appears anywhere on the poster in Image 2.\n"
+        "CRITICAL RULES:\n"
+        "- Compare visual features, iconography, text, shape, and symbols strictly.\n"
+        "- If Image 2 contains a DIFFERENT logo or company branding (e.g. an eye hospital logo when Image 1 is different, or a different organization's logo), or does NOT contain Image 1, you MUST return found: false, match_score: 0.0, reason: 'WRONG_LOGO' or 'MISSING'.\n"
+        "- NEVER return found: true merely because an arbitrary logo is present on the poster; it MUST be the specific logo from Image 1.\n\n"
         "Return STRICT JSON with these exact keys:\n"
         "{\n"
         '  "found": true or false,\n'
-        '  "match_score": number between 0.0 and 1.0 (>= 0.85 if clear match),\n'
-        '  "location": "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center",\n'
+        '  "match_score": number between 0.0 and 1.0 (>= 0.85 only if clear match with Image 1),\n'
+        '  "location": "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center" | "unknown",\n'
         '  "size_percent": integer percentage of image width or area occupied by logo,\n'
         '  "reason": "CORRECT" | "MISSING" | "WRONG_LOGO" | "TOO_SMALL" | "HIDDEN" | "COLOR_CHANGED",\n'
         '  "suggestion": "One line actionable suggestion in Hindi/Hinglish for the graphic designer"\n'
@@ -339,29 +341,57 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
     except Exception:
         pass
 
-    # 3. ORB Feature Matching
+    # 3. ORB Feature Matching with RANSAC Geometric Verification
     orb_score = 0.0
+    orb_box = None
     try:
         orb = cv2.ORB_create(nfeatures=1000)
         kp_logo_orb, des_logo_orb = orb.detectAndCompute(logo_gray, None)
         kp_post_orb, des_post_orb = orb.detectAndCompute(post_gray, None)
 
-        if des_logo_orb is not None and des_post_orb is not None and len(kp_logo_orb) >= 4:
+        if des_logo_orb is not None and des_post_orb is not None and len(kp_logo_orb) >= 8 and len(kp_post_orb) >= 8:
             bf_orb = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
             orb_matches = bf_orb.match(des_logo_orb, des_post_orb)
-            good_orb = [m for m in orb_matches if m.distance < 55]
-            if len(good_orb) >= 5:
-                orb_score = min(1.0, len(good_orb) / 20.0)
+            good_orb = [m for m in orb_matches if m.distance < 50]
+            if len(good_orb) >= 10:
+                src_pts = np.float32([kp_logo_orb[m.queryIdx].pt for m in good_orb]).reshape(-1, 1, 2)
+                dst_pts = np.float32([kp_post_orb[m.trainIdx].pt for m in good_orb]).reshape(-1, 1, 2)
+                _matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+                if mask is not None:
+                    inliers = int(np.sum(mask))
+                    inlier_ratio = inliers / float(len(good_orb))
+                    if inliers >= 10 and inlier_ratio >= 0.35:
+                        inlier_pts = dst_pts[mask.ravel() == 1]
+                        x, y, w, h = cv2.boundingRect(inlier_pts)
+                        pts_2d = inlier_pts.reshape(-1, 2)
+                        w_ratio = w / float(post_w)
+                        h_ratio = h / float(post_h)
+                        std_x = float(np.std(pts_2d[:, 0]))
+                        std_y = float(np.std(pts_2d[:, 1]))
+                        # Spatial consistency: inliers must form a localized cluster
+                        if w_ratio <= 0.35 and h_ratio <= 0.35 and std_x <= post_w * 0.15 and std_y <= post_h * 0.15:
+                            orb_score = min(1.0, (inliers / 20.0) * 0.7 + inlier_ratio * 0.3)
+                            orb_box = (x, y, w, h)
     except Exception:
         pass
 
     # 4. Composite Score Calculation
-    # Template matching gives exact visual shape alignment; SIFT gives scale/affine robustness
-    final_score = max(best_template_score, sift_score, orb_score)
-    if best_template_score > 0.65 and sift_score > 0.65:
-        final_score = max(final_score, (best_template_score * 0.6) + (sift_score * 0.4))
+    # Template matching gives exact visual shape alignment; SIFT & ORB give scale/rotation robustness
+    feature_score = max(sift_score, orb_score)
+    feature_box = sift_box if sift_score >= orb_score else orb_box
 
-    chosen_box = best_template_box or sift_box or (0, 0, int(post_w * 0.1), int(post_h * 0.1))
+    if best_template_score >= 0.75:
+        final_score = best_template_score
+        chosen_box = best_template_box
+    elif feature_score >= 0.75:
+        final_score = feature_score
+        chosen_box = feature_box
+    elif best_template_score >= 0.60 and feature_score >= 0.50:
+        final_score = (best_template_score * 0.6) + (feature_score * 0.4)
+        chosen_box = best_template_box or feature_box
+    else:
+        final_score = max(best_template_score, feature_score)
+        chosen_box = best_template_box or feature_box or (0, 0, int(post_w * 0.1), int(post_h * 0.1))
 
     # Calculate location and size percent
     bx, by, bw, bh = chosen_box
@@ -377,8 +407,8 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
 
     size_percent = max(1, int(round((bw / float(post_w)) * 100)))
 
-    # Determine Reason
-    found = final_score >= 0.50
+    # Determine Reason (threshold >= 0.70 to avoid accidental false positives)
+    found = final_score >= 0.70
     if final_score >= PASS_THRESHOLD:
         reason = "CORRECT"
     elif not found:
@@ -516,7 +546,7 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
         custom_suggestion = ai_result.get("suggestion")
         suggestion = custom_suggestion if (custom_suggestion and str(custom_suggestion).strip()) else SUGGESTION_RULES.get(raw_reason, SUGGESTION_RULES["MISSING"])
 
-        # If AI returns found=true and match_score >= 0.85 => Return PASS, do NOT go to Python.
+        # If AI returned a definitive verdict, trust Gemini's inspection result
         if found and score >= PASS_THRESHOLD:
             return {
                 "status": "PASS",
@@ -526,6 +556,18 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
                 "location_hindi": loc_hindi,
                 "size_percent": size_pct,
                 "reason": "CORRECT",
+                "suggestion": suggestion,
+                "checked_by": "Gemini",
+            }
+        else:
+            return {
+                "status": "FAIL",
+                "found": False,
+                "score": round(score, 2),
+                "location": loc_key if loc_key != "unknown" else "unknown",
+                "location_hindi": loc_hindi if loc_key != "unknown" else "Kahin nahi mila",
+                "size_percent": size_pct if found else 0,
+                "reason": raw_reason if raw_reason in SUGGESTION_RULES else "MISSING",
                 "suggestion": suggestion,
                 "checked_by": "Gemini",
             }

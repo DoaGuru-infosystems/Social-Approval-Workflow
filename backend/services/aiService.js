@@ -10,6 +10,7 @@ const geminiOcrService = require('./geminiOcrService');
 const googleVisionService = require('./googleVisionService');
 const brandLogoService = require('./brandLogoService');
 const grammarService = require('./grammarService');
+const crossClientService = require('./crossClientService');
 const fuzzball = require('fuzzball');
 
 // Ensure environment variables are loaded if invoked directly
@@ -498,15 +499,43 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     (p) => p.status === 'mismatch_warning' || p.status === 'unknown_phone'
   );
 
+  // Cross-Client Collision Check on combined text (Caption + Title)
+  let textCrossClientReport = null;
+  try {
+    textCrossClientReport = await crossClientService.detectCrossClientCollisions({
+      currentClientId: clientId,
+      text: combinedText,
+    });
+  } catch (err) {
+    console.warn('[runTextCheck] Cross-client collision check notice:', err.message);
+  }
+
+  const hasTextCrossClient = Boolean(textCrossClientReport && textCrossClientReport.hasCollision);
   const hasSpellingIssues = spellingIssues.length > 0;
   const hasBannedWords = bannedWordsFound.length > 0;
   const hasMissingMandatory = missingMandatoryPhrases.length > 0;
   const hasPhoneIssues = phoneWarnings.length > 0;
 
-  const passed = !hasSpellingIssues && !hasBannedWords && !hasMissingMandatory && !hasPhoneIssues;
+  let textEnforcementState = 'green_clean';
+  const textEnforcementReasons = [];
+
+  if (hasTextCrossClient) {
+    textEnforcementState = 'red_block';
+    const firstCol = textCrossClientReport.collisions[0];
+    const reasonMsg = `Caption/Title me dusre client '${firstCol?.foreignClient?.name}' ke brand elements mile (${firstCol?.reasons?.join('; ')})`;
+    textEnforcementReasons.push(reasonMsg);
+  } else if (hasSpellingIssues || hasBannedWords) {
+    textEnforcementState = 'red_block';
+    if (hasBannedWords) textEnforcementReasons.push(`Banned brand terms found: ${bannedWordsFound.join(', ')}`);
+    if (hasSpellingIssues) textEnforcementReasons.push(`Text spelling errors: ${spellingIssues.length} issue(s) detected`);
+  }
+
+  const passed = textEnforcementState === 'green_clean' && !hasMissingMandatory && !hasPhoneIssues;
 
   let summary = 'Text Check Clean';
-  if (hasBannedWords) {
+  if (hasTextCrossClient) {
+    summary = textEnforcementReasons[0] || 'Cross-Client Mismatch in Text';
+  } else if (hasBannedWords) {
     summary = `Flagged: Banned brand terms found (${bannedWordsFound.join(', ')})`;
   } else if (hasPhoneIssues) {
     summary = `Phone Verification Alert: ${phoneWarnings[0].message}`;
@@ -520,6 +549,9 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     text_status: 'completed',
     passed,
     summary,
+    enforcement_state: textEnforcementState,
+    enforcement_reasons: textEnforcementReasons,
+    cross_client_report: textCrossClientReport,
     spelling_issues: spellingIssues,
     grammar_suggestions: grammarSuggestions,
     key_error: keyError,
@@ -650,6 +682,8 @@ const groupOcrBoxes = (rawBoxes, maxTarget = 8) => {
  * @param {Object} [params.guidelines={}]
  * @param {string} [params.caption='']
  * @param {Array<Object>} [params.spellingIssues=[]]
+ * @param {Object} [params.crossClientReport=null]
+ * @param {number} [params.currentClientId=null]
  * @returns {Array<Object>}
  */
 const buildAnnotatedPosterBoxes = ({
@@ -658,6 +692,8 @@ const buildAnnotatedPosterBoxes = ({
   guidelines = {},
   caption = '',
   spellingIssues = [],
+  crossClientReport = null,
+  currentClientId = null,
 }) => {
   const normOcr = (rawOcrText || '').trim();
   const orgName = guidelines.organization_name || '';
@@ -667,6 +703,19 @@ const buildAnnotatedPosterBoxes = ({
   const expectedPhones = [guidelines.primary_phone, guidelines.alternate_phone, guidelines.gmb_phone]
     .filter(Boolean)
     .map((p) => String(p).replace(/\D/g, ''));
+
+  // Derive allowed client domains from whitelist and organization name
+  const allowedClientDomains = [];
+  for (const w of whitelist) {
+    const found = crossClientService.extractDomains(w);
+    if (found.length) allowedClientDomains.push(...found);
+  }
+  if (orgName) {
+    const orgRoots = orgName.toLowerCase().split(/\s+/).filter((w) => w.length >= 4);
+    for (const r of orgRoots) {
+      allowedClientDomains.push(`${r}.com`, `${r}.in`);
+    }
+  }
 
   // Use real OCR boxes if available. If boxes are <= 25, keep individual boxes for pinpoint precision;
   // only group if there are too many fragmented micro-boxes (>25).
@@ -808,10 +857,72 @@ const buildAnnotatedPosterBoxes = ({
       isWhitelisted = false; // Brand name error MUST NEVER be excused by whitelist
     }
 
+    // Check Cross-Client Collision for this box
+    let isForeignCollision = false;
+    let foreignCollisionReason = null;
+    let foreignClientName = null;
+
+    if (crossClientReport && crossClientReport.hasCollision) {
+      const isBoxColliding =
+        (crossClientReport.collidingBoxIds && crossClientReport.collidingBoxIds.includes(boxId)) ||
+        (crossClientReport.collidingBoxIds && crossClientReport.collidingBoxIds.includes(item.id));
+
+      if (isBoxColliding) {
+        isForeignCollision = true;
+        for (const col of crossClientReport.collisions || []) {
+          const matchingR = (col.reasons || []).find((r) => r.includes(`Box #${boxId}`) || r.includes(`Box #${item.id}`));
+          if (matchingR) {
+            foreignCollisionReason = matchingR;
+            foreignClientName = col.foreignClient?.name;
+            break;
+          }
+        }
+        if (!foreignCollisionReason && crossClientReport.collisions?.[0]) {
+          foreignCollisionReason = crossClientReport.collisions[0].reasons[0];
+          foreignClientName = crossClientReport.collisions[0].foreignClient?.name;
+        }
+      }
+    }
+
+    // Check Website Domains in this box
+    const boxDomains = crossClientService.extractDomains(text);
+    let hasUnregisteredDomain = false;
+    let domainErrorReason = null;
+    if (boxDomains.length > 0) {
+      for (const dom of boxDomains) {
+        const isAllowed = allowedClientDomains.some((ad) => dom.includes(ad) || ad.includes(dom));
+        if (!isAllowed) {
+          hasUnregisteredDomain = true;
+          // Check if it belongs to another registered client
+          let otherClientName = null;
+          if (crossClientReport) {
+            for (const col of crossClientReport.collisions || []) {
+              if (col.reasons.some((r) => r.toLowerCase().includes(dom.toLowerCase()))) {
+                otherClientName = col.foreignClient?.name;
+                break;
+              }
+            }
+          }
+          if (otherClientName) {
+            domainErrorReason = `Domain '${dom}' belongs to '${otherClientName}'! Cross-client collision!`;
+          } else {
+            domainErrorReason = `Unregistered website domain '${dom}' detected on poster (is client ki guidelines me registered nahi hai).`;
+          }
+          break;
+        }
+      }
+    }
+
     // Check Phone Numbers in this box
+    const phoneDigitsInBox = crossClientService.extractPhoneDigits(text);
     let matchedExpectedPhone = null;
+    let hasForeignPhone = false;
+    let foreignPhoneReason = null;
+    let hasUnknownPhone = false;
+    let unknownPhoneReason = null;
     let hasPhoneMismatch = false;
     let phoneMismatchReason = null;
+
     const digitsInBox = text.replace(/\D/g, '');
     for (const ep of expectedPhones) {
       if (ep && (text.includes(ep) || (digitsInBox.length >= 10 && digitsInBox.includes(ep)))) {
@@ -820,7 +931,32 @@ const buildAnnotatedPosterBoxes = ({
       }
     }
 
-    if (!matchedExpectedPhone && digitsInBox.length === 10) {
+    if (phoneDigitsInBox.length > 0 && !matchedExpectedPhone) {
+      for (const p of phoneDigitsInBox) {
+        const isExp = expectedPhones.some((ep) => ep && ep.endsWith(p));
+        if (!isExp) {
+          // Check if phone belongs to another client
+          let otherClientName = null;
+          if (crossClientReport) {
+            for (const col of crossClientReport.collisions || []) {
+              if (col.reasons.some((r) => r.includes(p))) {
+                otherClientName = col.foreignClient?.name;
+                break;
+              }
+            }
+          }
+          if (otherClientName) {
+            hasForeignPhone = true;
+            foreignPhoneReason = `Phone number '${p}' belongs to '${otherClientName}'! Cross-client collision!`;
+          } else {
+            hasUnknownPhone = true;
+            unknownPhoneReason = `Unknown phone number '${p}' detected on poster jo registered numbers se match nahi karta.`;
+          }
+        }
+      }
+    }
+
+    if (!matchedExpectedPhone && digitsInBox.length === 10 && !hasForeignPhone) {
       const { distance } = require('fastest-levenshtein');
       for (const ep of expectedPhones) {
         if (ep) {
@@ -876,7 +1012,13 @@ const buildAnnotatedPosterBoxes = ({
 
     // 3. Derive poster_expected dynamically from caption and brand rules
     let posterExpected = text;
-    if ((isBrandExact || hasBrandNameError) && orgName) {
+    if (isForeignCollision) {
+      posterExpected = foreignClientName ? `(Belongs to ${foreignClientName})` : 'Cross-Client Mismatch';
+    } else if (hasForeignPhone) {
+      posterExpected = 'Contact: Registered Phone Number';
+    } else if (hasUnregisteredDomain) {
+      posterExpected = 'Official Client Website';
+    } else if ((isBrandExact || hasBrandNameError) && orgName) {
       posterExpected = `${orgName} (Official Brand)`;
     } else if (matchedExpectedPhone) {
       posterExpected = `Contact: ${matchedExpectedPhone}`;
@@ -885,7 +1027,6 @@ const buildAnnotatedPosterBoxes = ({
     } else if ((hasAddressMismatch || (guidelines.address && text.length >= 10 && fuzzball.partial_ratio(text.toLowerCase(), guidelines.address.toLowerCase()) >= 70))) {
       posterExpected = guidelines.address;
     } else if (captionSegments.length > 0) {
-      // Find closest segment in caption
       let bestCapScore = 0;
       let bestCapText = '';
       for (const seg of captionSegments) {
@@ -943,47 +1084,66 @@ const buildAnnotatedPosterBoxes = ({
       ? brandRulesService.fuzzyMatchWhitelist(boxSpellError.word, whitelist, 88)
       : false;
 
-    // Is this block an isolated UI element (numbers, icons, UI chrome)?
-    const isIsolatedElement = regionType === 'isolated_element';
+    // CRITICAL: UI Chrome / Isolated Element exemption MUST NEVER apply if the box contains
+    // brand name tokens, foreign collisions, unregistered domains, or phone numbers!
+    const hasBrandingOrContact =
+      isBrandExact ||
+      hasBrandNameError ||
+      isForeignCollision ||
+      hasUnregisteredDomain ||
+      hasForeignPhone ||
+      phoneDigitsInBox.length > 0;
 
-    if (matchedBanned) {
+    const isIsolatedElement = (regionType === 'isolated_element') && !hasBrandingOrContact;
+
+    if (isForeignCollision) {
+      status = 'red';
+      statusLabel = 'RED = Real Error';
+      reason = `Cross-Client Mismatch: ${foreignCollisionReason || 'Box contains elements of another registered client.'}`;
+    } else if (hasForeignPhone) {
+      status = 'red';
+      statusLabel = 'RED = Real Error';
+      reason = `Cross-Client Mismatch: ${foreignPhoneReason}`;
+    } else if (hasUnregisteredDomain) {
+      status = 'red';
+      statusLabel = 'RED = Real Error';
+      reason = domainErrorReason;
+    } else if (matchedBanned) {
       status = 'red';
       statusLabel = 'RED = Real Error';
       reason = `Banned word detected: "${matchedBanned}"`;
     } else if (hasBrandNameError && confPercent >= 80) {
-      // High-confidence brand name mismatch is ALWAYS RED = Real Error
       status = 'red';
       statusLabel = 'RED = Real Error';
       reason = brandErrorReason;
     } else if (isIsolatedElement) {
-      // B1: If region_type === "isolated_element", EXCLUDE from spelling checks (UI chrome)
       status = 'green';
       statusLabel = 'GREEN = OK';
       reason = 'Isolated UI element — spelling check skipped (UI chrome).';
     } else if (boxSpellError && !isSpellWordWhitelisted) {
-      // B1: If region_type === "uncertain", cap max severity at YELLOW even if dictionary mismatch
       if (regionType === 'uncertain') {
         status = 'yellow';
         statusLabel = 'YELLOW = Manual Check';
         reason = `Spelling uncertainty: "${boxSpellError.word}" (geometric region uncertain — manual check recommended)`;
       } else {
-        // Confirmed spelling error on prose poster is a strict RED FLAG
         status = 'red';
         statusLabel = 'RED = Real Error';
         reason = `Spelling error detected on poster: "${boxSpellError.word}"${boxSpellError.suggestion ? ` (Did you mean: "${boxSpellError.suggestion}"?)` : ''}`;
       }
     } else if (suspectWords && suspectWords.length > 0) {
-      // B1: Surface suspect_words as a YELLOW "OCR Doubt" — never RED, never auto-correct
       const firstSuspect = suspectWords[0];
       status = 'yellow';
       statusLabel = 'YELLOW = Manual Check';
       reason = `OCR Doubt — possible misread: '${firstSuspect.word}' could be '${firstSuspect.suggested}' (not confirmed)`;
       posterExpected = firstSuspect.suggested;
-    } else if (hasPhoneMismatch) {
-      // Phone mismatch: YELLOW = Manual Check (do not quietly auto-correct)
+    } else if (hasForeignPhone || hasPhoneMismatch) {
+      status = hasForeignPhone ? 'red' : 'yellow';
+      statusLabel = hasForeignPhone ? 'RED = Real Error' : 'YELLOW = Manual Check';
+      reason = hasForeignPhone ? foreignPhoneReason : phoneMismatchReason;
+    } else if (hasUnknownPhone) {
       status = 'yellow';
       statusLabel = 'YELLOW = Manual Check';
-      reason = phoneMismatchReason;
+      reason = unknownPhoneReason;
     } else if (hasAddressMismatch) {
       status = 'yellow';
       statusLabel = 'YELLOW = OCR Doubt';
@@ -1412,15 +1572,30 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   });
 
   // Generate structured annotated poster zones matching visual OCR boxes
+  // Cross-Client Collision Detection on Poster Text & Boxes
+  let crossClientReport = null;
+  try {
+    crossClientReport = await crossClientService.detectCrossClientCollisions({
+      currentClientId: clientId,
+      text: rawOcrText,
+      ocrBoxes: remoteResult.ocr_boxes || [],
+    });
+  } catch (err) {
+    console.warn('[runImageCheck] Cross-client collision check notice:', err.message);
+  }
+
   const annotatedBoxes = buildAnnotatedPosterBoxes({
     rawOcrText,
     ocrBoxes: remoteResult.ocr_boxes || [],
     guidelines,
     caption,
     spellingIssues: realSpellingIssues,
+    crossClientReport,
+    currentClientId: clientId,
   });
 
   const ocrDoubts = annotatedBoxes.filter((b) => b.status === 'yellow');
+  const realErrorsOnPoster = annotatedBoxes.filter((b) => b.status === 'red');
 
   // Filter phone warnings to only validate true 10-digit phone candidate strings
   const validPhoneWarnings = (brandIdentityCheck.phone_verification || []).filter(
@@ -1465,7 +1640,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
         location_hindi: 'Kahin nahi mila',
         size_percent: 0,
         reason: 'MISSING',
-        suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+        suggestion: 'Logo post me kahin nahi mila. Logo ko post me lagayein.',
         checked_by: 'Python',
       };
     }
@@ -1483,10 +1658,65 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   const hasBrandNameError = Boolean(brandIdentityCheck.possible_brand_name_error);
   const hasPhoneIssues = validPhoneWarnings.length > 0;
 
-  const passed = !ocrUnreliable && !hasSpellingIssues && !hasBannedWords && !hasBrandNameError && !hasPhoneIssues && !hasLogoError;
+  // Strict 2-Tier Enforcement Gate Calculation:
+  // RED BLOCK: Logo missing in guidelines, Cross-client collision, both Logo & Brand missing,
+  // or real errors / banned words on poster.
+  const clientHasLogo = Boolean(resolvedLogoPath && guidelines.reference_logo_url);
+  const hasCrossClient = Boolean(crossClientReport && crossClientReport.hasCollision);
+  const logoFound = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found);
+  const brandNameFound = Boolean(brandIdentityCheck.brand_name_correct && (brandIdentityCheck.brand_name_match_score || 0) >= 80);
+
+  let imageEnforcementState = 'green_clean';
+  const imageEnforcementReasons = [];
+
+  if (!clientHasLogo) {
+    imageEnforcementState = 'red_block';
+    imageEnforcementReasons.push('Client Guidelines me official logo upload nahi hai. Guidelines me pehle logo upload karein.');
+  }
+  if (hasCrossClient) {
+    imageEnforcementState = 'red_block';
+    const firstCol = crossClientReport.collisions[0];
+    imageEnforcementReasons.push(`Cross-Client Collision: Poster par dusre client '${firstCol?.foreignClient?.name}' ke brand elements mile (${firstCol?.reasons?.join('; ')}).`);
+  }
+  if (realErrorsOnPoster.length > 0) {
+    imageEnforcementState = 'red_block';
+    imageEnforcementReasons.push(`Poster par ${realErrorsOnPoster.length} real error(s) detect huye hain.`);
+  }
+  if (!logoFound && !brandNameFound) {
+    imageEnforcementState = 'red_block';
+    imageEnforcementReasons.push(`Poster me na to official logo mila aur na hi official '${guidelines.organization_name || 'Brand'}' name mila.`);
+  }
+  if (hasSpellingIssues || hasBannedWords) {
+    imageEnforcementState = 'red_block';
+    if (hasSpellingIssues) imageEnforcementReasons.push(`Poster text me ${realSpellingIssues.length} real spelling mistake(s) hain.`);
+    if (hasBannedWords) imageEnforcementReasons.push(`Banned brand terms detected: ${bannedWordsFound.join(', ')}.`);
+  }
+
+  // YELLOW ALERT (Soft Gate): Exactly one of (Logo OR Brand Name) is present and no RED violations
+  if (imageEnforcementState !== 'red_block') {
+    if ((!logoFound && brandNameFound) || (logoFound && !brandNameFound)) {
+      imageEnforcementState = 'yellow_alert';
+      imageEnforcementReasons.push(logoFound ? 'Brand Name poster par missing hai (Logo verified OK).' : 'Official Logo poster par missing hai (Brand Name verified OK).');
+    } else {
+      imageEnforcementState = 'green_clean';
+    }
+  }
+
+  const isCrossClientMismatch = Boolean(hasCrossClient || (!logoFound && !brandNameFound));
+
+  const passed =
+    imageEnforcementState === 'green_clean' &&
+    !ocrUnreliable &&
+    realErrorsOnPoster.length === 0 &&
+    !hasPhoneIssues &&
+    !hasBrandNameError;
 
   let summary = 'Image Check Clean';
-  if (ocrUnreliable) {
+  if (imageEnforcementState === 'red_block') {
+    summary = imageEnforcementReasons[0] || 'Image Check Blocked: RED BLOCK violation';
+  } else if (imageEnforcementState === 'yellow_alert') {
+    summary = imageEnforcementReasons[0] || 'Image Check Warning: Yellow Zone (1 branding element detected)';
+  } else if (ocrUnreliable) {
     summary = `Image text could not be read clearly (OCR confidence ${Math.round(
       ocrConfidenceAverage * 100
     )}%). Manual verification recommended.`;
@@ -1496,6 +1726,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     summary = `Brand Identity Error in Image: ${brandIdentityCheck.possible_brand_name_error}`;
   } else if (hasLogoError) {
     summary = `Brand Logo Check: ${logoCheck.suggestion || 'Logo missing or invalid'}`;
+  } else if (isCrossClientMismatch) {
+    summary = `Cross-Client Mismatch: Poster me na to official logo mila aur na hi '${guidelines.organization_name}' brand name mila. Galat client ka poster upload kiya gaya ho sakta hai.`;
   } else if (hasPhoneIssues) {
     summary = `Phone Mismatch in Image: ${validPhoneWarnings[0].message}`;
   } else if (hasSpellingIssues) {
@@ -1508,6 +1740,9 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     image_status: 'completed',
     passed,
     summary,
+    enforcement_state: imageEnforcementState,
+    enforcement_reasons: imageEnforcementReasons,
+    cross_client_report: crossClientReport,
     ocr_extracted_text: cleanedOcrText || rawOcrText,
     ocr_confidence: Math.round(ocrConfidenceAverage * 10000) / 100,
     ocr_confidence_avg: ocrConfidenceAverage,
@@ -1528,6 +1763,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     banned_words_found: bannedWordsFound,
     brand_identity_check: brandIdentityCheck,
     logo_check: logoCheck,
+    is_cross_client_mismatch: isCrossClientMismatch,
   };
 };
 
@@ -1623,7 +1859,33 @@ const mergeAiCheckResults = (textResult, imageResult) => {
   const hasPhoneIssues = phoneWarnings.length > 0;
   const hasLogoError = Boolean(imageResult?.logo_check && imageResult.logo_check.status === 'FAIL');
 
+  // Compute Merged 2-Tier Enforcement State:
+  // RED BLOCK: Any red_block in text or image check
+  // YELLOW ALERT: Any yellow_alert (and no red_block)
+  // GREEN CLEAN: Both text and image clean
+  let mergedEnforcementState = 'green_clean';
+  const mergedEnforcementReasons = [];
+
+  if (textResult?.enforcement_state === 'red_block' || imageResult?.enforcement_state === 'red_block') {
+    mergedEnforcementState = 'red_block';
+    if (textResult?.enforcement_reasons) mergedEnforcementReasons.push(...textResult.enforcement_reasons);
+    if (imageResult?.enforcement_reasons) mergedEnforcementReasons.push(...imageResult.enforcement_reasons);
+  } else if (textResult?.enforcement_state === 'yellow_alert' || imageResult?.enforcement_state === 'yellow_alert') {
+    mergedEnforcementState = 'yellow_alert';
+    if (textResult?.enforcement_reasons) mergedEnforcementReasons.push(...textResult.enforcement_reasons);
+    if (imageResult?.enforcement_reasons) mergedEnforcementReasons.push(...imageResult.enforcement_reasons);
+  }
+
+  // Cross-Client / Unbranded Guard:
+  const isCrossClientMismatch = Boolean(
+    imageResult?.is_cross_client_mismatch ||
+    textResult?.cross_client_report?.hasCollision ||
+    imageResult?.cross_client_report?.hasCollision ||
+    mergedEnforcementState === 'red_block'
+  );
+
   const passed =
+    mergedEnforcementState === 'green_clean' &&
     (textResult?.passed !== false) &&
     (isImageNA || (isImageCompleted && imageResult?.passed !== false && !ocrUnreliable)) &&
     !hasSpellingIssues &&
@@ -1634,7 +1896,11 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     !hasLogoError;
 
   let summary = 'Verified Clean';
-  if (isImageFailed) {
+  if (mergedEnforcementState === 'red_block') {
+    summary = mergedEnforcementReasons[0] || 'Brand Compliance Block (RED BLOCK)';
+  } else if (mergedEnforcementState === 'yellow_alert') {
+    summary = mergedEnforcementReasons[0] || 'Yellow Zone Alert: Review branding before submission';
+  } else if (isImageFailed) {
     summary = `Image check failed: ${imageResult.image_error || 'Error processing image'}`;
   } else if (ocrUnreliable) {
     summary = `Image text could not be read clearly (OCR confidence ${Math.round(
@@ -1646,6 +1912,8 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     summary = `Brand Identity Error: ${mergedBrandIdentity.possible_brand_name_error}`;
   } else if (hasLogoError) {
     summary = `Brand Logo Check: ${imageResult.logo_check.suggestion || 'Logo missing or invalid'}`;
+  } else if (isCrossClientMismatch) {
+    summary = imageResult?.summary || 'Cross-Client Mismatch: Post me official logo ya brand name nahi mila. Sahi client ka content upload karein.';
   } else if (hasPhoneIssues) {
     summary = `Phone Verification Alert: ${phoneWarnings[0].message}`;
   } else if (hasMissingMandatory) {
@@ -1664,6 +1932,9 @@ const mergeAiCheckResults = (textResult, imageResult) => {
   return {
     passed,
     summary,
+    enforcement_state: mergedEnforcementState,
+    enforcement_reasons: Array.from(new Set(mergedEnforcementReasons)),
+    cross_client_collision: imageResult?.cross_client_report || textResult?.cross_client_report || null,
     engine: `Hybrid Engine (${imageResult?.ocr_engine || 'auto'}) + Gemini Grammar Check`,
     ocr_engine: imageResult?.ocr_engine || 'auto',
     ai_provider: aiProvider,

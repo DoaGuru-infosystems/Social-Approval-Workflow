@@ -96,7 +96,7 @@ const getClients = async (req, res) => {
         c.*,
         u.name AS created_by_name,
         (SELECT COUNT(*) FROM posts p WHERE p.client_id = c.id) AS post_count,
-        (SELECT COUNT(*) FROM social_accounts sa WHERE sa.client_id = c.id AND sa.is_active = TRUE) AS social_account_count
+        ((SELECT COUNT(*) FROM client_social_accounts csa WHERE csa.client_id = c.id AND csa.is_connected = TRUE) + (SELECT COUNT(*) FROM social_accounts sa WHERE sa.client_id = c.id AND sa.is_active = TRUE)) AS social_account_count
       FROM clients c
       LEFT JOIN users u ON c.created_by_admin_id = u.id
       ${condition}
@@ -184,13 +184,22 @@ const getClientById = async (req, res) => {
       client.reference_logo_url = g.reference_logo_url || null;
     }
 
-    // Fetch connected social accounts (no tokens)
+    // Fetch connected social accounts (no tokens, supports both client_social_accounts and legacy social_accounts)
     const [socialAccounts] = await pool.query(
-      `SELECT id, client_id, platform, account_name, platform_account_id, is_active, created_at
-       FROM social_accounts 
+      `SELECT id, client_id, platform, 
+              COALESCE(platform_username, platform) AS account_name, 
+              platform_id AS platform_account_id, 
+              profile_url,
+              is_connected AS is_active, 
+              created_at
+       FROM client_social_accounts 
+       WHERE client_id = ? AND is_connected = TRUE
+       UNION
+       SELECT id, client_id, platform, account_name, platform_account_id, NULL AS profile_url, is_active, created_at
+       FROM social_accounts
        WHERE client_id = ? AND is_active = TRUE
        ORDER BY created_at DESC`,
-      [id]
+      [id, id]
     );
 
     // Fetch 4-platform social connect accounts
@@ -574,12 +583,22 @@ const getClientSocialAccounts = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Fetch active connected accounts from client_social_accounts and fallback/union with legacy social_accounts
     const [accounts] = await pool.query(
-      `SELECT id, client_id, platform, account_name, platform_account_id, is_active, created_at
+      `SELECT id, client_id, platform, 
+              COALESCE(platform_username, platform) AS account_name, 
+              platform_id AS platform_account_id, 
+              profile_url,
+              is_connected AS is_active, 
+              created_at
+       FROM client_social_accounts
+       WHERE client_id = ? AND is_connected = TRUE
+       UNION
+       SELECT id, client_id, platform, account_name, platform_account_id, NULL AS profile_url, is_active, created_at
        FROM social_accounts
        WHERE client_id = ? AND is_active = TRUE
        ORDER BY created_at DESC`,
-      [id]
+      [id, id]
     );
 
     return res.status(200).json({
@@ -679,6 +698,17 @@ const initiateSocialConnect = async (req, res) => {
         success: false,
         message: "Platform must be 'instagram' or 'facebook'.",
       });
+    }
+
+    if (platform === 'instagram') {
+      const igRes = metaService.getInstagramAuthUrl(id);
+      if (req.query.json === 'true' || req.headers.accept?.includes('application/json')) {
+        return res.status(200).json(igRes);
+      }
+      if (igRes.authUrl) {
+        return res.redirect(igRes.authUrl);
+      }
+      return res.status(400).json(igRes);
     }
 
     const statePayload = Buffer.from(

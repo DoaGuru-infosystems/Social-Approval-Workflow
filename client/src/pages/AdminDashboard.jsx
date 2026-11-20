@@ -494,12 +494,12 @@ const AdminDashboard = () => {
     setActionLoading((prev) => ({ ...prev, [`test-${platform}`]: true }));
     try {
       const res = await clientService.testSocialPlatform(clientId, platform);
-      if (res.success && (res.valid || res.connected)) {
+      if (res.success && res.valid) {
         const nameStr = res.accountName ? ` [${res.accountName}]` : '';
         showToast(`Test passed: ${platform.toUpperCase()}${nameStr} connection is healthy!`, 'success');
         setCardBanners((prev) => ({ ...prev, [platform]: null }));
       } else {
-        const errMsg = res.user_message || res.error || 'Token Expired / Invalid';
+        const errMsg = res.user_message || res.error || 'API Verification Failed';
         showToast(`Test failed: ${errMsg}`, 'error');
         setCardBanners((prev) => ({
           ...prev,
@@ -1448,7 +1448,7 @@ const AdminDashboard = () => {
               /* REDESIGNED CLIENT DETAILS VIEW WITH TABBED ARCHITECTURE */
               <div className="space-y-6">
                 {/* Back button & Client Header */}
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#FFFFFF] p-6 rounded-3xl border border-[#E5E2DA] shadow-xs">
+                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-[#FFFFFF] p-6 rounded-3xl border border-[#E5E2DA] shadow-xs">
                   <div>
                     <button
                       onClick={handleBackToClients}
@@ -1457,10 +1457,45 @@ const AdminDashboard = () => {
                       <ArrowLeft className="w-3.5 h-3.5" />
                       Back to All Clients
                     </button>
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
-                        <Building2 className="w-5 h-5" />
-                      </div>
+                    <div className="flex items-center gap-3.5">
+                      {/* Brand Logo in Client Heading */}
+                      {referenceLogoUrl ? (
+                        <div
+                          onClick={() => logoInputRef.current?.click()}
+                          className="w-16 h-16 rounded-2xl border border-[#D5D2CA] bg-stone-100 p-1.5 flex items-center justify-center shrink-0 shadow-2xs overflow-hidden relative group cursor-pointer bg-[radial-gradient(#cbd5e1_1.2px,transparent_1.2px)] [background-size:8px_8px]"
+                          title="Click to Change Logo"
+                        >
+                          <img
+                            src={
+                              referenceLogoUrl.startsWith('http')
+                                ? referenceLogoUrl
+                                : `${SERVER_URL}${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}?t=${Date.now()}`
+                            }
+                            alt={selectedClient.client?.name || 'Brand Logo'}
+                            className="max-h-full max-w-full object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.25)]"
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              if (!target.dataset.fallback && !referenceLogoUrl.startsWith('http')) {
+                                target.dataset.fallback = 'true';
+                                target.src = `http://localhost:5001${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}`;
+                              }
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-stone-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                            <RotateCcw className="w-4 h-4 drop-shadow" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => logoInputRef.current?.click()}
+                          className="w-16 h-16 rounded-2xl border-2 border-dashed border-[#D5D2CA] hover:border-emerald-500 bg-[#FAF9F6] hover:bg-emerald-50/40 flex flex-col items-center justify-center text-emerald-600 shrink-0 cursor-pointer transition-all shadow-2xs group"
+                          title="Click to Upload Logo"
+                        >
+                          <UploadCloud className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                          <span className="text-[9px] font-bold text-emerald-700 mt-0.5">Upload</span>
+                        </div>
+                      )}
+
                       <div>
                         <h2 className="text-xl font-bold text-[#2B2A27] flex items-center gap-2">
                           <span>{selectedClient.client?.name}</span>
@@ -1468,14 +1503,81 @@ const AdminDashboard = () => {
                             ID #{selectedClient.client?.id}
                           </span>
                         </h2>
-                        <span className="text-xs text-[#6B6A63]">
-                          Registered on {formatDate(selectedClient.client?.created_at)}
-                        </span>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span className="text-xs text-[#6B6A63]">
+                            Registered on {formatDate(selectedClient.client?.created_at)}
+                          </span>
+                          {referenceLogoUrl ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Logo Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                              <AlertTriangle className="w-3 h-3 text-amber-600" /> No Logo
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  {/* Right Actions: Logo Upload / Change / Remove & Client Active Status */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input
+                      type="file"
+                      ref={logoInputRef}
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleLogoFileChange(e.target.files[0]);
+                        }
+                        e.target.value = '';
+                      }}
+                      accept="image/png,image/jpeg,image/jpg"
+                      className="hidden"
+                    />
+
+                    {/* Logo Buttons */}
+                    {referenceLogoUrl ? (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          loading={uploadingLogo}
+                          onClick={() => logoInputRef.current?.click()}
+                          leftIcon={<RotateCcw className="w-3 h-3" />}
+                          className="!rounded-xl text-xs font-semibold !py-1.5"
+                        >
+                          Change Logo
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          loading={uploadingLogo}
+                          onClick={handleRemoveLogo}
+                          leftIcon={<Trash2 className="w-3 h-3" />}
+                          className="!rounded-xl text-xs font-semibold !py-1.5"
+                        >
+                          Remove Logo
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        loading={uploadingLogo}
+                        onClick={() => logoInputRef.current?.click()}
+                        leftIcon={<UploadCloud className="w-3.5 h-3.5" />}
+                        className="!rounded-xl text-xs font-semibold !py-1.5 !bg-emerald-600 hover:!bg-emerald-700"
+                      >
+                        Upload Logo
+                      </Button>
+                    )}
+
+                    <div className="h-6 w-[1px] bg-[#E5E2DA] hidden lg:block mx-1" />
+
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-semibold ${
                         selectedClient.client?.is_active
@@ -1890,148 +1992,6 @@ const AdminDashboard = () => {
                           Save Brand Guidelines
                         </Button>
                       </form>
-
-                      {/* OFFICIAL BRAND LOGO BOX */}
-                      <div className="pt-5 border-t border-[#E5E2DA] space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
-                              <ImageIcon className="w-3.5 h-3.5" />
-                            </div>
-                            <div>
-                              <h4 className="text-sm font-bold text-[#2B2A27]">Official Brand Logo</h4>
-                              <p className="text-[11px] text-[#6B6A63]">
-                                AI Vision &amp; Python Fallback isi logo ko poster me detect karenge.
-                              </p>
-                            </div>
-                          </div>
-                          {referenceLogoUrl ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Active</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                              <AlertTriangle className="w-3 h-3 text-amber-600" />
-                              <span>Not Uploaded</span>
-                            </span>
-                          )}
-                        </div>
-
-                        <input
-                          type="file"
-                          ref={logoInputRef}
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              handleLogoFileChange(e.target.files[0]);
-                            }
-                            e.target.value = '';
-                          }}
-                          accept="image/png,image/jpeg,image/jpg"
-                          className="hidden"
-                        />
-
-                        {referenceLogoUrl ? (
-                          /* Live Preview Card */
-                          <div className="p-3.5 bg-[#FAF9F6] border border-[#E5E2DA] rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-16 h-16 rounded-xl border border-[#E5E2DA] bg-white p-1.5 flex items-center justify-center shadow-2xs overflow-hidden shrink-0">
-                                <img
-                                  src={
-                                    referenceLogoUrl.startsWith('http')
-                                      ? referenceLogoUrl
-                                      : `${SERVER_URL}${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}`
-                                  }
-                                  alt="Brand Logo"
-                                  className="max-h-full max-w-full object-contain"
-                                  onError={(e) => {
-                                    const target = e.currentTarget;
-                                    if (!target.dataset.fallback && !referenceLogoUrl.startsWith('http')) {
-                                      target.dataset.fallback = 'true';
-                                      target.src = `http://localhost:5001${referenceLogoUrl.startsWith('/') ? '' : '/'}${referenceLogoUrl}`;
-                                    }
-                                  }}
-                                />
-                              </div>
-                              <div className="space-y-0.5">
-                                <span className="text-xs font-bold text-[#2B2A27]">Official Logo Preview</span>
-                                <p className="text-[11px] text-[#6B6A63]">
-                                  Transparent PNG best hai, Max 2MB
-                                </p>
-                                <span className="inline-block text-[10px] font-mono font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80">
-                                  Logo Check Active
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                loading={uploadingLogo}
-                                onClick={() => logoInputRef.current?.click()}
-                                leftIcon={<RotateCcw className="w-3 h-3" />}
-                                className="!rounded-xl text-xs font-semibold !py-1.5"
-                              >
-                                Change Logo
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="danger"
-                                size="sm"
-                                loading={uploadingLogo}
-                                onClick={handleRemoveLogo}
-                                leftIcon={<Trash2 className="w-3 h-3" />}
-                                className="!rounded-xl text-xs font-semibold !py-1.5"
-                              >
-                                Remove Logo
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          /* Dropzone */
-                          <div
-                            onClick={() => logoInputRef.current?.click()}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              setIsDraggingLogo(true);
-                            }}
-                            onDragLeave={(e) => {
-                              e.preventDefault();
-                              setIsDraggingLogo(false);
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              setIsDraggingLogo(false);
-                              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                                handleLogoFileChange(e.dataTransfer.files[0]);
-                              }
-                            }}
-                            className={`border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-1.5 ${
-                              isDraggingLogo
-                                ? 'border-emerald-500 bg-emerald-50/60'
-                                : 'border-[#D5D2CA] hover:border-emerald-600 bg-[#FAF9F6] hover:bg-emerald-50/20'
-                            }`}
-                          >
-                            <div className="w-10 h-10 rounded-xl bg-white border border-[#E5E2DA] flex items-center justify-center text-[#6B6A63] shadow-2xs">
-                              <UploadCloud className="w-5 h-5 text-emerald-600" />
-                            </div>
-                            <div>
-                              <p className="text-xs font-bold text-[#2B2A27]">
-                                Click karke ya Drag &amp; Drop karke official logo upload karein
-                              </p>
-                              <p className="text-[11px] text-[#6B6A63] mt-0.5">
-                                Transparent PNG best hai, Max 2MB
-                              </p>
-                            </div>
-                            <div className="mt-1 px-2.5 py-1 bg-amber-50 border border-amber-200/80 rounded-xl flex items-center gap-1 text-[11px] text-amber-900 font-medium">
-                              <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
-                              <span>Logo upload nahi hai — Logo Check nahi chalega</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
                 )}
@@ -2152,6 +2112,8 @@ const AdminDashboard = () => {
                             {p.is_connected && (
                               <div className="p-3 rounded-xl bg-stone-50 border border-[#E5E2DA] flex items-center gap-4 text-xs font-mono text-stone-600 flex-wrap">
                                 <div><span className="text-stone-400">Method: </span><span className="font-semibold uppercase text-stone-800">{p.connection_method || 'oauth'}</span></div>
+                                {p.platform_username && <div><span className="text-stone-400">Username: </span><span className="font-semibold text-stone-800">@{p.platform_username}</span></div>}
+                                {p.platform_id && <div><span className="text-stone-400">Account ID: </span><span className="text-stone-800">{p.platform_id}</span></div>}
                                 {p.masked_access_token && <div><span className="text-stone-400">Token: </span><span className="text-stone-800">{p.masked_access_token}</span></div>}
                                 {p.token_expires_at && <div><span className="text-stone-400">Expires: </span><span className="text-stone-800">{formatDate(p.token_expires_at)}</span></div>}
                               </div>

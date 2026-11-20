@@ -160,7 +160,7 @@ const classifyRegionType = (rect, text, neighborRects = []) => {
 };
 
 const SUGGESTION_RULES = {
-  MISSING: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+  MISSING: 'Logo post me kahin nahi mila. Logo ko post me lagayein.',
   WRONG_LOGO: 'Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein.',
   TOO_SMALL: 'Logo bahut chhota hai. Logo ko kam se kam 10% bada karein.',
   HIDDEN: 'Logo text ke peeche chhup gaya hai. Logo ko khali jagah pe le jayein.',

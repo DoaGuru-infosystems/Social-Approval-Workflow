@@ -86,7 +86,7 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
       location_hindi: 'Kahin nahi mila',
       size_percent: 0,
       reason: 'MISSING',
-      suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+      suggestion: 'Logo post me kahin nahi mila. Logo ko post me lagayein.',
       checked_by: 'Python',
     };
   }
@@ -134,7 +134,7 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
           location_hindi: 'Kahin nahi mila',
           size_percent: 0,
           reason: 'MISSING',
-          suggestion: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
+          suggestion: 'Logo post me kahin nahi mila. Logo ko post me lagayein.',
           checked_by: 'Python',
         });
       }

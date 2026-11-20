@@ -102,7 +102,8 @@ const executeBackgroundImageCheck = async ({
            logo_check = ?,
            ai_provider = ?,
            fallback_used = ?,
-           fallback_reason = ?
+           fallback_reason = ?,
+           enforcement_state = ?
        WHERE post_id = ? AND revision_id = ?`,
       [
         JSON.stringify(combinedResult.spelling_issues),
@@ -121,6 +122,7 @@ const executeBackgroundImageCheck = async ({
         combinedResult.ai_provider || 'gemini',
         combinedResult.fallback_used ? 1 : 0,
         combinedResult.fallback_reason || 'none',
+        combinedResult.enforcement_state || 'green_clean',
         postId,
         revisionId,
       ]
@@ -239,8 +241,8 @@ const createPost = async (req, res) => {
     await pool.query(
       `INSERT INTO ai_check_results (
          post_id, revision_id, spelling_issues, grammar_suggestions, key_error, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
-         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check, logo_check, ai_provider, fallback_used, fallback_reason
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check, logo_check, ai_provider, fallback_used, fallback_reason, enforcement_state
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
@@ -261,6 +263,7 @@ const createPost = async (req, res) => {
         initialAiCheck.ai_provider || 'gemini',
         initialAiCheck.fallback_used ? 1 : 0,
         initialAiCheck.fallback_reason || 'none',
+        initialAiCheck.enforcement_state || 'green_clean',
       ]
     );
     
@@ -429,8 +432,8 @@ const revisePost = async (req, res) => {
     await pool.query(
       `INSERT INTO ai_check_results (
          post_id, revision_id, spelling_issues, grammar_suggestions, key_error, ocr_extracted_text, ocr_issues, ocr_confidence, ocr_unreliable,
-         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check, logo_check, ai_provider, fallback_used, fallback_reason
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         image_status, text_status, image_error, banned_words_found, missing_mandatory_phrases, brand_identity_check, logo_check, ai_provider, fallback_used, fallback_reason, enforcement_state
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         postId,
         revisionId,
@@ -451,6 +454,7 @@ const revisePost = async (req, res) => {
         initialAiCheck.ai_provider || 'gemini',
         initialAiCheck.fallback_used ? 1 : 0,
         initialAiCheck.fallback_reason || 'none',
+        initialAiCheck.enforcement_state || 'green_clean',
       ]
     );
 
@@ -563,6 +567,48 @@ const submitPost = async (req, res) => {
       });
     }
 
+    // Enforcement State Check: Strict 2-Tier Gate
+    const [aiRows] = await pool.query(
+      'SELECT * FROM ai_check_results WHERE post_id = ? ORDER BY id DESC LIMIT 1',
+      [postId]
+    );
+
+    if (aiRows.length > 0) {
+      const latestAi = aiRows[0];
+      const enforcementState = latestAi.enforcement_state || 'green_clean';
+
+      // 1. RED BLOCK (Hard Stop)
+      if (enforcementState === 'red_block') {
+        let brandCheck = null;
+        try {
+          brandCheck = typeof latestAi.brand_identity_check === 'string'
+            ? JSON.parse(latestAi.brand_identity_check)
+            : latestAi.brand_identity_check;
+        } catch {}
+
+        const blockReason =
+          brandCheck?.possible_brand_name_error ||
+          'Submission Blocked: Post me critical brand compliance violations hain (Cross-client collision, official logo missing, ya brand mismatch). Kripya post ko revise karein.';
+
+        return res.status(400).json({
+          success: false,
+          code: 'RED_BLOCK',
+          message: blockReason,
+          enforcement_state: 'red_block',
+        });
+      }
+
+      // 2. YELLOW ALERT (Soft Gate requiring explicit confirmation)
+      if (enforcementState === 'yellow_alert' && !req.body.confirm_yellow_override) {
+        return res.status(400).json({
+          success: false,
+          code: 'YELLOW_CONFIRMATION_REQUIRED',
+          message: 'Yellow Zone Alert: Post me Logo ya Brand Name me se keval ek mila hai. Aage badhne ke liye explicit SMO confirmation zaroori hai.',
+          enforcement_state: 'yellow_alert',
+        });
+      }
+    }
+
     // Update status to pending_manager
     await pool.query("UPDATE posts SET status = 'pending_manager' WHERE id = ?", [postId]);
 
@@ -629,6 +675,29 @@ const managerReview = async (req, res) => {
     let normalizedAction;
 
     if (action === 'approve' || action === 'approved') {
+      // Check enforcement state before manager approval
+      const [aiRows] = await pool.query(
+        'SELECT * FROM ai_check_results WHERE post_id = ? ORDER BY id DESC LIMIT 1',
+        [postId]
+      );
+      if (aiRows.length > 0) {
+        const state = aiRows[0].enforcement_state || 'green_clean';
+        if (state === 'red_block') {
+          return res.status(400).json({
+            success: false,
+            code: 'RED_BLOCK',
+            message: 'Cannot approve post: Post has unresolved RED BLOCK violations.',
+          });
+        }
+        if (state === 'yellow_alert' && !req.body.manager_acknowledged) {
+          return res.status(400).json({
+            success: false,
+            code: 'MANAGER_ACK_REQUIRED',
+            message: 'Manager acknowledgment required: Kripya Yellow Zone warning ko acknowledge karke hi approve karein.',
+          });
+        }
+      }
+
       newStatus = 'pending_admin';
       normalizedAction = 'approved';
     } else if (action === 'reject' || action === 'rejected') {
@@ -1127,6 +1196,10 @@ const getPostById = async (req, res) => {
       banned_words_found: typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : r.banned_words_found || [],
       missing_mandatory_phrases: typeof r.missing_mandatory_phrases === 'string' ? JSON.parse(r.missing_mandatory_phrases) : r.missing_mandatory_phrases || [],
       brand_identity_check: typeof r.brand_identity_check === 'string' ? JSON.parse(r.brand_identity_check) : r.brand_identity_check || null,
+      logo_check: typeof r.logo_check === 'string' ? JSON.parse(r.logo_check) : r.logo_check || null,
+      ai_provider: r.ai_provider || 'gemini',
+      fallback_used: Boolean(Number(r.fallback_used)),
+      fallback_reason: r.fallback_reason || 'none',
       image_status: r.image_status || 'completed',
       text_status: r.text_status || 'completed',
       image_error: r.image_error || null,
@@ -1141,10 +1214,15 @@ const getPostById = async (req, res) => {
       [postId]
     );
 
+    const latestRevision = revisions.length > 0 ? revisions[revisions.length - 1] : null;
+    const latestAiReport = parsedAiReports.length > 0 ? parsedAiReports[parsedAiReports.length - 1] : null;
+
     return res.status(200).json({
       success: true,
       post: {
         ...post,
+        latest_revision: latestRevision,
+        latest_ai_check: latestAiReport,
         creator: {
           id: post.created_by,
           name: post.creator_name,

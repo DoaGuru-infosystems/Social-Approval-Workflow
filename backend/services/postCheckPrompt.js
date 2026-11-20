@@ -62,7 +62,7 @@ ${
   * "reason": one of "CORRECT" | "MISSING" | "WRONG_LOGO" | "TOO_SMALL" | "HIDDEN" | "COLOR_CHANGED"
   * "status": "PASS" (if found is true AND score >= 0.85 AND reason is CORRECT), otherwise "FAIL".
   * "suggestion": actionable designer suggestion in Hindi/Hinglish following these exact rules:
-      MISSING => "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein."
+      MISSING => "Logo post me kahin nahi mila. Logo ko post me lagayein."
       WRONG_LOGO => "Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein."
       TOO_SMALL => "Logo bahut chhota hai. Logo ko kam se kam 10% bada karein."
       HIDDEN => "Logo text ke peeche chhup gaya hai. Logo ko khali jagah pe le jayein."
