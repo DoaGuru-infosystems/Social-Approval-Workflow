@@ -10,11 +10,15 @@ let globalWhitelistSet = new Set();
 let hindiFrequencyMap = {};
 let hindiMatraRules = {};
 let hindiConfusionRules = [];
+let hindiBarakhadiData = null;
+let hindiEnglishPhoneticData = null;
 
 const COMMON_WORDS_PATH = path.resolve(__dirname, '..', 'dictionaries', 'common_hindi_words.txt');
 const FREQ_JSON_PATH = path.resolve(__dirname, '..', 'dictionaries', 'hindi_word_frequency.json');
 const MATRA_RULES_PATH = path.resolve(__dirname, '..', 'dictionaries', 'hindi_matra_rules.json');
 const CONFUSION_RULES_PATH = path.resolve(__dirname, '..', 'dictionaries', 'confusion_rules.json');
+const BARAKHADI_JSON_PATH = path.resolve(__dirname, '..', 'dictionaries', 'hindi_barakhadi.json');
+const PHONETIC_JSON_PATH = path.resolve(__dirname, '..', 'dictionaries', 'hindi_english_phonetic.json');
 
 const DEVANAGARI_CONSONANTS_SET = new Set([
   ...'कखगघङचछजझञटठडढणतथदधनपफबभमयरलवशषसहक़ख़ग़ज़ड़ढ़फ़य़'
@@ -112,6 +116,106 @@ const loadConfusionRules = () => {
   } catch (err) {
     console.warn('[hindiDictionaryService] Notice loading confusion_rules.json:', err.message);
   }
+};
+
+/**
+ * Loads hindi_barakhadi.json into memory
+ */
+const loadHindiBarakhadi = () => {
+  try {
+    const candPaths = [
+      BARAKHADI_JSON_PATH,
+      path.resolve(__dirname, '..', '..', 'hindi_barakhadi.json'),
+    ];
+    for (const p of candPaths) {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf8');
+        hindiBarakhadiData = JSON.parse(content);
+        break;
+      }
+    }
+  } catch (err) {
+    console.warn('[hindiDictionaryService] Notice loading hindi_barakhadi.json:', err.message);
+  }
+};
+
+/**
+ * Loads hindi_english_phonetic.json into memory
+ */
+const loadHindiEnglishPhonetic = () => {
+  try {
+    const candPaths = [
+      PHONETIC_JSON_PATH,
+      path.resolve(__dirname, '..', '..', 'hindi_english_phonetic.json'),
+    ];
+    for (const p of candPaths) {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf8');
+        hindiEnglishPhoneticData = JSON.parse(content);
+        break;
+      }
+    }
+  } catch (err) {
+    console.warn('[hindiDictionaryService] Notice loading hindi_english_phonetic.json:', err.message);
+  }
+};
+
+/**
+ * Structural Validation Layer using hindi_barakhadi.json.
+ * Validates if an OCR word is structurally possible in Hindi.
+ * If not (like 'नः'), flag it for review. Do NOT use for auto-correction!
+ * @param {string} word
+ * @returns {{ isValid: boolean, reason: string }}
+ */
+const validateHindiWordStructure = (word) => {
+  if (!word || typeof word !== 'string' || !/[\u0900-\u097f]/.test(word)) {
+    return { isValid: true, reason: '' };
+  }
+
+  const clean = word.trim();
+  if (clean.length === 0) return { isValid: true, reason: '' };
+
+  // Check 1: Leading matra or modifier
+  if (DEVANAGARI_ALL_MATRAS_SET.has(clean[0])) {
+    return { isValid: false, reason: `Invalid leading matra/sign '${clean[0]}'` };
+  }
+
+  // Check 2: 'नः' as standalone word or anomalous prefix before consonant (PaddleOCR drop of short-i)
+  if (clean === 'नः') {
+    return { isValid: false, reason: "Structurally impossible standalone syllable 'नः' (visarga artifact)" };
+  }
+  if (clean.startsWith('नः') && clean.length > 2 && DEVANAGARI_CONSONANTS_SET.has(clean[2])) {
+    return { isValid: false, reason: "Structurally impossible prefix 'नः' before consonant (missing matra)" };
+  }
+
+  // Check 3: Visarga position
+  for (let idx = 0; idx < clean.length; idx++) {
+    if (clean[idx] === '\u0903') { // ः
+      if (idx === 0) {
+        return { isValid: false, reason: 'Visarga cannot start a word' };
+      }
+      if (idx + 1 < clean.length && DEVANAGARI_VOWEL_SIGNS_SET.has(clean[idx + 1])) {
+        return { isValid: false, reason: `Visarga followed by vowel sign '${clean[idx + 1]}'` };
+      }
+    }
+  }
+
+  // Check 4: Consecutive vowel signs
+  let prevVowelSign = false;
+  for (let idx = 0; idx < clean.length; idx++) {
+    const isVowelSign = DEVANAGARI_VOWEL_SIGNS_SET.has(clean[idx]);
+    if (isVowelSign && prevVowelSign) {
+      return { isValid: false, reason: 'Consecutive vowel signs' };
+    }
+    prevVowelSign = isVowelSign;
+  }
+
+  // Check 5: Consecutive halants
+  if (clean.includes('\u094D\u094D')) {
+    return { isValid: false, reason: 'Consecutive halants' };
+  }
+
+  return { isValid: true, reason: '' };
 };
 
 /**
@@ -246,6 +350,8 @@ const initHindiDictionary = async () => {
     loadHindiWordFrequency();
     loadHindiMatraRules();
     loadConfusionRules();
+    loadHindiBarakhadi();
+    loadHindiEnglishPhonetic();
 
     const affPath = path.resolve(__dirname, '..', 'dictionaries', 'hi_IN', 'hi_IN.aff');
     const dicPath = path.resolve(__dirname, '..', 'dictionaries', 'hi_IN', 'hi_IN.dic');
@@ -305,21 +411,6 @@ const isCorrect = (word, whitelist = []) => {
     return true;
   }
 
-  // 5. Statistical / Frequency-Based Fuzzy Candidate Check (1-2 distance)
-  // If a candidate exists in both nspell and frequency JSON, or in globalWhitelist, consider it correct
-  const candidates = suggest(clean, whitelist, 5);
-  for (const cand of candidates) {
-    if (distance(clean, cand) <= 1) {
-      const candLow = cand.toLowerCase();
-      if (
-        globalWhitelistSet.has(candLow) ||
-        (hindiFrequencyMap && (hindiFrequencyMap[cand] || hindiFrequencyMap[candLow]))
-      ) {
-        return true;
-      }
-    }
-  }
-
   return false;
 };
 
@@ -336,6 +427,7 @@ const suggest = (word, whitelist = [], maxSuggestions = 5) => {
   if (!clean || !cachedHindiSpeller) return [];
 
   const rawSuggestions = cachedHindiSpeller.suggest(clean) || [];
+  const candidatePool = new Set(rawSuggestions);
 
   // Add candidates from Visual Rule Engine (matra rules, halant conjuncts, confusion rules)
   const analysis = analyzeHindiWord(clean);
@@ -345,8 +437,28 @@ const suggest = (word, whitelist = [], maxSuggestions = 5) => {
     }
   }
 
+  // Loanword Phonetic Suggestions (hindi_english_phonetic.json)
+  // CRITICAL CONSTRAINT: Suggestions ONLY, never auto-correct!
+  if (hindiEnglishPhoneticData && Array.isArray(hindiEnglishPhoneticData.loanwords)) {
+    const cleanLower = clean.toLowerCase();
+    for (const pair of hindiEnglishPhoneticData.loanwords) {
+      const eng = String(pair.english || '').toLowerCase();
+      const hiList = Array.isArray(pair.hindi) ? pair.hindi : [pair.hindi];
+
+      // If word matches English loanword or close to it, suggest standard Hindi form
+      if (cleanLower === eng || distance(cleanLower, eng) <= 2) {
+        hiList.forEach((h) => candidatePool.add(h));
+      }
+      // If word matches Hindi loanword or close to it, suggest correct Hindi forms
+      for (const h of hiList) {
+        if (typeof h === 'string' && (clean === h || distance(clean, h) <= 2)) {
+          hiList.forEach((alt) => candidatePool.add(alt));
+        }
+      }
+    }
+  }
+
   // Add close candidates from whitelist and global whitelist if any
-  const candidatePool = new Set(rawSuggestions);
   if (whitelist) {
     const list = Array.isArray(whitelist) ? whitelist : Array.from(whitelist);
     for (const item of list) {
@@ -405,6 +517,8 @@ module.exports = {
   isCorrect,
   suggest,
   analyzeHindiWord,
+  validateHindiWordStructure,
+  isStructurallyValidHindi: (w) => validateHindiWordStructure(w).isValid,
   normalizePhonesWithExpected,
   addWordToGlobalWhitelist,
   getGlobalWhitelist: () => Array.from(globalWhitelistSet),

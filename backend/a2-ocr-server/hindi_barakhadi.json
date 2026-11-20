@@ -1,0 +1,4176 @@
+{
+  "description": "Hindi Barakhadi (बारहखड़ी) 36 consonants x 12 matras structural validation dictionary",
+  "total_consonants": 41,
+  "total_matras": 12,
+  "consonants": [
+    "क",
+    "ख",
+    "ग",
+    "घ",
+    "ङ",
+    "च",
+    "छ",
+    "ज",
+    "झ",
+    "ञ",
+    "ट",
+    "ठ",
+    "ड",
+    "ढ",
+    "ण",
+    "त",
+    "थ",
+    "द",
+    "ध",
+    "न",
+    "प",
+    "फ",
+    "ब",
+    "भ",
+    "म",
+    "य",
+    "र",
+    "ल",
+    "व",
+    "श",
+    "ष",
+    "स",
+    "ह",
+    "क्ष",
+    "त्र",
+    "ज्ञ",
+    "श्र",
+    "ड़",
+    "ढ़",
+    "फ़",
+    "ज़"
+  ],
+  "matras": [
+    {
+      "symbol": "",
+      "vowel": "अ",
+      "roman": "a",
+      "name": "mukta"
+    },
+    {
+      "symbol": "ा",
+      "vowel": "आ",
+      "roman": "aa",
+      "name": "aakaar"
+    },
+    {
+      "symbol": "ि",
+      "vowel": "इ",
+      "roman": "i",
+      "name": "chhoti_i"
+    },
+    {
+      "symbol": "ी",
+      "vowel": "ई",
+      "roman": "ee",
+      "name": "badi_i"
+    },
+    {
+      "symbol": "ु",
+      "vowel": "उ",
+      "roman": "u",
+      "name": "chhota_u"
+    },
+    {
+      "symbol": "ू",
+      "vowel": "ऊ",
+      "roman": "oo",
+      "name": "bada_u"
+    },
+    {
+      "symbol": "े",
+      "vowel": "ए",
+      "roman": "e",
+      "name": "ekaar"
+    },
+    {
+      "symbol": "ै",
+      "vowel": "ऐ",
+      "roman": "ai",
+      "name": "aikaar"
+    },
+    {
+      "symbol": "ो",
+      "vowel": "ओ",
+      "roman": "o",
+      "name": "okaar"
+    },
+    {
+      "symbol": "ौ",
+      "vowel": "औ",
+      "roman": "au",
+      "name": "aukaar"
+    },
+    {
+      "symbol": "ं",
+      "vowel": "अं",
+      "roman": "am",
+      "name": "anusvara"
+    },
+    {
+      "symbol": "ः",
+      "vowel": "अः",
+      "roman": "ah",
+      "name": "visarga"
+    }
+  ],
+  "independent_vowels": [
+    "अ",
+    "आ",
+    "इ",
+    "ई",
+    "उ",
+    "ऊ",
+    "ए",
+    "ऐ",
+    "ओ",
+    "औ",
+    "अं",
+    "अः",
+    "ऋ",
+    "ऑ",
+    "ऍ"
+  ],
+  "barakhadi_table": {
+    "क": [
+      {
+        "syllable": "क",
+        "consonant": "क",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "का",
+        "consonant": "क",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "कि",
+        "consonant": "क",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "की",
+        "consonant": "क",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "कु",
+        "consonant": "क",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "कू",
+        "consonant": "क",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "के",
+        "consonant": "क",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "कै",
+        "consonant": "क",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "को",
+        "consonant": "क",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "कौ",
+        "consonant": "क",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "कं",
+        "consonant": "क",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "कः",
+        "consonant": "क",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ख": [
+      {
+        "syllable": "ख",
+        "consonant": "ख",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "खा",
+        "consonant": "ख",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "खि",
+        "consonant": "ख",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "खी",
+        "consonant": "ख",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "खु",
+        "consonant": "ख",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "खू",
+        "consonant": "ख",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "खे",
+        "consonant": "ख",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "खै",
+        "consonant": "ख",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "खो",
+        "consonant": "ख",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "खौ",
+        "consonant": "ख",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "खं",
+        "consonant": "ख",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "खः",
+        "consonant": "ख",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ग": [
+      {
+        "syllable": "ग",
+        "consonant": "ग",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "गा",
+        "consonant": "ग",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "गि",
+        "consonant": "ग",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "गी",
+        "consonant": "ग",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "गु",
+        "consonant": "ग",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "गू",
+        "consonant": "ग",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "गे",
+        "consonant": "ग",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "गै",
+        "consonant": "ग",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "गो",
+        "consonant": "ग",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "गौ",
+        "consonant": "ग",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "गं",
+        "consonant": "ग",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "गः",
+        "consonant": "ग",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "घ": [
+      {
+        "syllable": "घ",
+        "consonant": "घ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "घा",
+        "consonant": "घ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "घि",
+        "consonant": "घ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "घी",
+        "consonant": "घ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "घु",
+        "consonant": "घ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "घू",
+        "consonant": "घ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "घे",
+        "consonant": "घ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "घै",
+        "consonant": "घ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "घो",
+        "consonant": "घ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "घौ",
+        "consonant": "घ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "घं",
+        "consonant": "घ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "घः",
+        "consonant": "घ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ङ": [
+      {
+        "syllable": "ङ",
+        "consonant": "ङ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ङा",
+        "consonant": "ङ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ङि",
+        "consonant": "ङ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ङी",
+        "consonant": "ङ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ङु",
+        "consonant": "ङ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ङू",
+        "consonant": "ङ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ङे",
+        "consonant": "ङ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ङै",
+        "consonant": "ङ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ङो",
+        "consonant": "ङ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ङौ",
+        "consonant": "ङ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ङं",
+        "consonant": "ङ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ङः",
+        "consonant": "ङ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "च": [
+      {
+        "syllable": "च",
+        "consonant": "च",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "चा",
+        "consonant": "च",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "चि",
+        "consonant": "च",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ची",
+        "consonant": "च",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "चु",
+        "consonant": "च",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "चू",
+        "consonant": "च",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "चे",
+        "consonant": "च",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "चै",
+        "consonant": "च",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "चो",
+        "consonant": "च",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "चौ",
+        "consonant": "च",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "चं",
+        "consonant": "च",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "चः",
+        "consonant": "च",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "छ": [
+      {
+        "syllable": "छ",
+        "consonant": "छ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "छा",
+        "consonant": "छ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "छि",
+        "consonant": "छ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "छी",
+        "consonant": "छ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "छु",
+        "consonant": "छ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "छू",
+        "consonant": "छ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "छे",
+        "consonant": "छ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "छै",
+        "consonant": "छ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "छो",
+        "consonant": "छ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "छौ",
+        "consonant": "छ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "छं",
+        "consonant": "छ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "छः",
+        "consonant": "छ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ज": [
+      {
+        "syllable": "ज",
+        "consonant": "ज",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "जा",
+        "consonant": "ज",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "जि",
+        "consonant": "ज",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "जी",
+        "consonant": "ज",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "जु",
+        "consonant": "ज",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "जू",
+        "consonant": "ज",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "जे",
+        "consonant": "ज",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "जै",
+        "consonant": "ज",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "जो",
+        "consonant": "ज",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "जौ",
+        "consonant": "ज",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "जं",
+        "consonant": "ज",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "जः",
+        "consonant": "ज",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "झ": [
+      {
+        "syllable": "झ",
+        "consonant": "झ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "झा",
+        "consonant": "झ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "झि",
+        "consonant": "झ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "झी",
+        "consonant": "झ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "झु",
+        "consonant": "झ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "झू",
+        "consonant": "झ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "झे",
+        "consonant": "झ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "झै",
+        "consonant": "झ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "झो",
+        "consonant": "झ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "झौ",
+        "consonant": "झ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "झं",
+        "consonant": "झ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "झः",
+        "consonant": "झ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ञ": [
+      {
+        "syllable": "ञ",
+        "consonant": "ञ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ञा",
+        "consonant": "ञ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ञि",
+        "consonant": "ञ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ञी",
+        "consonant": "ञ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ञु",
+        "consonant": "ञ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ञू",
+        "consonant": "ञ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ञे",
+        "consonant": "ञ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ञै",
+        "consonant": "ञ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ञो",
+        "consonant": "ञ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ञौ",
+        "consonant": "ञ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ञं",
+        "consonant": "ञ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ञः",
+        "consonant": "ञ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ट": [
+      {
+        "syllable": "ट",
+        "consonant": "ट",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "टा",
+        "consonant": "ट",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "टि",
+        "consonant": "ट",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "टी",
+        "consonant": "ट",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "टु",
+        "consonant": "ट",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "टू",
+        "consonant": "ट",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "टे",
+        "consonant": "ट",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "टै",
+        "consonant": "ट",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "टो",
+        "consonant": "ट",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "टौ",
+        "consonant": "ट",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "टं",
+        "consonant": "ट",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "टः",
+        "consonant": "ट",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ठ": [
+      {
+        "syllable": "ठ",
+        "consonant": "ठ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ठा",
+        "consonant": "ठ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ठि",
+        "consonant": "ठ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ठी",
+        "consonant": "ठ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ठु",
+        "consonant": "ठ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ठू",
+        "consonant": "ठ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ठे",
+        "consonant": "ठ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ठै",
+        "consonant": "ठ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ठो",
+        "consonant": "ठ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ठौ",
+        "consonant": "ठ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ठं",
+        "consonant": "ठ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ठः",
+        "consonant": "ठ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ड": [
+      {
+        "syllable": "ड",
+        "consonant": "ड",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "डा",
+        "consonant": "ड",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "डि",
+        "consonant": "ड",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "डी",
+        "consonant": "ड",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "डु",
+        "consonant": "ड",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "डू",
+        "consonant": "ड",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "डे",
+        "consonant": "ड",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "डै",
+        "consonant": "ड",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "डो",
+        "consonant": "ड",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "डौ",
+        "consonant": "ड",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "डं",
+        "consonant": "ड",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "डः",
+        "consonant": "ड",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ढ": [
+      {
+        "syllable": "ढ",
+        "consonant": "ढ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ढा",
+        "consonant": "ढ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ढि",
+        "consonant": "ढ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ढी",
+        "consonant": "ढ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ढु",
+        "consonant": "ढ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ढू",
+        "consonant": "ढ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ढे",
+        "consonant": "ढ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ढै",
+        "consonant": "ढ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ढो",
+        "consonant": "ढ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ढौ",
+        "consonant": "ढ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ढं",
+        "consonant": "ढ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ढः",
+        "consonant": "ढ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ण": [
+      {
+        "syllable": "ण",
+        "consonant": "ण",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "णा",
+        "consonant": "ण",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "णि",
+        "consonant": "ण",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "णी",
+        "consonant": "ण",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "णु",
+        "consonant": "ण",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "णू",
+        "consonant": "ण",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "णे",
+        "consonant": "ण",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "णै",
+        "consonant": "ण",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "णो",
+        "consonant": "ण",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "णौ",
+        "consonant": "ण",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "णं",
+        "consonant": "ण",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "णः",
+        "consonant": "ण",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "त": [
+      {
+        "syllable": "त",
+        "consonant": "त",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ता",
+        "consonant": "त",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ति",
+        "consonant": "त",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ती",
+        "consonant": "त",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "तु",
+        "consonant": "त",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "तू",
+        "consonant": "त",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ते",
+        "consonant": "त",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "तै",
+        "consonant": "त",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "तो",
+        "consonant": "त",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "तौ",
+        "consonant": "त",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "तं",
+        "consonant": "त",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "तः",
+        "consonant": "त",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "थ": [
+      {
+        "syllable": "थ",
+        "consonant": "थ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "था",
+        "consonant": "थ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "थि",
+        "consonant": "थ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "थी",
+        "consonant": "थ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "थु",
+        "consonant": "थ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "थू",
+        "consonant": "थ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "थे",
+        "consonant": "थ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "थै",
+        "consonant": "थ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "थो",
+        "consonant": "थ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "थौ",
+        "consonant": "थ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "थं",
+        "consonant": "थ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "थः",
+        "consonant": "थ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "द": [
+      {
+        "syllable": "द",
+        "consonant": "द",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "दा",
+        "consonant": "द",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "दि",
+        "consonant": "द",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "दी",
+        "consonant": "द",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "दु",
+        "consonant": "द",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "दू",
+        "consonant": "द",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "दे",
+        "consonant": "द",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "दै",
+        "consonant": "द",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "दो",
+        "consonant": "द",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "दौ",
+        "consonant": "द",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "दं",
+        "consonant": "द",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "दः",
+        "consonant": "द",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ध": [
+      {
+        "syllable": "ध",
+        "consonant": "ध",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "धा",
+        "consonant": "ध",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "धि",
+        "consonant": "ध",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "धी",
+        "consonant": "ध",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "धु",
+        "consonant": "ध",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "धू",
+        "consonant": "ध",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "धे",
+        "consonant": "ध",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "धै",
+        "consonant": "ध",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "धो",
+        "consonant": "ध",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "धौ",
+        "consonant": "ध",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "धं",
+        "consonant": "ध",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "धः",
+        "consonant": "ध",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "न": [
+      {
+        "syllable": "न",
+        "consonant": "न",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ना",
+        "consonant": "न",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "नि",
+        "consonant": "न",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "नी",
+        "consonant": "न",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "नु",
+        "consonant": "न",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "नू",
+        "consonant": "न",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ने",
+        "consonant": "न",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "नै",
+        "consonant": "न",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "नो",
+        "consonant": "न",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "नौ",
+        "consonant": "न",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "नं",
+        "consonant": "न",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "नः",
+        "consonant": "न",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "प": [
+      {
+        "syllable": "प",
+        "consonant": "प",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "पा",
+        "consonant": "प",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "पि",
+        "consonant": "प",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "पी",
+        "consonant": "प",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "पु",
+        "consonant": "प",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "पू",
+        "consonant": "प",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "पे",
+        "consonant": "प",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "पै",
+        "consonant": "प",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "पो",
+        "consonant": "प",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "पौ",
+        "consonant": "प",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "पं",
+        "consonant": "प",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "पः",
+        "consonant": "प",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "फ": [
+      {
+        "syllable": "फ",
+        "consonant": "फ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "फा",
+        "consonant": "फ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "फि",
+        "consonant": "फ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "फी",
+        "consonant": "फ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "फु",
+        "consonant": "फ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "फू",
+        "consonant": "फ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "फे",
+        "consonant": "फ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "फै",
+        "consonant": "फ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "फो",
+        "consonant": "फ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "फौ",
+        "consonant": "फ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "फं",
+        "consonant": "फ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "फः",
+        "consonant": "फ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ब": [
+      {
+        "syllable": "ब",
+        "consonant": "ब",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "बा",
+        "consonant": "ब",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "बि",
+        "consonant": "ब",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "बी",
+        "consonant": "ब",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "बु",
+        "consonant": "ब",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "बू",
+        "consonant": "ब",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "बे",
+        "consonant": "ब",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "बै",
+        "consonant": "ब",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "बो",
+        "consonant": "ब",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "बौ",
+        "consonant": "ब",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "बं",
+        "consonant": "ब",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "बः",
+        "consonant": "ब",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "भ": [
+      {
+        "syllable": "भ",
+        "consonant": "भ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "भा",
+        "consonant": "भ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "भि",
+        "consonant": "भ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "भी",
+        "consonant": "भ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "भु",
+        "consonant": "भ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "भू",
+        "consonant": "भ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "भे",
+        "consonant": "भ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "भै",
+        "consonant": "भ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "भो",
+        "consonant": "भ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "भौ",
+        "consonant": "भ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "भं",
+        "consonant": "भ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "भः",
+        "consonant": "भ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "म": [
+      {
+        "syllable": "म",
+        "consonant": "म",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "मा",
+        "consonant": "म",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "मि",
+        "consonant": "म",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "मी",
+        "consonant": "म",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "मु",
+        "consonant": "म",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "मू",
+        "consonant": "म",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "मे",
+        "consonant": "म",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "मै",
+        "consonant": "म",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "मो",
+        "consonant": "म",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "मौ",
+        "consonant": "म",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "मं",
+        "consonant": "म",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "मः",
+        "consonant": "म",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "य": [
+      {
+        "syllable": "य",
+        "consonant": "य",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "या",
+        "consonant": "य",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "यि",
+        "consonant": "य",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "यी",
+        "consonant": "य",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "यु",
+        "consonant": "य",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "यू",
+        "consonant": "य",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ये",
+        "consonant": "य",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "यै",
+        "consonant": "य",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "यो",
+        "consonant": "य",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "यौ",
+        "consonant": "य",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "यं",
+        "consonant": "य",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "यः",
+        "consonant": "य",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "र": [
+      {
+        "syllable": "र",
+        "consonant": "र",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "रा",
+        "consonant": "र",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "रि",
+        "consonant": "र",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "री",
+        "consonant": "र",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "रु",
+        "consonant": "र",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "रू",
+        "consonant": "र",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "रे",
+        "consonant": "र",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "रै",
+        "consonant": "र",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "रो",
+        "consonant": "र",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "रौ",
+        "consonant": "र",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "रं",
+        "consonant": "र",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "रः",
+        "consonant": "र",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ल": [
+      {
+        "syllable": "ल",
+        "consonant": "ल",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ला",
+        "consonant": "ल",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "लि",
+        "consonant": "ल",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ली",
+        "consonant": "ल",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "लु",
+        "consonant": "ल",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "लू",
+        "consonant": "ल",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ले",
+        "consonant": "ल",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "लै",
+        "consonant": "ल",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "लो",
+        "consonant": "ल",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "लौ",
+        "consonant": "ल",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "लं",
+        "consonant": "ल",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "लः",
+        "consonant": "ल",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "व": [
+      {
+        "syllable": "व",
+        "consonant": "व",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "वा",
+        "consonant": "व",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "वि",
+        "consonant": "व",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "वी",
+        "consonant": "व",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "वु",
+        "consonant": "व",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "वू",
+        "consonant": "व",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "वे",
+        "consonant": "व",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "वै",
+        "consonant": "व",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "वो",
+        "consonant": "व",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "वौ",
+        "consonant": "व",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "वं",
+        "consonant": "व",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "वः",
+        "consonant": "व",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "श": [
+      {
+        "syllable": "श",
+        "consonant": "श",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "शा",
+        "consonant": "श",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "शि",
+        "consonant": "श",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "शी",
+        "consonant": "श",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "शु",
+        "consonant": "श",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "शू",
+        "consonant": "श",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "शे",
+        "consonant": "श",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "शै",
+        "consonant": "श",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "शो",
+        "consonant": "श",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "शौ",
+        "consonant": "श",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "शं",
+        "consonant": "श",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "शः",
+        "consonant": "श",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ष": [
+      {
+        "syllable": "ष",
+        "consonant": "ष",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "षा",
+        "consonant": "ष",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "षि",
+        "consonant": "ष",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "षी",
+        "consonant": "ष",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "षु",
+        "consonant": "ष",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "षू",
+        "consonant": "ष",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "षे",
+        "consonant": "ष",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "षै",
+        "consonant": "ष",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "षो",
+        "consonant": "ष",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "षौ",
+        "consonant": "ष",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "षं",
+        "consonant": "ष",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "षः",
+        "consonant": "ष",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "स": [
+      {
+        "syllable": "स",
+        "consonant": "स",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "सा",
+        "consonant": "स",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "सि",
+        "consonant": "स",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "सी",
+        "consonant": "स",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "सु",
+        "consonant": "स",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "सू",
+        "consonant": "स",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "से",
+        "consonant": "स",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "सै",
+        "consonant": "स",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "सो",
+        "consonant": "स",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "सौ",
+        "consonant": "स",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "सं",
+        "consonant": "स",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "सः",
+        "consonant": "स",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ह": [
+      {
+        "syllable": "ह",
+        "consonant": "ह",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "हा",
+        "consonant": "ह",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "हि",
+        "consonant": "ह",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ही",
+        "consonant": "ह",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "हु",
+        "consonant": "ह",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "हू",
+        "consonant": "ह",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "हे",
+        "consonant": "ह",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "है",
+        "consonant": "ह",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "हो",
+        "consonant": "ह",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "हौ",
+        "consonant": "ह",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "हं",
+        "consonant": "ह",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "हः",
+        "consonant": "ह",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "क्ष": [
+      {
+        "syllable": "क्ष",
+        "consonant": "क्ष",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "क्षा",
+        "consonant": "क्ष",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "क्षि",
+        "consonant": "क्ष",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "क्षी",
+        "consonant": "क्ष",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "क्षु",
+        "consonant": "क्ष",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "क्षू",
+        "consonant": "क्ष",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "क्षे",
+        "consonant": "क्ष",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "क्षै",
+        "consonant": "क्ष",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "क्षो",
+        "consonant": "क्ष",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "क्षौ",
+        "consonant": "क्ष",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "क्षं",
+        "consonant": "क्ष",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "क्षः",
+        "consonant": "क्ष",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "त्र": [
+      {
+        "syllable": "त्र",
+        "consonant": "त्र",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "त्रा",
+        "consonant": "त्र",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "त्रि",
+        "consonant": "त्र",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "त्री",
+        "consonant": "त्र",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "त्रु",
+        "consonant": "त्र",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "त्रू",
+        "consonant": "त्र",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "त्रे",
+        "consonant": "त्र",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "त्रै",
+        "consonant": "त्र",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "त्रो",
+        "consonant": "त्र",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "त्रौ",
+        "consonant": "त्र",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "त्रं",
+        "consonant": "त्र",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "त्रः",
+        "consonant": "त्र",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ज्ञ": [
+      {
+        "syllable": "ज्ञ",
+        "consonant": "ज्ञ",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ज्ञा",
+        "consonant": "ज्ञ",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ज्ञि",
+        "consonant": "ज्ञ",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ज्ञी",
+        "consonant": "ज्ञ",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ज्ञु",
+        "consonant": "ज्ञ",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ज्ञू",
+        "consonant": "ज्ञ",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ज्ञे",
+        "consonant": "ज्ञ",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ज्ञै",
+        "consonant": "ज्ञ",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ज्ञो",
+        "consonant": "ज्ञ",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ज्ञौ",
+        "consonant": "ज्ञ",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ज्ञं",
+        "consonant": "ज्ञ",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ज्ञः",
+        "consonant": "ज्ञ",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "श्र": [
+      {
+        "syllable": "श्र",
+        "consonant": "श्र",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "श्रा",
+        "consonant": "श्र",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "श्रि",
+        "consonant": "श्र",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "श्री",
+        "consonant": "श्र",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "श्रु",
+        "consonant": "श्र",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "श्रू",
+        "consonant": "श्र",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "श्रे",
+        "consonant": "श्र",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "श्रै",
+        "consonant": "श्र",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "श्रो",
+        "consonant": "श्र",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "श्रौ",
+        "consonant": "श्र",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "श्रं",
+        "consonant": "श्र",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "श्रः",
+        "consonant": "श्र",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ड़": [
+      {
+        "syllable": "ड़",
+        "consonant": "ड़",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ड़ा",
+        "consonant": "ड़",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ड़ि",
+        "consonant": "ड़",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ड़ी",
+        "consonant": "ड़",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ड़ु",
+        "consonant": "ड़",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ड़ू",
+        "consonant": "ड़",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ड़े",
+        "consonant": "ड़",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ड़ै",
+        "consonant": "ड़",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ड़ो",
+        "consonant": "ड़",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ड़ौ",
+        "consonant": "ड़",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ड़ं",
+        "consonant": "ड़",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ड़ः",
+        "consonant": "ड़",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ढ़": [
+      {
+        "syllable": "ढ़",
+        "consonant": "ढ़",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ढ़ा",
+        "consonant": "ढ़",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ढ़ि",
+        "consonant": "ढ़",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ढ़ी",
+        "consonant": "ढ़",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ढ़ु",
+        "consonant": "ढ़",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ढ़ू",
+        "consonant": "ढ़",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ढ़े",
+        "consonant": "ढ़",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ढ़ै",
+        "consonant": "ढ़",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ढ़ो",
+        "consonant": "ढ़",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ढ़ौ",
+        "consonant": "ढ़",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ढ़ं",
+        "consonant": "ढ़",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ढ़ः",
+        "consonant": "ढ़",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "फ़": [
+      {
+        "syllable": "फ़",
+        "consonant": "फ़",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "फ़ा",
+        "consonant": "फ़",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "फ़ि",
+        "consonant": "फ़",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "फ़ी",
+        "consonant": "फ़",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "फ़ु",
+        "consonant": "फ़",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "फ़ू",
+        "consonant": "फ़",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "फ़े",
+        "consonant": "फ़",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "फ़ै",
+        "consonant": "फ़",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "फ़ो",
+        "consonant": "फ़",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "फ़ौ",
+        "consonant": "फ़",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "फ़ं",
+        "consonant": "फ़",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "फ़ः",
+        "consonant": "फ़",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ],
+    "ज़": [
+      {
+        "syllable": "ज़",
+        "consonant": "ज़",
+        "matra": "",
+        "vowel_sound": "अ",
+        "roman": "a"
+      },
+      {
+        "syllable": "ज़ा",
+        "consonant": "ज़",
+        "matra": "ा",
+        "vowel_sound": "आ",
+        "roman": "aa"
+      },
+      {
+        "syllable": "ज़ि",
+        "consonant": "ज़",
+        "matra": "ि",
+        "vowel_sound": "इ",
+        "roman": "i"
+      },
+      {
+        "syllable": "ज़ी",
+        "consonant": "ज़",
+        "matra": "ी",
+        "vowel_sound": "ई",
+        "roman": "ee"
+      },
+      {
+        "syllable": "ज़ु",
+        "consonant": "ज़",
+        "matra": "ु",
+        "vowel_sound": "उ",
+        "roman": "u"
+      },
+      {
+        "syllable": "ज़ू",
+        "consonant": "ज़",
+        "matra": "ू",
+        "vowel_sound": "ऊ",
+        "roman": "oo"
+      },
+      {
+        "syllable": "ज़े",
+        "consonant": "ज़",
+        "matra": "े",
+        "vowel_sound": "ए",
+        "roman": "e"
+      },
+      {
+        "syllable": "ज़ै",
+        "consonant": "ज़",
+        "matra": "ै",
+        "vowel_sound": "ऐ",
+        "roman": "ai"
+      },
+      {
+        "syllable": "ज़ो",
+        "consonant": "ज़",
+        "matra": "ो",
+        "vowel_sound": "ओ",
+        "roman": "o"
+      },
+      {
+        "syllable": "ज़ौ",
+        "consonant": "ज़",
+        "matra": "ौ",
+        "vowel_sound": "औ",
+        "roman": "au"
+      },
+      {
+        "syllable": "ज़ं",
+        "consonant": "ज़",
+        "matra": "ं",
+        "vowel_sound": "अं",
+        "roman": "am"
+      },
+      {
+        "syllable": "ज़ः",
+        "consonant": "ज़",
+        "matra": "ः",
+        "vowel_sound": "अः",
+        "roman": "ah"
+      }
+    ]
+  },
+  "valid_syllables": [
+    "अ",
+    "आ",
+    "इ",
+    "ई",
+    "उ",
+    "ऊ",
+    "ए",
+    "ऐ",
+    "ओ",
+    "औ",
+    "अं",
+    "अः",
+    "ऋ",
+    "ऑ",
+    "ऍ",
+    "क",
+    "का",
+    "कि",
+    "की",
+    "कु",
+    "कू",
+    "के",
+    "कै",
+    "को",
+    "कौ",
+    "कं",
+    "कः",
+    "ख",
+    "खा",
+    "खि",
+    "खी",
+    "खु",
+    "खू",
+    "खे",
+    "खै",
+    "खो",
+    "खौ",
+    "खं",
+    "खः",
+    "ग",
+    "गा",
+    "गि",
+    "गी",
+    "गु",
+    "गू",
+    "गे",
+    "गै",
+    "गो",
+    "गौ",
+    "गं",
+    "गः",
+    "घ",
+    "घा",
+    "घि",
+    "घी",
+    "घु",
+    "घू",
+    "घे",
+    "घै",
+    "घो",
+    "घौ",
+    "घं",
+    "घः",
+    "ङ",
+    "ङा",
+    "ङि",
+    "ङी",
+    "ङु",
+    "ङू",
+    "ङे",
+    "ङै",
+    "ङो",
+    "ङौ",
+    "ङं",
+    "ङः",
+    "च",
+    "चा",
+    "चि",
+    "ची",
+    "चु",
+    "चू",
+    "चे",
+    "चै",
+    "चो",
+    "चौ",
+    "चं",
+    "चः",
+    "छ",
+    "छा",
+    "छि",
+    "छी",
+    "छु",
+    "छू",
+    "छे",
+    "छै",
+    "छो",
+    "छौ",
+    "छं",
+    "छः",
+    "ज",
+    "जा",
+    "जि",
+    "जी",
+    "जु",
+    "जू",
+    "जे",
+    "जै",
+    "जो",
+    "जौ",
+    "जं",
+    "जः",
+    "झ",
+    "झा",
+    "झि",
+    "झी",
+    "झु",
+    "झू",
+    "झे",
+    "झै",
+    "झो",
+    "झौ",
+    "झं",
+    "झः",
+    "ञ",
+    "ञा",
+    "ञि",
+    "ञी",
+    "ञु",
+    "ञू",
+    "ञे",
+    "ञै",
+    "ञो",
+    "ञौ",
+    "ञं",
+    "ञः",
+    "ट",
+    "टा",
+    "टि",
+    "टी",
+    "टु",
+    "टू",
+    "टे",
+    "टै",
+    "टो",
+    "टौ",
+    "टं",
+    "टः",
+    "ठ",
+    "ठा",
+    "ठि",
+    "ठी",
+    "ठु",
+    "ठू",
+    "ठे",
+    "ठै",
+    "ठो",
+    "ठौ",
+    "ठं",
+    "ठः",
+    "ड",
+    "डा",
+    "डि",
+    "डी",
+    "डु",
+    "डू",
+    "डे",
+    "डै",
+    "डो",
+    "डौ",
+    "डं",
+    "डः",
+    "ढ",
+    "ढा",
+    "ढि",
+    "ढी",
+    "ढु",
+    "ढू",
+    "ढे",
+    "ढै",
+    "ढो",
+    "ढौ",
+    "ढं",
+    "ढः",
+    "ण",
+    "णा",
+    "णि",
+    "णी",
+    "णु",
+    "णू",
+    "णे",
+    "णै",
+    "णो",
+    "णौ",
+    "णं",
+    "णः",
+    "त",
+    "ता",
+    "ति",
+    "ती",
+    "तु",
+    "तू",
+    "ते",
+    "तै",
+    "तो",
+    "तौ",
+    "तं",
+    "तः",
+    "थ",
+    "था",
+    "थि",
+    "थी",
+    "थु",
+    "थू",
+    "थे",
+    "थै",
+    "थो",
+    "थौ",
+    "थं",
+    "थः",
+    "द",
+    "दा",
+    "दि",
+    "दी",
+    "दु",
+    "दू",
+    "दे",
+    "दै",
+    "दो",
+    "दौ",
+    "दं",
+    "दः",
+    "ध",
+    "धा",
+    "धि",
+    "धी",
+    "धु",
+    "धू",
+    "धे",
+    "धै",
+    "धो",
+    "धौ",
+    "धं",
+    "धः",
+    "न",
+    "ना",
+    "नि",
+    "नी",
+    "नु",
+    "नू",
+    "ने",
+    "नै",
+    "नो",
+    "नौ",
+    "नं",
+    "नः",
+    "प",
+    "पा",
+    "पि",
+    "पी",
+    "पु",
+    "पू",
+    "पे",
+    "पै",
+    "पो",
+    "पौ",
+    "पं",
+    "पः",
+    "फ",
+    "फा",
+    "फि",
+    "फी",
+    "फु",
+    "फू",
+    "फे",
+    "फै",
+    "फो",
+    "फौ",
+    "फं",
+    "फः",
+    "ब",
+    "बा",
+    "बि",
+    "बी",
+    "बु",
+    "बू",
+    "बे",
+    "बै",
+    "बो",
+    "बौ",
+    "बं",
+    "बः",
+    "भ",
+    "भा",
+    "भि",
+    "भी",
+    "भु",
+    "भू",
+    "भे",
+    "भै",
+    "भो",
+    "भौ",
+    "भं",
+    "भः",
+    "म",
+    "मा",
+    "मि",
+    "मी",
+    "मु",
+    "मू",
+    "मे",
+    "मै",
+    "मो",
+    "मौ",
+    "मं",
+    "मः",
+    "य",
+    "या",
+    "यि",
+    "यी",
+    "यु",
+    "यू",
+    "ये",
+    "यै",
+    "यो",
+    "यौ",
+    "यं",
+    "यः",
+    "र",
+    "रा",
+    "रि",
+    "री",
+    "रु",
+    "रू",
+    "रे",
+    "रै",
+    "रो",
+    "रौ",
+    "रं",
+    "रः",
+    "ल",
+    "ला",
+    "लि",
+    "ली",
+    "लु",
+    "लू",
+    "ले",
+    "लै",
+    "लो",
+    "लौ",
+    "लं",
+    "लः",
+    "व",
+    "वा",
+    "वि",
+    "वी",
+    "वु",
+    "वू",
+    "वे",
+    "वै",
+    "वो",
+    "वौ",
+    "वं",
+    "वः",
+    "श",
+    "शा",
+    "शि",
+    "शी",
+    "शु",
+    "शू",
+    "शे",
+    "शै",
+    "शो",
+    "शौ",
+    "शं",
+    "शः",
+    "ष",
+    "षा",
+    "षि",
+    "षी",
+    "षु",
+    "षू",
+    "षे",
+    "षै",
+    "षो",
+    "षौ",
+    "षं",
+    "षः",
+    "स",
+    "सा",
+    "सि",
+    "सी",
+    "सु",
+    "सू",
+    "से",
+    "सै",
+    "सो",
+    "सौ",
+    "सं",
+    "सः",
+    "ह",
+    "हा",
+    "हि",
+    "ही",
+    "हु",
+    "हू",
+    "हे",
+    "है",
+    "हो",
+    "हौ",
+    "हं",
+    "हः",
+    "क्ष",
+    "क्षा",
+    "क्षि",
+    "क्षी",
+    "क्षु",
+    "क्षू",
+    "क्षे",
+    "क्षै",
+    "क्षो",
+    "क्षौ",
+    "क्षं",
+    "क्षः",
+    "त्र",
+    "त्रा",
+    "त्रि",
+    "त्री",
+    "त्रु",
+    "त्रू",
+    "त्रे",
+    "त्रै",
+    "त्रो",
+    "त्रौ",
+    "त्रं",
+    "त्रः",
+    "ज्ञ",
+    "ज्ञा",
+    "ज्ञि",
+    "ज्ञी",
+    "ज्ञु",
+    "ज्ञू",
+    "ज्ञे",
+    "ज्ञै",
+    "ज्ञो",
+    "ज्ञौ",
+    "ज्ञं",
+    "ज्ञः",
+    "श्र",
+    "श्रा",
+    "श्रि",
+    "श्री",
+    "श्रु",
+    "श्रू",
+    "श्रे",
+    "श्रै",
+    "श्रो",
+    "श्रौ",
+    "श्रं",
+    "श्रः",
+    "ड़",
+    "ड़ा",
+    "ड़ि",
+    "ड़ी",
+    "ड़ु",
+    "ड़ू",
+    "ड़े",
+    "ड़ै",
+    "ड़ो",
+    "ड़ौ",
+    "ड़ं",
+    "ड़ः",
+    "ढ़",
+    "ढ़ा",
+    "ढ़ि",
+    "ढ़ी",
+    "ढ़ु",
+    "ढ़ू",
+    "ढ़े",
+    "ढ़ै",
+    "ढ़ो",
+    "ढ़ौ",
+    "ढ़ं",
+    "ढ़ः",
+    "फ़",
+    "फ़ा",
+    "फ़ि",
+    "फ़ी",
+    "फ़ु",
+    "फ़ू",
+    "फ़े",
+    "फ़ै",
+    "फ़ो",
+    "फ़ौ",
+    "फ़ं",
+    "फ़ः",
+    "ज़",
+    "ज़ा",
+    "ज़ि",
+    "ज़ी",
+    "ज़ु",
+    "ज़ू",
+    "ज़े",
+    "ज़ै",
+    "ज़ो",
+    "ज़ौ",
+    "ज़ं",
+    "ज़ः"
+  ]
+}

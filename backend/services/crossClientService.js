@@ -122,19 +122,23 @@ const getClientsIndex = async (forceRefresh = false) => {
     const guide = guidelinesMap.get(c.id) || { whitelist: [], logoPath: null };
     const cleanName = normalizeText(c.name);
 
-    // Extract distinctive tokens (length >= 4 and not in genericStopWords)
-    const nameTokens = cleanName.split(' ').filter((t) => t.length >= 4 && !genericStopWords.has(t));
+    // Prioritize client's own brand words:
+    // First preserve all name tokens from the client's official name
+    const rawTokens = cleanName.split(' ').filter((t) => t.length >= 3);
+    // Generic stop words / professional terms only filter out generic terms AFTER checking client brand tokens
+    const filteredTokens = rawTokens.filter((t) => !genericStopWords.has(t));
+    const nameTokens = filteredTokens.length > 0 ? filteredTokens : rawTokens;
 
     // Extract distinctive whitelist roots ONLY if they contain or match the client's brand name tokens
     const whitelistRoots = (guide.whitelist || [])
       .map((w) => normalizeText(w))
       .filter((w) => {
-        if (w.length < 4 || genericStopWords.has(w)) return false;
-        // Must contain or match at least one nameToken to be considered proprietary to this client
-        return nameTokens.some((nt) => w.includes(nt) || nt.includes(w));
+        if (w.length < 3 || genericStopWords.has(w)) return false;
+        // Must contain or match at least one nameToken or be a specific custom term
+        return nameTokens.some((nt) => w.includes(nt) || nt.includes(w)) || w.length >= 5;
       });
 
-    // Combine distinct roots
+    // Combine distinct roots: client's own brand tokens get priority
     const distinctRoots = Array.from(new Set([...nameTokens, ...whitelistRoots]));
 
     // Registered phones
@@ -189,6 +193,81 @@ const detectCrossClientCollisions = async ({
 }) => {
   const allClients = await getClientsIndex();
   const currentClient = allClients.find((c) => c.id === Number(currentClientId));
+
+  // If no client registered for this post (random poster / unauthorized brand): NEVER skip!
+  if (!currentClientId || !currentClient) {
+    const collisions = [];
+    const collidingBoxIds = new Set();
+    const combinedNormalized = normalizeText(text);
+    const textPhones = extractPhoneDigits(text);
+    const textDomains = extractDomains(text);
+
+    for (const other of allClients) {
+      let clientCollisionFound = false;
+      const reasons = [];
+
+      for (const root of other.distinctRoots) {
+        if (!root || root.length < 4) continue;
+        const regex = new RegExp(`\\b${root}\\b`, 'i');
+        if (regex.test(combinedNormalized)) {
+          clientCollisionFound = true;
+          reasons.push(`Brand name token '${root}' belongs to registered client '${other.name}'`);
+        }
+      }
+
+      for (const domain of other.domains) {
+        if (textDomains.includes(domain.toLowerCase()) || text.toLowerCase().includes(domain.toLowerCase())) {
+          clientCollisionFound = true;
+          reasons.push(`Website domain '${domain}' belongs to registered client '${other.name}'`);
+        }
+      }
+
+      for (const phone of other.phones) {
+        if (textPhones.includes(phone)) {
+          clientCollisionFound = true;
+          reasons.push(`Registered phone number '${phone}' belongs to registered client '${other.name}'`);
+        }
+      }
+
+      if (ocrBoxes && ocrBoxes.length > 0) {
+        for (const box of ocrBoxes) {
+          if (!box.text) continue;
+          const boxNorm = normalizeText(box.text);
+          for (const root of other.distinctRoots) {
+            if (!root || root.length < 4) continue;
+            const rRegex = new RegExp(`\\b${root}\\b`, 'i');
+            const isFuzzy = root.length >= 6 && fuzzball.partial_ratio(boxNorm, root) >= 95;
+            if (rRegex.test(boxNorm) || isFuzzy) {
+              collidingBoxIds.add(box.id);
+              clientCollisionFound = true;
+              reasons.push(`Box #${box.id} contains brand '${root}' from '${other.name}'`);
+            }
+          }
+        }
+      }
+
+      if (clientCollisionFound) {
+        collisions.push({
+          foreignClient: { id: other.id, name: other.name },
+          reasons: Array.from(new Set(reasons)),
+        });
+      }
+    }
+
+    return {
+      hasCollision: true,
+      isUnauthorized: true,
+      status: 'UNAUTHORIZED_BRAND',
+      currentClientName: null,
+      currentClientHasLogo: false,
+      collisions,
+      collidingBoxIds: Array.from(collidingBoxIds),
+      message: collisions.length > 0
+        ? `Unauthorized poster: Content matches registered client '${collisions[0].foreignClient.name}', but post has no authorized client.`
+        : 'Unauthorized poster: No authorized client registered for this post.',
+    };
+  }
+
   const otherClients = allClients.filter((c) => c.id !== Number(currentClientId));
 
   const collisions = [];

@@ -344,6 +344,8 @@ _CACHED_HINDI_DICT = None
 _HINDI_WORD_FREQ = None
 _CACHED_MATRA_RULES = None
 _CACHED_CONFUSION_RULES = None
+_CACHED_BARAKHADI = None
+_CACHED_BIGRAMS = None
 DEVANAGARI_CHAR_RE = re.compile(r"[\u0900-\u097F]")
 
 # Unicode classification sets for Hindi visual rule engine
@@ -458,6 +460,153 @@ def get_hindi_word_frequency():
     return _HINDI_WORD_FREQ
 
 
+def get_hindi_barakhadi():
+    """Loads and caches hindi_barakhadi.json structural validation layer."""
+    global _CACHED_BARAKHADI
+    if _CACHED_BARAKHADI is not None:
+        return _CACHED_BARAKHADI
+
+    barakhadi_paths = [
+        Path(__file__).resolve().parent / "hindi_barakhadi.json",
+        Path(__file__).resolve().parent / "dictionaries" / "hindi_barakhadi.json",
+        Path(__file__).resolve().parent.parent / "dictionaries" / "hindi_barakhadi.json",
+        Path(__file__).resolve().parents[1] / "dictionaries" / "hindi_barakhadi.json",
+        Path(__file__).resolve().parents[2] / "hindi_barakhadi.json",
+    ]
+    for p in barakhadi_paths:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    valid_syllables = set(data.get("valid_syllables", []))
+                    _CACHED_BARAKHADI = {
+                        "raw": data,
+                        "valid_syllables": valid_syllables,
+                        "consonants": set(data.get("consonants", [])),
+                    }
+                    return _CACHED_BARAKHADI
+            except Exception:
+                pass
+    _CACHED_BARAKHADI = {"valid_syllables": set(), "consonants": set()}
+    return _CACHED_BARAKHADI
+
+
+def get_hindi_bigrams():
+    """Loads and caches high-confidence poster bigrams from common_hindi_bigrams.json."""
+    global _CACHED_BIGRAMS
+    if _CACHED_BIGRAMS is not None:
+        return _CACHED_BIGRAMS
+
+    bigram_paths = [
+        Path(__file__).resolve().parent / "common_hindi_bigrams.json",
+        Path(__file__).resolve().parent / "dictionaries" / "common_hindi_bigrams.json",
+        Path(__file__).resolve().parent.parent / "dictionaries" / "common_hindi_bigrams.json",
+        Path(__file__).resolve().parents[1] / "dictionaries" / "common_hindi_bigrams.json",
+        Path(__file__).resolve().parents[2] / "common_hindi_bigrams.json",
+    ]
+    bigrams = set()
+    for p in bigram_paths:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    items = data.get("bigrams", []) if isinstance(data, dict) else data
+                    for b in items:
+                        if isinstance(b, str) and b.strip():
+                            bigrams.add(b.strip().lower())
+                    _CACHED_BIGRAMS = bigrams
+                    return _CACHED_BIGRAMS
+            except Exception:
+                pass
+    _CACHED_BIGRAMS = bigrams
+    return _CACHED_BIGRAMS
+
+
+def is_structurally_valid_hindi_word(word: str) -> tuple:
+    """
+    Validates if an OCR word is structurally possible in Hindi using Barakhadi (36 consonants x 12 matras).
+    Use this ONLY to validate if an OCR word is structurally possible in Hindi.
+    If not (like 'नः'), flag it for review. Do NOT use for auto-correction.
+    """
+    if not word or not isinstance(word, str):
+        return True, ""
+
+    clean = word.strip()
+    if not clean or not DEVANAGARI_CHAR_RE.search(clean):
+        return True, ""
+
+    # Check 1: Leading matra or modifier (cannot start with dependent vowel sign, halant, or visarga)
+    if clean[0] in DEVANAGARI_ALL_MATRAS:
+        return False, f"Invalid leading matra/sign '{clean[0]}'"
+
+    # Check 2: 'नः' as standalone word or anomalous prefix before consonant (PaddleOCR drop of short-i)
+    if clean == "नः":
+        return False, "Structurally impossible standalone syllable 'नः' (visarga artifact)"
+    if clean.startswith("नः") and len(clean) > 2 and clean[2] in DEVANAGARI_CONSONANTS:
+        return False, "Structurally impossible prefix 'नः' before consonant (missing matra)"
+
+    # Check 3: Visarga cannot be directly preceded by nothing or followed by a vowel sign
+    for idx, ch in enumerate(clean):
+        if ch == "\u0903":  # ः
+            if idx == 0:
+                return False, "Visarga cannot start a word"
+            if idx + 1 < len(clean) and clean[idx + 1] in DEVANAGARI_VOWEL_SIGNS:
+                return False, f"Visarga followed by vowel sign '{clean[idx+1]}'"
+
+    # Check 4: Consecutive vowel signs (e.g. \u093E\u093F)
+    prev_was_vowel_sign = False
+    for ch in clean:
+        is_vowel_sign = ch in DEVANAGARI_VOWEL_SIGNS
+        if is_vowel_sign and prev_was_vowel_sign:
+            return False, "Consecutive vowel signs"
+        prev_was_vowel_sign = is_vowel_sign
+
+    # Check 5: Consecutive halants
+    if "\u094D\u094D" in clean:
+        return False, "Consecutive halants"
+
+    return True, ""
+
+
+def check_bigram_context(candidate: str, prev_token: str, next_token: str) -> tuple:
+    """
+    Checks surrounding words for candidate correction.
+    If the corrected phrase (e.g. 'निःशुल्क ऑपरेशन', 'सुबह 10') exists in the
+    frequency dictionary or common_hindi_bigrams.json with high confidence, returns (True, phrase).
+    """
+    if not candidate:
+        return False, ""
+
+    bigrams = get_hindi_bigrams()
+    freq_dict = get_hindi_word_frequency()
+
+    cand_clean = candidate.strip()
+
+    # Check forward bigram with next_token
+    if next_token:
+        next_clean = re.sub(r"[^\w\u0900-\u097F]+", "", next_token).strip()
+        if next_clean:
+            fw1 = f"{cand_clean} {next_clean}".lower()
+            if fw1 in bigrams or fw1 in freq_dict:
+                return True, f"{cand_clean} {next_clean}"
+            fw2 = f"{cand_clean} {next_token.strip()}".lower()
+            if fw2 in bigrams or fw2 in freq_dict:
+                return True, f"{cand_clean} {next_token.strip()}"
+
+    # Check backward bigram with prev_token
+    if prev_token:
+        prev_clean = re.sub(r"[^\w\u0900-\u097F]+", "", prev_token).strip()
+        if prev_clean:
+            bw1 = f"{prev_clean} {cand_clean}".lower()
+            if bw1 in bigrams or bw1 in freq_dict:
+                return True, f"{prev_clean} {cand_clean}"
+            bw2 = f"{prev_token.strip()} {cand_clean}".lower()
+            if bw2 in bigrams or bw2 in freq_dict:
+                return True, f"{prev_token.strip()} {cand_clean}"
+
+    return False, ""
+
+
 def analyze_hindi_word(word: str) -> dict:
     """
     Visual Rule Engine for Devanagari words.
@@ -542,9 +691,14 @@ def analyze_hindi_word(word: str) -> dict:
 
 def apply_hindi_confusion_rules(text: str, corrections_collector: list = None) -> str:
     """
-    Devanagari-Specific Confusion Rules (Post-Processing).
-    CRITICAL: Applied ONLY to tokens matching the Devanagari Unicode range ([\u0900-\u097F]).
-    English words and pure English text are 100% bypassed and left untouched.
+    Devanagari-Specific Confusion Rules with Bigram Context Validation & Barakhadi Structural Check.
+    CRITICAL:
+    1. Applied ONLY to tokens matching Devanagari Unicode range. Pure English is 100% bypassed.
+    2. When correcting a word, check surrounding words. If the corrected phrase exists in the
+       bigram/frequency dictionary with high confidence, apply the correction (OCR_ERROR).
+    3. If bigram context cannot confirm, mark it as NEEDS_REVIEW and flag it.
+    4. If a word fails Barakhadi structural validation (e.g. 'नः'), flag it for review (NEEDS_REVIEW).
+       Do NOT use Barakhadi for auto-correction!
     """
     if not text or not isinstance(text, str):
         return text
@@ -583,140 +737,145 @@ def apply_hindi_confusion_rules(text: str, corrections_collector: list = None) -
                     "corrected": "क्ष",
                     "rule": "Halant split conjunct repair",
                     "type": "OCR_ERROR",
-                    "error_type": "OCR_ERROR"
+                    "error_type": "OCR_ERROR",
+                    "status": "APPLIED",
+                    "bigram_confirmed": True
                 })
             text = merged_text
 
-    def fix_token(match):
-        raw_token = match.group(0)
+    # Extract all elements preserving whitespace
+    raw_elements = [m.group(0) for m in re.finditer(r"[\u0900-\u097F]+|[A-Za-z0-9]+|\S+|\s+", text)]
+
+    # Identify word token indices
+    word_indices = [
+        i for i, el in enumerate(raw_elements)
+        if re.search(r"[\w\u0900-\u097F]", el)
+    ]
+
+    modified_elements = list(raw_elements)
+
+    for idx_pos, elem_idx in enumerate(word_indices):
+        raw_token = raw_elements[elem_idx]
         if not DEVANAGARI_CHAR_RE.search(raw_token):
-            return raw_token
+            continue
 
         clean = raw_token.strip()
-
-        # Check exact known confusion map first
-        if clean in exact_rules:
-            repl = exact_rules[clean]
-            if clean != repl and corrections_collector is not None:
-                corrections_collector.append({
-                    "original": clean,
-                    "corrected": repl,
-                    "rule": rule_reasons.get(clean, "Matra/Visarga confusion fix"),
-                    "type": "OCR_ERROR",
-                    "error_type": "OCR_ERROR"
-                })
-            return repl
 
         # ANTI-OVER-ENGINEERING SAFETY CHECK:
         # If clean token is ALREADY a valid established Hindi word (e.g. "हंस", "रंग", "संत", "कंस", "पुनः", "प्रायः", "दुःख", "पसंद", "आनंद"),
         # NEVER mutate or strip its characters!
         if clean in freq_dict:
-            return raw_token
+            continue
 
-        # Check start_of_word rules (e.g. "नः" prefix)
-        for pat, rep, r_reason in start_rules:
-            if clean.startswith(pat) and len(clean) > len(pat):
-                cand = rep + clean[len(pat):]
-                # Halant repair on suffix if needed
-                if "शुलक" in cand:
-                    cand = cand.replace("शुलक", "शुल्क")
-                if cand in freq_dict or cand in exact_rules.values():
-                    if corrections_collector is not None:
-                        corrections_collector.append({
-                            "original": clean,
-                            "corrected": cand,
-                            "rule": r_reason,
-                            "type": "OCR_ERROR",
-                            "error_type": "OCR_ERROR"
-                        })
-                    return cand
+        # Get context: previous word token and next word token
+        prev_word = raw_elements[word_indices[idx_pos - 1]].strip() if idx_pos > 0 else ""
+        next_word = raw_elements[word_indices[idx_pos + 1]].strip() if idx_pos + 1 < len(word_indices) else ""
 
-        # Phase 3: Halant split conjunct repair
-        if "कष" in clean:
-            cand = clean.replace("कष", "क्ष")
-            if cand in freq_dict or cand in exact_rules.values():
+        # Structural check via Barakhadi validation layer
+        is_struct_valid, struct_reason = is_structurally_valid_hindi_word(clean)
+
+        # Candidate selection
+        cand = None
+        cand_reason = None
+
+        if clean in exact_rules:
+            cand = exact_rules[clean]
+            cand_reason = rule_reasons.get(clean, "Exact confusion rule")
+        else:
+            # Check start_of_word rules (e.g. "नः" prefix)
+            for pat, rep, r_reason in start_rules:
+                if clean.startswith(pat) and len(clean) > len(pat):
+                    c_tmp = rep + clean[len(pat):]
+                    if "शुलक" in c_tmp:
+                        c_tmp = c_tmp.replace("शुलक", "शुल्क")
+                    if c_tmp in freq_dict or c_tmp in exact_rules.values():
+                        cand = c_tmp
+                        cand_reason = r_reason
+                        break
+
+            # Phase 3: Halant split conjunct repair
+            if not cand and "कष" in clean:
+                c_tmp = clean.replace("कष", "क्ष")
+                if c_tmp in freq_dict or c_tmp in exact_rules.values():
+                    cand = c_tmp
+                    cand_reason = "Halant conjunct repair (कष -> क्ष)"
+
+            if not cand and "शुलक" in clean:
+                c_tmp = clean.replace("शुलक", "शुल्क")
+                if c_tmp in freq_dict or c_tmp in exact_rules.values():
+                    cand = c_tmp
+                    cand_reason = "Halant conjunct repair (शुलक -> शुल्क)"
+
+            # Visarga / Matra prefix regex
+            if not cand and "ः" in clean:
+                if re.match(r"^नःशुल[कक्][ा-ौ]?$", clean):
+                    cand = "निःशुल्क"
+                    cand_reason = "Visarga and matra confusion fix"
+                elif re.match(r"^नः([शस][\u0900-\u097F]+)$", clean):
+                    c_tmp = "निः" + clean[2:]
+                    if c_tmp in freq_dict or c_tmp in exact_rules.values():
+                        cand = c_tmp
+                        cand_reason = "Prefix visarga confusion fix"
+
+            # Spurious anusvara removal on consonant
+            if not cand and "ं" in clean:
+                stripped = clean.replace("ं", "")
+                if stripped in freq_dict or stripped in exact_rules.values():
+                    cand = stripped
+                    cand_reason = "Spurious anusvara removal on consonant"
+
+            # Visual rule engine candidates
+            if not cand:
+                analysis = analyze_hindi_word(clean)
+                if not analysis["is_valid"] and analysis["candidates"]:
+                    cand = analysis["candidates"][0]
+                    cand_reason = f"Visual rule engine ({', '.join(analysis['issues'])})"
+
+        # Bigram Context Validation Gate
+        if cand and cand != clean:
+            bigram_ok, context_phrase = check_bigram_context(cand, prev_word, next_word)
+            if bigram_ok:
+                # CONFIRMED by bigram context: apply the correction!
+                modified_elements[elem_idx] = cand
                 if corrections_collector is not None:
                     corrections_collector.append({
                         "original": clean,
                         "corrected": cand,
-                        "rule": "Halant conjunct repair (कष -> क्ष)",
+                        "rule": cand_reason,
                         "type": "OCR_ERROR",
-                        "error_type": "OCR_ERROR"
+                        "error_type": "OCR_ERROR",
+                        "status": "APPLIED",
+                        "bigram_confirmed": True,
+                        "context_phrase": context_phrase,
                     })
-                return cand
-
-        if "शुलक" in clean:
-            cand = clean.replace("शुलक", "शुल्क")
-            if cand in freq_dict or cand in exact_rules.values():
+            else:
+                # Unconfirmed by bigram context: DO NOT auto-correct! Mark NEEDS_REVIEW and flag it!
                 if corrections_collector is not None:
                     corrections_collector.append({
                         "original": clean,
-                        "corrected": cand,
-                        "rule": "Halant conjunct repair (शुलक -> शुल्क)",
+                        "suggested": cand,
+                        "rule": cand_reason,
                         "type": "OCR_ERROR",
-                        "error_type": "OCR_ERROR"
+                        "error_type": "OCR_ERROR",
+                        "status": "NEEDS_REVIEW",
+                        "flagged": True,
+                        "reason": f"Bigram context unconfirmed: '{cand}' not verified by surrounding words",
                     })
-                return cand
-
-        # Rule 1 (Visarga/Matra): Visarga 'ः' following consonant where short-i 'ि' was intended
-        if "ः" in clean:
-            if re.match(r"^नःशुल[कक्][ा-ौ]?$", clean):
-                if corrections_collector is not None:
-                    corrections_collector.append({
-                        "original": clean,
-                        "corrected": "निःशुल्क",
-                        "rule": "Visarga and matra confusion fix",
-                        "type": "OCR_ERROR",
-                        "error_type": "OCR_ERROR"
-                    })
-                return "निःशुल्क"
-            if re.match(r"^नः([शस][\u0900-\u097F]+)$", clean):
-                cand = "निः" + clean[2:]
-                if cand in freq_dict or cand in exact_rules.values():
-                    if corrections_collector is not None:
-                        corrections_collector.append({
-                            "original": clean,
-                            "corrected": cand,
-                            "rule": "Prefix visarga confusion fix",
-                            "type": "OCR_ERROR",
-                            "error_type": "OCR_ERROR"
-                        })
-                    return cand
-
-        # Rule 2 (Anusvara/Consonant): Strip unnecessary OCR noise anusvara ONLY IF:
-        # 1. clean token itself is NOT in dictionary/corpus
-        # 2. AND stripped version is a known high-frequency word
-        if "ं" in clean:
-            stripped = clean.replace("ं", "")
-            if stripped in freq_dict or stripped in exact_rules.values():
-                if corrections_collector is not None:
-                    corrections_collector.append({
-                        "original": clean,
-                        "corrected": stripped,
-                        "rule": "Spurious anusvara removal on consonant",
-                        "type": "OCR_ERROR",
-                        "error_type": "OCR_ERROR"
-                    })
-                return stripped
-
-        # Visual Rule Engine / Matra Analysis candidates
-        analysis = analyze_hindi_word(clean)
-        if not analysis["is_valid"] and analysis["candidates"]:
-            best_cand = analysis["candidates"][0]
+        elif not is_struct_valid:
+            # Word is structurally impossible according to Barakhadi and has no confirmed correction.
+            # Flag it for review. Do NOT use Barakhadi for auto-correction!
             if corrections_collector is not None:
                 corrections_collector.append({
                     "original": clean,
-                    "corrected": best_cand,
-                    "rule": f"Visual rule engine ({', '.join(analysis['issues'])})",
+                    "rule": f"Barakhadi structural check: {struct_reason}",
                     "type": "OCR_ERROR",
-                    "error_type": "OCR_ERROR"
+                    "error_type": "OCR_ERROR",
+                    "status": "NEEDS_REVIEW",
+                    "flagged": True,
+                    "reason": struct_reason,
                 })
-            return best_cand
 
-        return raw_token
-
-    token_pattern = re.compile(r"[\u0900-\u097F]+|[A-Za-z]+|\S+")
-    return token_pattern.sub(fix_token, text)
+    return "".join(modified_elements)
 
 
 def get_hindi_dictionary_set():
