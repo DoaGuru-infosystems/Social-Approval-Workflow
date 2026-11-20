@@ -78,6 +78,16 @@ const checkWord = async (word, whitelist = null) => {
     return { correct: true, suggestions: [] };
   }
 
+  // B1: Format/Pattern check: URLs, emails, phone numbers, and handles are not prose words
+  if (
+    /^(https?:\/\/|www\.)/i.test(cleanWord) ||
+    /@/.test(cleanWord) ||
+    /^\+?\d{10,}$/.test(cleanWord) ||
+    cleanWord.startsWith('@')
+  ) {
+    return { correct: true, suggestions: [] };
+  }
+
   // Ensure dictionaries are loaded
   if (!isInitialized || !cachedEnglishSpell || !cachedHindiSpell) {
     await initDictionaries();
@@ -141,10 +151,21 @@ const checkText = async (text, whitelist = null) => {
     whitelist.forEach((w) => typeof w === 'string' && whitelistSet.add(w.toLowerCase()));
   }
 
-  // Exclude hashtags from word-level spell check (hashtags are checked via mandatory phrases)
-  const textWithoutHashtags = text.replace(/#[\w\u0900-\u097f-]+/g, ' ');
+  // Exclude pattern-tagged tokens (urls, emails, phones, hashtags, handles) from word-level spell check
+  const PATTERN_URL_REGEX = /\b(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?(?:\/\S*)?\b/gi;
+  const PATTERN_EMAIL_REGEX = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/gi;
+  const PATTERN_PHONE_REGEX = /\b(?:\+?\d{1,3}[-\s]?)?\d{10}\b/g;
+  const PATTERN_HASHTAG_REGEX = /#\w[\w]*/g;
+  const PATTERN_HANDLE_REGEX = /(?<!\w)@\w[\w.]*/g;
 
-  const matches = textWithoutHashtags.match(WORD_PATTERN);
+  const textWithoutPatterns = text
+    .replace(PATTERN_URL_REGEX, ' ')
+    .replace(PATTERN_EMAIL_REGEX, ' ')
+    .replace(PATTERN_PHONE_REGEX, ' ')
+    .replace(PATTERN_HASHTAG_REGEX, ' ')
+    .replace(PATTERN_HANDLE_REGEX, ' ');
+
+  const matches = textWithoutPatterns.match(WORD_PATTERN);
   if (!matches) {
     return [];
   }

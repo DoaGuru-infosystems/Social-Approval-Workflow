@@ -65,51 +65,6 @@ async function migrateSocialConnect() {
     console.log('Notice modifying posts status ENUM:', err.message);
   }
 
-  // 3. Pre-fill DOAGuru Infosystems (id 11 or search by name) profile URLs for all 4 platforms
-  const [doaguruRows] = await pool.query(
-    "SELECT id, name FROM clients WHERE name LIKE '%DOAGuru%' LIMIT 1"
-  );
-
-  if (doaguruRows.length > 0) {
-    const doaguruId = doaguruRows[0].id;
-    console.log(`Found DOAGuru with ID ${doaguruId}. Pre-filling 4 platforms...`);
-
-    const doaguruPlatforms = [
-      {
-        platform: 'instagram',
-        profile_url: 'https://www.instagram.com/doaguru_infosystem/',
-        platform_username: 'doaguru_infosystem',
-      },
-      {
-        platform: 'facebook',
-        profile_url: 'https://www.facebook.com/doaguruinfosystems/',
-        platform_username: 'doaguruinfosystems',
-      },
-      {
-        platform: 'youtube',
-        profile_url: 'https://www.youtube.com/@doaguru4230',
-        platform_username: '@doaguru4230',
-      },
-      {
-        platform: 'linkedin',
-        profile_url: 'https://in.linkedin.com/company/doaguru-infosystem',
-        platform_username: 'doaguru-infosystem',
-      },
-    ];
-
-    for (const p of doaguruPlatforms) {
-      await pool.query(
-        `INSERT INTO client_social_accounts (client_id, platform, profile_url, platform_username, is_connected)
-         VALUES (?, ?, ?, ?, FALSE)
-         ON DUPLICATE KEY UPDATE profile_url = VALUES(profile_url), platform_username = VALUES(platform_username)`,
-        [doaguruId, p.platform, p.profile_url, p.platform_username]
-      );
-    }
-    console.log('✓ DOAGuru profile URLs pre-filled for Instagram, Facebook, YouTube, LinkedIn.');
-  } else {
-    console.log('Note: DOAGuru client not found yet, will pre-fill when created.');
-  }
-
   console.log('--- Migration Completed Successfully ---');
 }
 

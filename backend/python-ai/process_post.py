@@ -129,6 +129,105 @@ def _compute_rect(box, img_width, img_height):
         return {"left": 0.0, "top": 0.0, "width": 100.0, "height": 10.0}
 
 
+PATTERN_REGEXES = {
+    "email": re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),
+    "url": re.compile(r"\b((?:https?://)?(?:www\.)?[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?(?:/\S*)?)\b"),
+    "phone": re.compile(r"\b(?:\+?\d{1,3}[-\s]?)?\d{10}\b"),
+    "hashtag": re.compile(r"#\w[\w]*"),
+    "handle": re.compile(r"(?<!\w)@\w[\w.]*"),
+}
+
+
+def tag_pattern_tokens(text):
+    """
+    Detect pattern tokens using regex (format, not word lists):
+      - email, url, phone, hashtag, handle
+    Returns list of {"type": ..., "value": ..., "start": ..., "end": ...}
+    """
+    if not text or not isinstance(text, str):
+        return []
+    tags = []
+    for p_type, regex in PATTERN_REGEXES.items():
+        for m in regex.finditer(text):
+            tags.append({
+                "type": p_type,
+                "value": m.group(0),
+                "start": m.start(),
+                "end": m.end(),
+            })
+    tags.sort(key=lambda x: (x["start"], x["end"]))
+    return tags
+
+
+def classify_region_type(rect, text, neighbor_rects):
+    """
+    Labels every OCR block as one of: "prose", "isolated_element", "uncertain".
+    Logic (PURELY geometric — box size/position relative to image %, and relative
+    to OTHER detected boxes — never based on the text content itself):
+      - word_count = number of tokens in this block's text
+      - height_pct, width_pct = this block's rect height/width as % of image
+      - Count "close_neighbors": other blocks whose vertical center is within
+        1.5x this block's height (i.e. sitting in the same text flow/line-band)
+      - If word_count <= 2 AND height_pct <= 2.5 AND width_pct <= 18 AND
+        close_neighbors <= 1  ->  "isolated_element"
+      - If word_count >= 4 AND close_neighbors >= 1  ->  "prose"
+      - Else -> "uncertain"
+    """
+    if not isinstance(rect, dict):
+        return "uncertain"
+    tokens = [t for t in (text or "").split() if t.strip()]
+    word_count = len(tokens)
+    height_pct = float(rect.get("height", 0.0) or 0.0)
+    width_pct = float(rect.get("width", 0.0) or 0.0)
+    top_pct = float(rect.get("top", 0.0) or 0.0)
+    my_v_center = top_pct + (height_pct / 2.0)
+    band = 1.5 * max(height_pct, 0.5)
+
+    close_neighbors = 0
+    if neighbor_rects:
+        for nr in neighbor_rects:
+            if not isinstance(nr, dict):
+                continue
+            nr_top = float(nr.get("top", 0.0) or 0.0)
+            nr_height = float(nr.get("height", 0.0) or 0.0)
+            nr_v_center = nr_top + (nr_height / 2.0)
+            if abs(my_v_center - nr_v_center) <= band:
+                close_neighbors += 1
+
+    if word_count <= 2 and height_pct <= 2.5 and width_pct <= 18.0 and close_neighbors <= 1:
+        return "isolated_element"
+    elif word_count >= 4 and close_neighbors >= 1:
+        return "prose"
+    else:
+        return "uncertain"
+
+
+_CACHED_EN_DICT = None
+
+
+def get_english_dictionary_set():
+    """Lazily loads and caches English dictionary words from dictionaries/en_US/en_US.dic if present."""
+    global _CACHED_EN_DICT
+    if _CACHED_EN_DICT is not None:
+        return _CACHED_EN_DICT
+
+    words = set()
+    base_dir = Path(__file__).resolve().parent
+    dict_path = base_dir / "dictionaries" / "en_US" / "en_US.dic"
+    if dict_path.exists():
+        try:
+            with open(dict_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    w = line.strip().split("/")[0].strip()
+                    if w and not w.isdigit():
+                        words.add(w)
+                        words.add(w.lower())
+        except Exception:
+            pass
+    _CACHED_EN_DICT = words
+    return _CACHED_EN_DICT
+
+
 def _parse_detections(detections, threshold):
     """
     Parses PaddleOCR page detections into (accepted_blocks, rejected_blocks).
@@ -239,10 +338,325 @@ def vote_best_word_reading(candidate_variants, dictionary_set, whitelist_set, to
     return winner["word"], winner["avg_conf"], winner["total_score"]
 
 
+def _run_variant_ocr_and_merge(
+    variants,
+    hi_reader,
+    en_reader_factory,
+    per_block_threshold,
+    data,
+    img_width,
+    img_height,
+    combined_dict,
+    whitelist_set,
+    whitelist_lower_set,
+):
+    """
+    Executes PaddleOCR on a set of image variants, runs word-level weighted voting
+    and relative fuzzy dictionary correction, merges missing words against TOP 1 baseline,
+    and returns parsed OCR boxes, confidence, and metadata.
+    """
+    t_ocr_start = time.perf_counter()
+    try:
+        top1_name, top1_img = variants[0]
+        top1_detections = hi_reader.ocr(top1_img, cls=True)
+        top1_accepted, top1_rejected = _parse_detections(top1_detections, per_block_threshold)
+        top1_text = " ".join([b[0] for b in top1_accepted + top1_rejected])
+
+        detected_language = detect_language_from_text(top1_text)
+
+        all_variant_results = []
+        if detected_language == "en":
+            active_en_reader = en_reader_factory(hi_reader)
+            if active_en_reader is not hi_reader:
+                en_det1 = active_en_reader.ocr(top1_img, cls=True)
+                all_variant_results.append(_parse_detections(en_det1, per_block_threshold))
+            else:
+                all_variant_results.append((top1_accepted, top1_rejected))
+
+            for var_name, var_img in variants[1:]:
+                det = active_en_reader.ocr(var_img, cls=True)
+                all_variant_results.append(_parse_detections(det, per_block_threshold))
+        else:
+            all_variant_results.append((top1_accepted, top1_rejected))
+            for var_name, var_img in variants[1:]:
+                det = hi_reader.ocr(var_img, cls=True)
+                all_variant_results.append(_parse_detections(det, per_block_threshold))
+
+        ocr_inference_ms = (time.perf_counter() - t_ocr_start) * 1000
+    except Exception as error:
+        raise RuntimeError(f"PaddleOCR could not read the image: {error}") from error
+
+    # Word-Level Weighted Voting Algorithm (Dictionary: 50, Confidence: 30, Frequency: 20)
+    word_candidates_map = {}
+    for var_accepted, var_rejected in all_variant_results:
+        for item in var_accepted + var_rejected:
+            t = item[0]
+            c = item[1]
+            for w in extract_tokens(t):
+                norm_w = normalize_text_for_comparison(w)
+                if not norm_w:
+                    continue
+                if norm_w not in word_candidates_map:
+                    word_candidates_map[norm_w] = {}
+                if w not in word_candidates_map[norm_w]:
+                    word_candidates_map[norm_w][w] = []
+                word_candidates_map[norm_w][w].append(c)
+
+    voted_replacements = {}
+    suspect_fixes = {}
+
+    for norm_w, cand_dict in word_candidates_map.items():
+        if len(cand_dict) > 1:
+            winner_word, winner_conf, winner_score = vote_best_word_reading(
+                cand_dict, combined_dict, whitelist_set, total_variants=len(variants)
+            )
+            for cand in cand_dict.keys():
+                if cand != winner_word:
+                    voted_replacements[cand] = winner_word
+        elif len(cand_dict) == 1:
+            # A3: Single distinct spelling across all variants -> Fuzzy relative dictionary check
+            single_word = list(cand_dict.keys())[0]
+            occurred_count = len(cand_dict[single_word])
+            sw_clean = single_word.strip()
+            sw_lower = sw_clean.lower()
+
+            if len(sw_clean) <= 1 or sw_clean.isdigit():
+                continue
+            if sw_lower in whitelist_lower_set:
+                continue
+            if sw_clean in combined_dict or sw_lower in combined_dict:
+                continue
+            if tag_pattern_tokens(sw_clean):
+                continue
+
+            w_len = len(sw_clean)
+            cutoff = 0.90 if w_len <= 4 else (0.82 if w_len <= 7 else 0.75)
+
+            best_match = None
+            best_ratio = 0.0
+            candidate_pool = [dw for dw in combined_dict if abs(len(dw) - w_len) <= 1]
+            for dict_word in candidate_pool:
+                dw_lower = dict_word.lower()
+                if sw_clean[0].isalpha() and dict_word[0].isalpha() and sw_lower[0] != dw_lower[0]:
+                    continue
+                ratio = difflib.SequenceMatcher(None, sw_lower, dw_lower).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = dict_word
+
+            if best_match and best_ratio >= cutoff:
+                if occurred_count >= 2 and best_ratio >= 0.90:
+                    voted_replacements[single_word] = best_match
+                else:
+                    suspect_fixes[single_word] = {
+                        "suggested": best_match,
+                        "match_ratio": round(best_ratio, 2),
+                    }
+
+    # Baseline TOP 1 + Missing Word Merging from Variants 2..N
+    expected_phones = list(data.get("expected_phones", []))
+    if not expected_phones and isinstance(data.get("whitelist_words"), list):
+        for w in data.get("whitelist_words", []):
+            cleaned_p = re.sub(r"\D", "", str(w))
+            if len(cleaned_p) == 10 and cleaned_p not in expected_phones:
+                expected_phones.append(cleaned_p)
+
+    target_phones = list(expected_phones)
+
+    accepted_lines = []
+    accepted_line_confs = {}
+    accepted_blocks_data = []
+    seen_line_norms = []
+    seen_words = set()
+    seen_phones = set()
+
+    top1_accepted_blocks, top1_rejected_blocks = all_variant_results[0]
+
+    for item in top1_accepted_blocks:
+        text = item[0]
+        conf = item[1]
+        box = item[2] if len(item) > 2 else []
+        for wrong_w, correct_w in voted_replacements.items():
+            if wrong_w in text:
+                text = re.sub(r'\b' + re.escape(wrong_w) + r'\b', correct_w, text)
+
+        cleaned_text = normalize_phone_numbers(text, target_phones).strip()
+        norm = normalize_text_for_comparison(cleaned_text)
+        if not norm:
+            continue
+
+        if norm in seen_line_norms:
+            continue
+
+        rect = _compute_rect(box, img_width, img_height)
+        accepted_lines.append(cleaned_text)
+        accepted_line_confs[cleaned_text] = conf
+        accepted_blocks_data.append({
+            "text": cleaned_text,
+            "conf": conf,
+            "box": box,
+            "rect": rect,
+        })
+        seen_line_norms.append(norm)
+
+        for w in extract_tokens(cleaned_text):
+            seen_words.add(w.lower())
+            if re.fullmatch(r"\d{10}", w):
+                seen_phones.add(w)
+
+    for var_accepted, _var_rejected in all_variant_results[1:]:
+        for item in var_accepted:
+            text = item[0]
+            conf = item[1]
+            box = item[2] if len(item) > 2 else []
+            for wrong_w, correct_w in voted_replacements.items():
+                if wrong_w in text:
+                    text = re.sub(r'\b' + re.escape(wrong_w) + r'\b', correct_w, text)
+
+            cleaned_text = normalize_phone_numbers(text, target_phones).strip()
+            norm = normalize_text_for_comparison(cleaned_text)
+            if not norm:
+                continue
+
+            if norm in seen_line_norms:
+                continue
+
+            is_line_dup = False
+            for prev_norm in seen_line_norms:
+                if norm in prev_norm or prev_norm in norm:
+                    is_line_dup = True
+                    break
+                cand_digits = re.findall(r"\d+", norm)
+                prev_digits = re.findall(r"\d+", prev_norm)
+                if cand_digits == prev_digits:
+                    if difflib.SequenceMatcher(None, norm, prev_norm).ratio() >= 0.65:
+                        is_line_dup = True
+                        break
+
+            if is_line_dup:
+                continue
+
+            tokens = extract_tokens(cleaned_text)
+            has_duplicate_phone = False
+            for w in tokens:
+                if re.fullmatch(r"\d{10}", w):
+                    if w in seen_phones:
+                        has_duplicate_phone = True
+                        break
+                    for sp in seen_phones:
+                        if sum(1 for c1, c2 in zip(w, sp) if c1 != c2) <= 2:
+                            has_duplicate_phone = True
+                            break
+            if has_duplicate_phone and len(tokens) <= 2:
+                continue
+
+            has_genuinely_new_word = False
+            for w in tokens:
+                nw = w.lower()
+                if nw in seen_words:
+                    continue
+
+                is_word_near_dup = False
+                for sw in seen_words:
+                    if abs(len(nw) - len(sw)) <= 2 and max(len(nw), len(sw)) >= 3:
+                        if difflib.SequenceMatcher(None, nw, sw).ratio() >= 0.65:
+                            is_word_near_dup = True
+                            break
+
+                if not is_word_near_dup:
+                    has_genuinely_new_word = True
+                    break
+
+            if not has_genuinely_new_word:
+                continue
+
+            rect = _compute_rect(box, img_width, img_height)
+            accepted_lines.append(cleaned_text)
+            accepted_line_confs[cleaned_text] = conf
+            accepted_blocks_data.append({
+                "text": cleaned_text,
+                "conf": conf,
+                "box": box,
+                "rect": rect,
+            })
+            seen_line_norms.append(norm)
+
+            for w in tokens:
+                seen_words.add(w.lower())
+                if re.fullmatch(r"\d{10}", w):
+                    seen_phones.add(w)
+
+    ocr_text = "\n".join(accepted_lines)
+    all_rects = [b["rect"] for b in accepted_blocks_data]
+
+    ocr_boxes = []
+    for idx, b_item in enumerate(accepted_blocks_data, start=1):
+        box_text = b_item["text"]
+        box_rect = b_item["rect"]
+        neighbor_rects = [r for i, r in enumerate(all_rects) if i != (idx - 1)]
+
+        region_type = classify_region_type(box_rect, box_text, neighbor_rects)
+        pattern_tags = tag_pattern_tokens(box_text)
+
+        box_suspects = []
+        for tok in extract_tokens(box_text):
+            if tok in suspect_fixes:
+                box_suspects.append({
+                    "word": tok,
+                    "suggested": suspect_fixes[tok]["suggested"],
+                    "match_ratio": suspect_fixes[tok]["match_ratio"],
+                })
+
+        ocr_boxes.append({
+            "id": idx,
+            "text": box_text,
+            "confidence": round(b_item["conf"], 4),
+            "rect": box_rect,
+            "box": b_item["box"],
+            "region_type": region_type,
+            "pattern_tags": pattern_tags,
+            "suspect_words": box_suspects,
+        })
+
+    accepted_confs = list(accepted_line_confs.values())
+    top1_rejected_confs = [b[1] for b in top1_rejected_blocks]
+    all_confs = accepted_confs + top1_rejected_confs
+
+    ocr_blocks_total = len(all_confs)
+    ocr_blocks_excluded_low_confidence = len(top1_rejected_confs)
+
+    if accepted_confs:
+        ocr_confidence_avg = sum(accepted_confs) / len(accepted_confs)
+        ocr_reliable = ocr_confidence_avg >= OCR_CONFIDENCE_THRESHOLD
+    elif all_confs:
+        ocr_confidence_avg = sum(all_confs) / len(all_confs)
+        ocr_reliable = False
+    else:
+        ocr_confidence_avg = 0.0
+        ocr_reliable = False
+
+    return {
+        "ocr_text": ocr_text,
+        "ocr_boxes": ocr_boxes,
+        "ocr_reliable": ocr_reliable,
+        "ocr_confidence_avg": round(ocr_confidence_avg, 4),
+        "ocr_blocks_total": ocr_blocks_total,
+        "ocr_blocks_excluded_low_confidence": ocr_blocks_excluded_low_confidence,
+        "detected_language": detected_language,
+        "inference_ms": ocr_inference_ms,
+        "accepted_lines": accepted_lines,
+    }
+
+
 def process_post(data, reader=None, dictionaries=None):
     """
-    Executes cv2 TOP 7 preprocessing in RAM and runs PaddleOCR on the TOP 7 variants.
-    Deduplicates lines, determines language dynamically, and applies per-block confidence filtering.
+    Two-Tier Escalation Pipeline:
+    1. Runs TOP 7 variants through PaddleOCR (baseline).
+    2. Checks escalation signals:
+       a. ocr_confidence_avg < 0.75
+       b. out-of-dictionary token proportion > 25% (catches matra-breaking errors like 'दवस')
+       c. detected_language == 'hi' AND condition (b) is true
+    3. If any signal triggers, escalates to a clean run of TOP 10 variants from get_top10_variants().
     """
     if not isinstance(data, dict):
         raise ValueError("Input must be a JSON object.")
@@ -260,11 +674,14 @@ def process_post(data, reader=None, dictionaries=None):
     ocr_inference_ms = 0.0
     detected_language = "hi"
     top7_used = []
+    top10_used = []
+    variants_used = 7
     logo_check_result = None
 
     if image_path is not None and not isinstance(image_path, str):
         raise ValueError("image_path must be a string or null.")
 
+    bgr_image = None
     if image_path:
         resolved_image_path = Path(image_path).expanduser().resolve()
         if not resolved_image_path.is_file():
@@ -280,312 +697,168 @@ def process_post(data, reader=None, dictionaries=None):
             except Exception:
                 pass
 
-        if bgr_image is None:
-            return {
-                "ocr_text": "",
-                "ocr_boxes": [],
-                "ocr_reliable": False,
-                "ocr_confidence_avg": 0.0,
-                "ocr_blocks_total": 0,
-                "ocr_blocks_excluded_low_confidence": 0,
-                "detected_language": "hi",
-                "top7_used": [],
-                "_internal_timings": {
-                    "ocr_inference_ms": 0.0,
-                },
+    if bgr_image is None:
+        return {
+            "ocr_text": "",
+            "ocr_boxes": [],
+            "ocr_reliable": False,
+            "ocr_confidence_avg": 0.0,
+            "ocr_blocks_total": 0,
+            "ocr_blocks_excluded_low_confidence": 0,
+            "detected_language": "hi",
+            "top7_used": [],
+            "top10_used": [],
+            "variants_used": 7,
+            "_internal_timings": {
+                "ocr_inference_ms": 0.0,
+            },
+        }
+
+    img_height, img_width = bgr_image.shape[:2]
+    if img_height <= 0:
+        img_height = 1
+    if img_width <= 0:
+        img_width = 1
+
+    # Brand Logo Verification (OpenCV Python SIFT + ORB + Template Matching) - RAM only, downscaled before check
+    ref_logo = data.get("reference_logo_path") or data.get("reference_logo_base64") or data.get("reference_logo")
+    if ref_logo:
+        try:
+            logo_check_result = check_brand_logo(bgr_image, ref_logo)
+            if not logo_check_result.get("checked_by"):
+                logo_check_result["checked_by"] = "Python"
+        except Exception as err:
+            print(f"[ProcessPost] Logo check error: {err}", file=sys.stderr)
+            logo_check_result = {
+                "status": "FAIL",
+                "found": False,
+                "score": 0.0,
+                "location": "unknown",
+                "location_hindi": "Kahin nahi mila",
+                "size_percent": 0,
+                "reason": "MISSING",
+                "suggestion": "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
+                "checked_by": "Python",
             }
 
-        img_height, img_width = bgr_image.shape[:2]
-        if img_height <= 0:
-            img_height = 1
-        if img_width <= 0:
-            img_width = 1
+    # Preload dictionaries and whitelist
+    hindi_dict = get_hindi_dictionary_set()
+    en_dict = get_english_dictionary_set()
+    combined_dict = hindi_dict | en_dict
+    whitelist_set = set(str(w).strip() for w in data.get("whitelist_words", []) if str(w).strip())
+    whitelist_lower_set = {w.lower() for w in whitelist_set}
 
-        # 2. Generate TOP 7 diverse families in RAM via cv2_preprocess.get_top7_variants
-        top7_variants, _scores, top7_names = get_top7_variants(bgr_image)
-        top7_used = list(top7_names)
+    # Reader initialization
+    if reader is None:
+        hi_reader = load_reader(lang="hi")
+    else:
+        hi_reader = reader
 
-        # Brand Logo Verification (OpenCV Python SIFT + ORB + Template Matching) - RAM only, downscaled before check
-        ref_logo = data.get("reference_logo_path") or data.get("reference_logo_base64") or data.get("reference_logo")
-        if ref_logo:
-            try:
-                logo_check_result = check_brand_logo(bgr_image, ref_logo)
-                if not logo_check_result.get("checked_by"):
-                    logo_check_result["checked_by"] = "Python"
-            except Exception as err:
-                print(f"[ProcessPost] Logo check error: {err}", file=sys.stderr)
-                logo_check_result = {
-                    "status": "FAIL",
-                    "found": False,
-                    "score": 0.0,
-                    "location": "unknown",
-                    "location_hindi": "Kahin nahi mila",
-                    "size_percent": 0,
-                    "reason": "MISSING",
-                    "suggestion": "Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.",
-                    "checked_by": "Python",
-                }
-
-        # 3. Initialize reader (use provided reader if available, else load hi)
-        if reader is None:
-            hi_reader = load_reader(lang="hi")
-        else:
-            hi_reader = reader
-
-        t_ocr_start = time.perf_counter()
-        try:
-            # a) Run TOP 1 variant with hi reader
-            top1_name, top1_img = top7_variants[0]
-            top1_detections = hi_reader.ocr(top1_img, cls=True)
-            top1_accepted, top1_rejected = _parse_detections(top1_detections, per_block_threshold)
-            top1_text = " ".join([b[0] for b in top1_accepted + top1_rejected])
-
-            # b) Detect language from TOP 1 text
-            detected_language = detect_language_from_text(top1_text)
-
-            all_variant_results = []
-            if detected_language == "en":
-                # Create en reader lazily if real reader; reuse mock if in tests
-                if type(hi_reader).__name__ == "MagicMock":
-                    en_reader = hi_reader
-                else:
-                    try:
-                        en_reader = get_en_reader()
-                    except Exception:
-                        en_reader = hi_reader
-
-                # Re-run all 7 variants with en reader
-                for var_name, var_img in top7_variants:
-                    det = en_reader.ocr(var_img, cls=True)
-                    all_variant_results.append(_parse_detections(det, per_block_threshold))
+    en_reader = None
+    def en_reader_factory(hi_reader_instance):
+        nonlocal en_reader
+        if en_reader is None:
+            if type(hi_reader_instance).__name__ == "MagicMock":
+                en_reader = hi_reader_instance
             else:
-                # Keep TOP 1 result, run remaining 6 variants with hi reader
-                all_variant_results.append((top1_accepted, top1_rejected))
-                for var_name, var_img in top7_variants[1:]:
-                    det = hi_reader.ocr(var_img, cls=True)
-                    all_variant_results.append(_parse_detections(det, per_block_threshold))
+                try:
+                    en_reader = get_en_reader()
+                except Exception:
+                    en_reader = hi_reader_instance
+        return en_reader
 
-            ocr_inference_ms = (time.perf_counter() - t_ocr_start) * 1000
-        except Exception as error:
-            raise RuntimeError(f"PaddleOCR could not read the image: {error}") from error
+    # Tier 1: Always run TOP 7 first (7 variants through PaddleOCR)
+    top7_variants, _scores7, top7_names = get_top7_variants(bgr_image)
+    res7 = _run_variant_ocr_and_merge(
+        top7_variants,
+        hi_reader,
+        en_reader_factory,
+        per_block_threshold,
+        data,
+        img_width,
+        img_height,
+        combined_dict,
+        whitelist_set,
+        whitelist_lower_set,
+    )
 
-        # Word-Level Weighted Voting Algorithm (Dictionary: 50, Confidence: 30, Frequency: 20)
-        hindi_dict = get_hindi_dictionary_set()
-        whitelist_set = set(str(w).strip() for w in data.get("whitelist_words", []) if str(w).strip())
-
-        word_candidates_map = {}
-        for var_accepted, var_rejected in all_variant_results:
-            for item in var_accepted + var_rejected:
-                t = item[0]
-                c = item[1]
-                for w in extract_tokens(t):
-                    norm_w = normalize_text_for_comparison(w)
-                    if not norm_w:
-                        continue
-                    if norm_w not in word_candidates_map:
-                        word_candidates_map[norm_w] = {}
-                    if w not in word_candidates_map[norm_w]:
-                        word_candidates_map[norm_w][w] = []
-                    word_candidates_map[norm_w][w].append(c)
-
-        voted_replacements = {}
-        for norm_w, cand_dict in word_candidates_map.items():
-            if len(cand_dict) > 1:
-                winner_word, winner_conf, winner_score = vote_best_word_reading(
-                    cand_dict, hindi_dict, whitelist_set, total_variants=len(top7_variants)
-                )
-                for cand in cand_dict.keys():
-                    if cand != winner_word:
-                        voted_replacements[cand] = winner_word
-
-        # c) Primary TOP 1 Baseline + Intelligent Missing-Word Merging from Variants 2..10
-        expected_phones = list(data.get("expected_phones", []))
-        if not expected_phones and isinstance(data.get("whitelist_words"), list):
-            for w in data.get("whitelist_words", []):
-                cleaned_p = re.sub(r"\D", "", str(w))
-                if len(cleaned_p) == 10 and cleaned_p not in expected_phones:
-                    expected_phones.append(cleaned_p)
-
-        target_phones = list(expected_phones)
-
-        accepted_lines = []
-        accepted_line_confs = {}
-        accepted_blocks_data = []
-        seen_line_norms = []
-        seen_words = set()
-        seen_phones = set()
-
-        # Step 1: Ingest TOP 1 (Authoritative Primary) with Voted Word Replacements
-        top1_accepted_blocks, top1_rejected_blocks = all_variant_results[0]
-
-        for item in top1_accepted_blocks:
-            text = item[0]
-            conf = item[1]
-            box = item[2] if len(item) > 2 else []
-            for wrong_w, correct_w in voted_replacements.items():
-                if wrong_w in text:
-                    text = re.sub(r'\b' + re.escape(wrong_w) + r'\b', correct_w, text)
-
-            cleaned_text = normalize_phone_numbers(text, target_phones).strip()
-            norm = normalize_text_for_comparison(cleaned_text)
-            if not norm:
+    # Escalation signals evaluation:
+    # a. ocr_confidence_avg < 0.75
+    # b. out-of-dictionary tokens proportion > 25% (catches matra-breaking like "दिवस" -> "दवस")
+    # c. detected_language == "hi" and out_of_dict_ratio > 0.25
+    eval_tokens = []
+    for box in res7["ocr_boxes"]:
+        box_text = box.get("text", "")
+        for tok in extract_tokens(box_text):
+            clean_tok = tok.strip()
+            if len(clean_tok) <= 1 or clean_tok.isdigit():
                 continue
-
-            # Within TOP 1, drop exact duplicates
-            if norm in seen_line_norms:
+            if tag_pattern_tokens(clean_tok):
                 continue
+            eval_tokens.append(clean_tok)
 
-            rect = _compute_rect(box, img_width, img_height)
-            accepted_lines.append(cleaned_text)
-            accepted_line_confs[cleaned_text] = conf
-            accepted_blocks_data.append({
-                "text": cleaned_text,
-                "conf": conf,
-                "box": box,
-                "rect": rect,
-            })
-            seen_line_norms.append(norm)
+    if eval_tokens:
+        out_of_dict_count = sum(
+            1 for tok in eval_tokens
+            if tok not in combined_dict
+            and tok.lower() not in combined_dict
+            and tok not in whitelist_set
+            and tok.lower() not in whitelist_lower_set
+        )
+        out_of_dict_ratio = out_of_dict_count / len(eval_tokens)
+    else:
+        out_of_dict_ratio = 0.0
 
-            for w in extract_tokens(cleaned_text):
-                seen_words.add(w.lower())
-                if re.fullmatch(r"\d{10}", w):
-                    seen_phones.add(w)
+    cond_a = res7["ocr_confidence_avg"] < 0.75
+    cond_b = out_of_dict_ratio > 0.25
+    cond_c = (res7["detected_language"] == "hi") and cond_b
 
-        # Step 2: Selectively inspect Variants 2..10 for MISSING words/blocks only
-        for var_accepted, _var_rejected in all_variant_results[1:]:
-            for item in var_accepted:
-                text = item[0]
-                conf = item[1]
-                box = item[2] if len(item) > 2 else []
-                for wrong_w, correct_w in voted_replacements.items():
-                    if wrong_w in text:
-                        text = re.sub(r'\b' + re.escape(wrong_w) + r'\b', correct_w, text)
+    escalate_to_top10 = cond_a or cond_b or cond_c
 
-                cleaned_text = normalize_phone_numbers(text, target_phones).strip()
-                norm = normalize_text_for_comparison(cleaned_text)
-                if not norm:
-                    continue
-
-                # 1. Line-level similarity check against all accepted lines
-                if norm in seen_line_norms:
-                    continue
-
-                is_line_dup = False
-                for prev_norm in seen_line_norms:
-                    if norm in prev_norm or prev_norm in norm:
-                        is_line_dup = True
-                        break
-                    # Fuzzy match only if numbers match or both have no numbers
-                    cand_digits = re.findall(r"\d+", norm)
-                    prev_digits = re.findall(r"\d+", prev_norm)
-                    if cand_digits == prev_digits:
-                        if difflib.SequenceMatcher(None, norm, prev_norm).ratio() >= 0.65:
-                            is_line_dup = True
-                            break
-
-                if is_line_dup:
-                    continue
-
-                # 2. Check 10-digit phone deduplication
-                tokens = extract_tokens(cleaned_text)
-                has_duplicate_phone = False
-                for w in tokens:
-                    if re.fullmatch(r"\d{10}", w):
-                        if w in seen_phones:
-                            has_duplicate_phone = True
-                            break
-                        for sp in seen_phones:
-                            if sum(1 for c1, c2 in zip(w, sp) if c1 != c2) <= 2:
-                                has_duplicate_phone = True
-                                break
-                if has_duplicate_phone and len(tokens) <= 2:
-                    continue
-
-                # 3. Word-level novelty check: Does this line contain any truly missing words?
-                has_genuinely_new_word = False
-                for w in tokens:
-                    nw = w.lower()
-                    if nw in seen_words:
-                        continue
-
-                    # Fuzzy match against already seen words of comparable length
-                    is_word_near_dup = False
-                    for sw in seen_words:
-                        if abs(len(nw) - len(sw)) <= 2 and max(len(nw), len(sw)) >= 3:
-                            if difflib.SequenceMatcher(None, nw, sw).ratio() >= 0.65:
-                                is_word_near_dup = True
-                                break
-
-                    if not is_word_near_dup:
-                        has_genuinely_new_word = True
-                        break
-
-                if not has_genuinely_new_word:
-                    continue
-
-                # Truly new text found in this variant - merge it into accepted lines
-                rect = _compute_rect(box, img_width, img_height)
-                accepted_lines.append(cleaned_text)
-                accepted_line_confs[cleaned_text] = conf
-                accepted_blocks_data.append({
-                    "text": cleaned_text,
-                    "conf": conf,
-                    "box": box,
-                    "rect": rect,
-                })
-                seen_line_norms.append(norm)
-
-                for w in tokens:
-                    seen_words.add(w.lower())
-                    if re.fullmatch(r"\d{10}", w):
-                        seen_phones.add(w)
-
-        ocr_text = "\n".join(accepted_lines)
-        ocr_boxes = []
-        for idx, b_item in enumerate(accepted_blocks_data, start=1):
-            ocr_boxes.append({
-                "id": idx,
-                "text": b_item["text"],
-                "confidence": round(b_item["conf"], 4),
-                "rect": b_item["rect"],
-                "box": b_item["box"],
-            })
-
-        accepted_confs = list(accepted_line_confs.values())
-        top1_rejected_confs = [b[1] for b in top1_rejected_blocks]
-        all_confs = accepted_confs + top1_rejected_confs
-
-        ocr_blocks_total = len(all_confs)
-        ocr_blocks_excluded_low_confidence = len(top1_rejected_confs)
-
-        if accepted_confs:
-            ocr_confidence_avg = sum(accepted_confs) / len(accepted_confs)
-            ocr_reliable = ocr_confidence_avg >= OCR_CONFIDENCE_THRESHOLD
-        elif all_confs:
-            ocr_confidence_avg = sum(all_confs) / len(all_confs)
-            ocr_reliable = False
-        else:
-            ocr_confidence_avg = 0.0
-            ocr_reliable = False
+    if escalate_to_top10:
+        # Tier 2 Escalation: clean full run on all 10 variants from get_top10_variants()
+        top10_variants, _scores10, top10_names = get_top10_variants(bgr_image)
+        res10 = _run_variant_ocr_and_merge(
+            top10_variants,
+            hi_reader,
+            en_reader_factory,
+            per_block_threshold,
+            data,
+            img_width,
+            img_height,
+            combined_dict,
+            whitelist_set,
+            whitelist_lower_set,
+        )
+        final_res = res10
+        variants_used = 10
+        used_names = top10_names
+        total_inference_ms = res7["inference_ms"] + res10["inference_ms"]
+    else:
+        final_res = res7
+        variants_used = 7
+        used_names = top7_names
+        total_inference_ms = res7["inference_ms"]
 
     fallback_reason = data.get("fallback_reason") or "gemini_failed"
 
     return {
-        "ocr_text": ocr_text,
-        "ocr_boxes": ocr_boxes,
-        "ocr_reliable": ocr_reliable,
-        "ocr_confidence_avg": round(ocr_confidence_avg, 4),
-        "ocr_blocks_total": ocr_blocks_total,
-        "ocr_blocks_excluded_low_confidence": ocr_blocks_excluded_low_confidence,
-        "detected_language": detected_language,
-        "top7_used": top7_used,
-        "top10_used": top7_used,
+        "ocr_text": final_res["ocr_text"],
+        "ocr_boxes": final_res["ocr_boxes"],
+        "ocr_reliable": final_res["ocr_reliable"],
+        "ocr_confidence_avg": final_res["ocr_confidence_avg"],
+        "ocr_blocks_total": final_res["ocr_blocks_total"],
+        "ocr_blocks_excluded_low_confidence": final_res["ocr_blocks_excluded_low_confidence"],
+        "detected_language": final_res["detected_language"],
+        "top7_used": top7_names,
+        "top10_used": used_names,
+        "variants_used": variants_used,
         "logo_check": logo_check_result,
         "ai_provider": "python",
         "fallback_used": True,
         "fallback_reason": fallback_reason,
         "_internal_timings": {
-            "ocr_inference_ms": round(ocr_inference_ms, 2),
+            "ocr_inference_ms": round(total_inference_ms, 2),
         },
     }
 
@@ -606,6 +879,8 @@ def main():
             "ocr_blocks_excluded_low_confidence": 0,
             "detected_language": "hi",
             "top7_used": [],
+            "top10_used": [],
+            "variants_used": 7,
         }
 
     sys.stdout.buffer.write(json.dumps(result).encode("ascii") + b"\n")

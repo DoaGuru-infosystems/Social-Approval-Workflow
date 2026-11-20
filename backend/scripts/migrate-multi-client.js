@@ -29,10 +29,10 @@ async function migrate() {
 
       const [res] = await connection.query(
         'INSERT INTO clients (name, created_by_admin_id, is_active) VALUES (?, ?, TRUE)',
-        ['Apex Health & Fitness', adminId]
+        ['Default Client', adminId]
       );
       defaultClientId = res.insertId;
-      console.log(`✓ Created default client 'Apex Health & Fitness' (ID: ${defaultClientId})`);
+      console.log(`✓ Created default client 'Default Client' (ID: ${defaultClientId})`);
     } else {
       defaultClientId = existingClients[0].id;
       console.log(`✓ Using existing client '${existingClients[0].name}' (ID: ${defaultClientId})`);
@@ -64,9 +64,9 @@ async function migrate() {
          VALUES (?, ?, ?, ?)`,
         [
           defaultClientId,
-          JSON.stringify(['Apex', 'ApexHealth', 'Insta', 'FitFam', 'नमस्ते', 'स्वास्थ्य']),
-          JSON.stringify(['guaranteed', 'scam', 'fraud', 'cure-all', 'जाली']),
-          JSON.stringify(['#ApexHealth', 'Consult physician']),
+          JSON.stringify([]),
+          JSON.stringify([]),
+          JSON.stringify([]),
         ]
       );
       console.log(`✓ Seeded default brand guidelines for client ID ${defaultClientId}.`);

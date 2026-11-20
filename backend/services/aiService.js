@@ -337,6 +337,18 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
   let grammarSuggestions = [];
   let keyError = null;
 
+  const isPatternToken = (w) => {
+    if (!w) return false;
+    const s = String(w).trim();
+    return (
+      /^(https?:\/\/|www\.)/i.test(s) ||
+      /@/.test(s) ||
+      /^\+?\d{10,}$/.test(s) ||
+      s.startsWith('#') ||
+      s.startsWith('@')
+    );
+  };
+
   const gmbData = {
     officialName: guidelines.gmb_official_name,
     autoWhitelist: guidelines.gmb_auto_whitelist,
@@ -370,6 +382,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         ? await spellCheckService.checkText(combinedText, guidelines.whitelist)
         : [];
       spellingIssues = rawSpelling.filter((issue) => {
+        if (isPatternToken(issue.word)) return false;
         if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
@@ -388,12 +401,14 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
       grammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
     }
 
-    // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
+    // Node Whitelist & Pattern Filter: If Gemini flagged any whitelist word or pattern token, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
+      if (isPatternToken(issue.word)) return false;
       if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     grammarSuggestions = grammarSuggestions.filter((item) => {
+      if (isPatternToken(item.original)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
     });
   } else {
@@ -425,6 +440,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         : [];
 
       spellingIssues = rawSpellingIssues.filter((issue) => {
+        if (isPatternToken(issue.word)) return false;
         if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
@@ -443,12 +459,14 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
       grammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
     }
 
-    // Node Whitelist Filter: If Gemini flagged any whitelist word, remove it!
+    // Node Whitelist & Pattern Filter: If Gemini flagged any whitelist word or pattern token, remove it!
     spellingIssues = spellingIssues.filter((issue) => {
+      if (isPatternToken(issue.word)) return false;
       if (isBrandCandidateError(issue.word, guidelines.organization_name, guidelines.gmb_official_name)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
     });
     grammarSuggestions = grammarSuggestions.filter((item) => {
+      if (isPatternToken(item.original)) return false;
       return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
     });
   }
@@ -887,11 +905,35 @@ const buildAnnotatedPosterBoxes = ({
     let statusLabel = 'GREEN = OK';
     let reason = `Verified OK (Confidence ${confPercent}%).`;
 
+    const regionType = item.region_type || 'prose';
+    const patternTags = item.pattern_tags || [];
+    const suspectWords = item.suspect_words || [];
+
+    // Helper: check if a word is part of pattern_tags (e.g. url, email, phone, hashtag, handle)
+    const isTokenPatternTagged = (w) => {
+      if (!w) return false;
+      const lowerW = String(w).toLowerCase();
+      if (patternTags.some((pt) => String(pt.value || '').toLowerCase().includes(lowerW))) {
+        return true;
+      }
+      if (
+        /^(https?:\/\/|www\.)/i.test(w) ||
+        /@/.test(w) ||
+        /^\+?\d{10,}$/.test(w) ||
+        w.startsWith('#') ||
+        w.startsWith('@')
+      ) {
+        return true;
+      }
+      return false;
+    };
+
     // Check for confirmed spelling issue in this clear box
     const boxSpellError = (spellingIssues || []).find((issue) => {
       if (!issue || !issue.word) return false;
       const cleanIssueWord = String(issue.word).toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
       if (!cleanIssueWord) return false;
+      if (isTokenPatternTagged(issue.word)) return false; // Exclude pattern-tagged spans
       const cleanBoxText = text.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
       return cleanBoxText.includes(cleanIssueWord);
     });
@@ -900,6 +942,9 @@ const buildAnnotatedPosterBoxes = ({
     const isSpellWordWhitelisted = boxSpellError
       ? brandRulesService.fuzzyMatchWhitelist(boxSpellError.word, whitelist, 88)
       : false;
+
+    // Is this block an isolated UI element (numbers, icons, UI chrome)?
+    const isIsolatedElement = regionType === 'isolated_element';
 
     if (matchedBanned) {
       status = 'red';
@@ -910,11 +955,30 @@ const buildAnnotatedPosterBoxes = ({
       status = 'red';
       statusLabel = 'RED = Real Error';
       reason = brandErrorReason;
+    } else if (isIsolatedElement) {
+      // B1: If region_type === "isolated_element", EXCLUDE from spelling checks (UI chrome)
+      status = 'green';
+      statusLabel = 'GREEN = OK';
+      reason = 'Isolated UI element — spelling check skipped (UI chrome).';
     } else if (boxSpellError && !isSpellWordWhitelisted) {
-      // Confirmed spelling error on poster is ALWAYS a strict RED FLAG (Real Error)
-      status = 'red';
-      statusLabel = 'RED = Real Error';
-      reason = `Spelling error detected on poster: "${boxSpellError.word}"${boxSpellError.suggestion ? ` (Did you mean: "${boxSpellError.suggestion}"?)` : ''}`;
+      // B1: If region_type === "uncertain", cap max severity at YELLOW even if dictionary mismatch
+      if (regionType === 'uncertain') {
+        status = 'yellow';
+        statusLabel = 'YELLOW = Manual Check';
+        reason = `Spelling uncertainty: "${boxSpellError.word}" (geometric region uncertain — manual check recommended)`;
+      } else {
+        // Confirmed spelling error on prose poster is a strict RED FLAG
+        status = 'red';
+        statusLabel = 'RED = Real Error';
+        reason = `Spelling error detected on poster: "${boxSpellError.word}"${boxSpellError.suggestion ? ` (Did you mean: "${boxSpellError.suggestion}"?)` : ''}`;
+      }
+    } else if (suspectWords && suspectWords.length > 0) {
+      // B1: Surface suspect_words as a YELLOW "OCR Doubt" — never RED, never auto-correct
+      const firstSuspect = suspectWords[0];
+      status = 'yellow';
+      statusLabel = 'YELLOW = Manual Check';
+      reason = `OCR Doubt — possible misread: '${firstSuspect.word}' could be '${firstSuspect.suggested}' (not confirmed)`;
+      posterExpected = firstSuspect.suggested;
     } else if (hasPhoneMismatch) {
       // Phone mismatch: YELLOW = Manual Check (do not quietly auto-correct)
       status = 'yellow';
@@ -948,6 +1012,9 @@ const buildAnnotatedPosterBoxes = ({
       status_label: statusLabel,
       confidence: confPercent,
       reason,
+      region_type: regionType,
+      pattern_tags: patternTags,
+      suspect_words: suspectWords,
     });
   });
 
@@ -1450,6 +1517,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     grammar_suggestions: imageGrammarSuggestions,
     ocr_engine: ocrEngineUsed,
     ai_provider: aiProvider,
+    variants_used: remoteResult?.variants_used || (aiProvider === 'gemini' ? null : 7),
     fallback_used: fallbackUsed,
     fallback_reason: fallbackReason,
     key_error: imageKeyError,

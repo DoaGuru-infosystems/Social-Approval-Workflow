@@ -103,6 +103,62 @@ const LOCATION_HINDI_MAP = {
   unknown: 'Kahin nahi mila',
 };
 
+const PATTERN_REGEXES = {
+  email: /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g,
+  url: /\b(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?(?:\/\S*)?\b/g,
+  phone: /\b(?:\+?\d{1,3}[-\s]?)?\d{10}\b/g,
+  hashtag: /#\w[\w]*/g,
+  handle: /(?<!\w)@\w[\w.]*/g,
+};
+
+const tagPatternTokens = (text) => {
+  if (!text || typeof text !== 'string') return [];
+  const tags = [];
+  for (const [pType, regex] of Object.entries(PATTERN_REGEXES)) {
+    let m;
+    regex.lastIndex = 0;
+    while ((m = regex.exec(text)) !== null) {
+      tags.push({
+        type: pType,
+        value: m[0],
+        start: m.index,
+        end: m.index + m[0].length,
+      });
+    }
+  }
+  tags.sort((a, b) => a.start - b.start);
+  return tags;
+};
+
+const classifyRegionType = (rect, text, neighborRects = []) => {
+  if (!rect) return 'uncertain';
+  const tokens = String(text || '').trim().split(/\s+/).filter(Boolean);
+  const wordCount = tokens.length;
+  const heightPct = Number(rect.height || 0);
+  const widthPct = Number(rect.width || 0);
+  const topPct = Number(rect.top || 0);
+  const myVCenter = topPct + (heightPct / 2.0);
+  const band = 1.5 * Math.max(heightPct, 0.5);
+
+  let closeNeighbors = 0;
+  for (const nr of neighborRects) {
+    if (!nr) continue;
+    const nrTop = Number(nr.top || 0);
+    const nrHeight = Number(nr.height || 0);
+    const nrVCenter = nrTop + (nrHeight / 2.0);
+    if (Math.abs(myVCenter - nrVCenter) <= band) {
+      closeNeighbors += 1;
+    }
+  }
+
+  if (wordCount <= 2 && heightPct <= 2.5 && widthPct <= 18.0 && closeNeighbors <= 1) {
+    return 'isolated_element';
+  } else if (wordCount >= 4 && closeNeighbors >= 1) {
+    return 'prose';
+  }
+  return 'uncertain';
+};
+
 const SUGGESTION_RULES = {
   MISSING: 'Logo post me kahin nahi mila. Logo ko neeche right corner me saaf jagah pe lagayein.',
   WRONG_LOGO: 'Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein.',
@@ -327,6 +383,15 @@ const runGoogleVisionPostCheck = async ({
       },
     };
   }).filter((b) => b.text.length > 0);
+
+  // Calculate region_type and pattern_tags for each normalized box
+  const allGeminiRects = normalizedBoxes.map((b) => b.rect);
+  normalizedBoxes.forEach((b, i) => {
+    const neighborRects = allGeminiRects.filter((_, idx) => idx !== i);
+    b.region_type = classifyRegionType(b.rect, b.text, neighborRects);
+    b.pattern_tags = tagPatternTokens(b.text);
+    b.suspect_words = [];
+  });
 
   let avgConf = Number(parsed.ocr_confidence_avg);
   if (!Number.isFinite(avgConf) || avgConf <= 0) {

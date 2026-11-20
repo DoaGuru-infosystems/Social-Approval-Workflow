@@ -14,10 +14,8 @@ const VALID_SHORT_WORDS = new Set([
   'जब', 'तब', 'कम', 'मन', 'तन', 'घर', 'चल', 'सच', 'हक', 'एक', 'व', 'न'
 ]);
 
-// Known standard uppercase acronyms (medical, tech, etc.)
-const KNOWN_UPPERCASE_ACRONYMS = new Set([
-  'MBBS', 'DNB', 'OPD', 'EEG', 'IAP', 'PDA', 'ICU', 'MRI', 'CT', 'ECG', 'WHO', 'AI'
-]);
+// Generic uppercase acronym pattern (2-6 letters, e.g. SEO, MBBS, CRM, GST, ICU)
+const UPPERCASE_ACRONYM_REGEX = /^[A-Z]{2,6}$/;
 
 /**
  * Detailed analysis of an OCR token to detect visual garbage/noise.
@@ -38,16 +36,24 @@ const analyzeToken = (token, whitelist = null) => {
   // Whitelist bypass: If token is in client whitelist, never treat as garbage
   const lowered = raw.toLowerCase();
   if (whitelist) {
-    if (whitelist instanceof Set && whitelist.has(lowered)) {
-      return { isGarbage: false, reason: null };
-    }
-    if (Array.isArray(whitelist) && whitelist.some((w) => typeof w === 'string' && w.toLowerCase() === lowered)) {
-      return { isGarbage: false, reason: null };
+    if (whitelist instanceof Set) {
+      if (whitelist.has(lowered) || whitelist.has(raw)) {
+        return { isGarbage: false, reason: null };
+      }
+      for (const w of whitelist) {
+        if (typeof w === 'string' && w.toLowerCase() === lowered) {
+          return { isGarbage: false, reason: null };
+        }
+      }
+    } else if (Array.isArray(whitelist)) {
+      if (whitelist.some((w) => typeof w === 'string' && (w.toLowerCase() === lowered || w === raw))) {
+        return { isGarbage: false, reason: null };
+      }
     }
   }
 
-  // Known uppercase acronym bypass (e.g. MBBS, OPD, DNB)
-  if (KNOWN_UPPERCASE_ACRONYMS.has(raw.toUpperCase())) {
+  // Generic uppercase acronym bypass (2-6 letters, e.g. SEO, MBBS, CRM, GST, ICU)
+  if (UPPERCASE_ACRONYM_REGEX.test(raw)) {
     return { isGarbage: false, reason: null };
   }
 

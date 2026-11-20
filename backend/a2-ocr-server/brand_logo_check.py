@@ -324,6 +324,18 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
                     if len(inlier_pts) >= 4:
                         x, y, w, h = cv2.boundingRect(inlier_pts)
                         sift_box = (x, y, w, h)
+
+                        # A5: Spatial consistency guard against scattered inliers across cluttered poster
+                        pts_2d = inlier_pts.reshape(-1, 2)
+                        w_ratio = w / float(post_w)
+                        h_ratio = h / float(post_h)
+                        std_x = float(np.std(pts_2d[:, 0]))
+                        std_y = float(np.std(pts_2d[:, 1]))
+
+                        # If points are scattered over > 60% of poster in either dimension
+                        # or std dev indicates diffuse scatter rather than a localized cluster
+                        if w_ratio > 0.60 or h_ratio > 0.60 or (std_x > post_w * 0.25 and std_y > post_h * 0.25):
+                            sift_score *= 0.3
     except Exception:
         pass
 

@@ -12,7 +12,12 @@ const findBannedWords = (text, bannedWordsList) => {
     return [];
   }
 
-  const loweredText = text.toLowerCase();
+  // Strip URLs and emails so domain/email tokens are not falsely matched as banned words
+  const textWithoutPatterns = String(text)
+    .replace(/\b(?:https?:\/\/)?(?:www\.)?[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?(?:\/\S*)?\b/gi, ' ')
+    .replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/gi, ' ');
+
+  const loweredText = textWithoutPatterns.toLowerCase();
   const found = [];
 
   for (const word of bannedWordsList) {
