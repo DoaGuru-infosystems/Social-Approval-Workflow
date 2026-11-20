@@ -213,6 +213,10 @@ const createPost = async (req, res) => {
       noise_tokens: [],
       banned_words_found: [],
       brand_identity_check: null,
+      logo_check: null,
+      ai_provider: 'gemini',
+      fallback_used: false,
+      fallback_reason: 'none',
     });
 
     // 5. Insert into posts table
@@ -259,8 +263,7 @@ const createPost = async (req, res) => {
         initialAiCheck.fallback_reason || 'none',
       ]
     );
-      ]
-    );
+    
 
     // 8. If image exists, kick off background image check immediately (non-blocking)
     if (hasImage) {
@@ -397,6 +400,10 @@ const revisePost = async (req, res) => {
       noise_tokens: [],
       banned_words_found: [],
       brand_identity_check: null,
+      logo_check: null,
+      ai_provider: 'gemini',
+      fallback_used: false,
+      fallback_reason: 'none',
     });
 
     // Fetch current max revision number
@@ -444,8 +451,6 @@ const revisePost = async (req, res) => {
         initialAiCheck.ai_provider || 'gemini',
         initialAiCheck.fallback_used ? 1 : 0,
         initialAiCheck.fallback_reason || 'none',
-      ]
-    );
       ]
     );
 
