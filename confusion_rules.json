@@ -1,0 +1,27 @@
+{
+  "rules": [
+    { "pattern": "नःशुलक", "replacement": "निःशुल्क", "context": "exact_word", "reason": "Matra visarga confusion and split consonant fix" },
+    { "pattern": "नःशुल्क", "replacement": "निःशुल्क", "context": "exact_word", "reason": "Matra visarga confusion fix" },
+    { "pattern": "निःशुलक", "replacement": "निःशुल्क", "context": "exact_word", "reason": "Half character halant fix" },
+    { "pattern": "निशुल्क", "replacement": "निःशुल्क", "context": "exact_word", "reason": "Missing visarga fix" },
+    { "pattern": "निशुलक", "replacement": "निःशुल्क", "context": "exact_word", "reason": "Missing visarga and split consonant fix" },
+    { "pattern": "नः", "replacement": "निः", "context": "start_of_word", "reason": "Prefix visarga confusion for choti-i" },
+    { "pattern": "सुंबह", "replacement": "सुबह", "context": "exact_word", "reason": "Spurious anusvara removal on consonant" },
+    { "pattern": "सुंबहा", "replacement": "सुबह", "context": "exact_word", "reason": "Spurious anusvara removal on consonant" },
+    { "pattern": "अंस्पताल", "replacement": "अस्पताल", "context": "exact_word", "reason": "Spurious anusvara removal on consonant" },
+    { "pattern": "अस्पंतााल", "replacement": "अस्पताल", "context": "exact_word", "reason": "Spurious anusvara removal on consonant" },
+    { "pattern": "डॉंक्टर", "replacement": "डॉक्टर", "context": "exact_word", "reason": "Spurious anusvara removal on candrabindu" },
+    { "pattern": "डांक्टर", "replacement": "डॉक्टर", "context": "exact_word", "reason": "OCR matra confusion fix" },
+    { "pattern": "संबय", "replacement": "समय", "context": "exact_word", "reason": "Spurious anusvara and character confusion" },
+    { "pattern": "संबमय", "replacement": "समय", "context": "exact_word", "reason": "OCR stuttering and anusvara fix" },
+    { "pattern": "अपांइटमेंट", "replacement": "अपॉइंटमेंट", "context": "exact_word", "reason": "Matra anusvara confusion fix" },
+    { "pattern": "अपॉंइंटमेंट", "replacement": "अपॉइंटमेंट", "context": "exact_word", "reason": "Double vowel mark fix" },
+    { "pattern": "विशेषंज्ञ", "replacement": "विशेषज्ञ", "context": "exact_word", "reason": "Spurious anusvara removal" },
+    { "pattern": "मोंतियाबिंद", "replacement": "मोतियाबिंद", "context": "exact_word", "reason": "Spurious anusvara removal" },
+    { "pattern": "उंपलब्ध", "replacement": "उपलब्ध", "context": "exact_word", "reason": "Spurious anusvara removal" },
+    { "pattern": "सुंविधा", "replacement": "सुविधा", "context": "exact_word", "reason": "Spurious anusvara removal" },
+    { "pattern": "रांझीं", "replacement": "रांझी", "context": "exact_word", "reason": "Trailing anusvara removal" },
+    { "pattern": "ऑंपरेशन", "replacement": "ऑपरेशन", "context": "exact_word", "reason": "Spurious anusvara removal" },
+    { "pattern": "दःख", "replacement": "दुःख", "context": "exact_word", "reason": "Missing matra before visarga fix" }
+  ]
+}

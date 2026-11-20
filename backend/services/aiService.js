@@ -291,15 +291,16 @@ const isBrandCandidateError = (word, orgName, gmbName = '') => {
   if (!word || (!orgName && !gmbName)) return false;
   const cleanW = String(word).trim().toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
   if (cleanW.length < 3) return false;
+  if (crossClientService.isProfessionalTerm(cleanW)) return false;
 
   const namesToCheck = [orgName, gmbName].filter(Boolean);
   for (const name of namesToCheck) {
-    const orgWords = name.trim().toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+    const orgWords = name.trim().toLowerCase().split(/\s+/).filter((w) => w.length >= 3 && !crossClientService.isProfessionalTerm(w));
     for (const ow of orgWords) {
       const cleanOw = ow.replace(/[^\w\u0900-\u097f]/g, '');
       if (!cleanOw || cleanOw.length < 3) continue;
       const sim = fuzzball.ratio(cleanW, cleanOw);
-      if (sim >= 50 && sim < 95) {
+      if (sim >= 80 && sim < 95) {
         return true;
       }
     }
@@ -471,6 +472,12 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
       return !brandRulesService.fuzzyMatchWhitelist(item.original, guidelines.whitelist, 80);
     });
   }
+
+  // Tag all text spelling issues as HUMAN_ERROR (caption/title errors are typed by humans, never OCR errors)
+  spellingIssues = spellingIssues.map((issue) => ({
+    ...issue,
+    error_type: 'HUMAN_ERROR',
+  }));
 
   // 3. Brand Compliance: Banned Words Check (against combinedText in Node)
   const bannedWordsFound = combinedText.trim()
@@ -834,10 +841,13 @@ const buildAnnotatedPosterBoxes = ({
       const cleanBoxText = text.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
       const fullOrgSim = fuzzball.ratio(cleanBoxText, cleanOrgFull);
 
-      if (cleanPrimary.length >= 3 && bestPrimarySim >= 55 && bestPrimarySim < 95) {
-        hasBrandNameError = true;
-        brandErrorReason = `Poster me hi brand name galat likha hai: "${bestPrimaryCandidate}" vs official "${primaryWord}" (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer ko bolo: Poster me ${bestPrimaryCandidate} ki jagah ${primaryWord} likho.`;
-      } else if (bestPrimarySim >= 95 || fullOrgSim >= 95) {
+      if (cleanPrimary.length >= 4 && bestPrimarySim >= 80 && bestPrimarySim < 95) {
+        const isProf = crossClientService.isProfessionalTerm(bestPrimaryCandidate);
+        if (!isProf) {
+          hasBrandNameError = true;
+          brandErrorReason = `Poster me hi brand name galat likha hai: "${bestPrimaryCandidate}" vs official "${primaryWord}" (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer ko bolo: Poster me ${bestPrimaryCandidate} ki jagah ${primaryWord} likho.`;
+        }
+      } else if (bestPrimarySim >= 90 || fullOrgSim >= 90) {
         isBrandExact = true;
       }
     }
@@ -1371,6 +1381,11 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   }
 
   const rawOcrText = remoteResult.ocr_text || '';
+  const correctedOcrText = remoteResult.ocr_text_corrected || rawOcrText;
+  const ocrCorrectionsApplied = (remoteResult.corrections_applied || []).map((c) => ({
+    ...c,
+    error_type: 'OCR_ERROR',
+  }));
   const ocrConfidenceAverage = remoteResult.ocr_confidence_avg || 0.0;
   const ocrReliable = Boolean(remoteResult.ocr_reliable);
 
@@ -1378,8 +1393,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   let cleanedOcrText = '';
   const noiseTokens = [];
 
-  if (ocrReliable && rawOcrText.trim()) {
-    const correctedText = textCorrectionService.fixCommonOcrErrors(rawOcrText);
+  if (ocrReliable && (correctedOcrText || rawOcrText).trim()) {
+    const correctedText = textCorrectionService.fixCommonOcrErrors(correctedOcrText || rawOcrText);
     const rawLines = correctedText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const validLines = [];
 
@@ -1539,21 +1554,32 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   const ocrForIdentity = (ocrReliable && cleanedOcrText.trim()) ? cleanedOcrText : (rawOcrText || '');
   let brandIdentityCheck = {
     brand_name_correct: true,
+    brand_name_not_found: false,
     possible_brand_name_error: null,
+    status: 'PASS',
     phone_verification: [],
     address_match_percentage: 100,
     address_warning: null,
   };
 
-  if ((guidelines.organization_name || guidelines.gmb_official_name) && ocrForIdentity) {
+  if (!guidelines.organization_name && !guidelines.gmb_official_name) {
+    // Random poster / no client registered: NEVER skip brand check, flag as UNAUTHORIZED_BRAND / BRAND_NOT_FOUND
+    brandIdentityCheck.brand_name_correct = false;
+    brandIdentityCheck.brand_name_not_found = true;
+    brandIdentityCheck.status = 'UNAUTHORIZED_BRAND';
+    brandIdentityCheck.message = 'No authorized client brand registered for this post.';
+  } else if (ocrForIdentity) {
     const nameCheck = brandIdentityVerificationService.verifyBrandNamePresence(
       ocrForIdentity,
       guidelines.organization_name,
-      guidelines.gmb_official_name
+      guidelines.gmb_official_name,
+      guidelines.whitelist
     );
     brandIdentityCheck.brand_name_correct = nameCheck.brand_name_correct;
+    brandIdentityCheck.brand_name_not_found = nameCheck.brand_name_not_found;
     brandIdentityCheck.brand_name_match_score = nameCheck.score;
     brandIdentityCheck.matched_brand_text = nameCheck.matched_text;
+    brandIdentityCheck.status = nameCheck.status || (nameCheck.brand_name_correct ? 'PASS' : 'BRAND_NOT_FOUND');
     if (nameCheck.possible_brand_name_error) {
       brandIdentityCheck.possible_brand_name_error = nameCheck.message;
     }
@@ -1592,7 +1618,10 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     );
     if (isFuzzyWhitelisted) return false;
     return true;
-  });
+  }).map((issue) => ({
+    ...issue,
+    error_type: 'HUMAN_ERROR',
+  }));
 
   // Brand Logo Verification (Gemini Primary, Guaranteed Python Fallback)
   let logoCheck = remoteResult?.logo_check || null;
@@ -1808,7 +1837,11 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     enforcement_state: imageEnforcementState,
     enforcement_reasons: imageEnforcementReasons,
     cross_client_report: crossClientReport,
-    ocr_extracted_text: cleanedOcrText || rawOcrText,
+    ocr_extracted_text: cleanedOcrText || correctedOcrText || rawOcrText,
+    ocr_text_raw: rawOcrText,
+    ocr_text_corrected: correctedOcrText,
+    corrections_applied: ocrCorrectionsApplied,
+    ocr_corrections: ocrCorrectionsApplied,
     ocr_confidence: Math.round(ocrConfidenceAverage * 10000) / 100,
     ocr_confidence_avg: ocrConfidenceAverage,
     ocr_reliable: ocrReliable,
@@ -2008,6 +2041,8 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     key_error: activeKeyError,
     spelling_issues: mergedSpelling,
     grammar_suggestions: mergedGrammar,
+    corrections_applied: imageResult?.corrections_applied || [],
+    ocr_corrections: imageResult?.ocr_corrections || [],
     noise_tokens: imageResult?.noise_tokens || [],
     ocr_extracted_text: imageResult?.ocr_extracted_text || '',
     ocr_issues: imageResult?.ocr_issues || [],

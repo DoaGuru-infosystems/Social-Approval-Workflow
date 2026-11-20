@@ -1,7 +1,8 @@
 const fuzz = require('fuzzball');
+const { isProfessionalTerm, getProfessionalTermsSet } = require('./crossClientService');
 
 /**
- * Calculate Levenshtein edit distance between two strings of identical or near-identical length.
+ * Calculate Levenshtein edit distance between two strings.
  * @param {string} a
  * @param {string} b
  * @returns {number}
@@ -37,30 +38,26 @@ const getEditDistance = (a, b) => {
 };
 
 /**
- * 1. FUZZY PHRASE MATCHING (Brand Name Presence & Integrity)
- * Extracts sliding windows of 2 to 5 consecutive words from OCR text and compares
- * them against the official organization name using fuzzball.ratio().
- * 
- * Classification:
- *  a) score >= 90: brand_name_correct: true
- *  b) score 55-89: possible_brand_name_error: true
- *  c) score < 55:  brand_name_not_found: true
- * 
- * @param {string} ocrText
- * @param {string} officialName
- * @returns {Object}
- */
-/**
  * Internal helper to verify OCR text against a single brand name.
+ * Client-agnostic: uses professional_terms.json to distinguish generic qualifications/descriptors.
+ * Never skips brand checks; flags BRAND_NOT_FOUND or UNAUTHORIZED_BRAND when missing.
  * @param {string} ocrText
  * @param {string} officialName
+ * @param {Array<string>} [clientWhitelist]
  * @returns {Object}
  */
-const _checkSingleBrandName = (ocrText, officialName) => {
+const _checkSingleBrandName = (ocrText, officialName, clientWhitelist = []) => {
   if (!officialName || !officialName.trim()) {
     return {
       verified: false,
-      reason: 'No official organization name registered',
+      brand_name_correct: false,
+      brand_name_not_found: true,
+      possible_brand_name_error: false,
+      status: 'UNAUTHORIZED_BRAND',
+      score: 0,
+      matched_text: '',
+      official_name: '',
+      message: 'No official organization name registered. Unauthorized brand.',
     };
   }
 
@@ -73,8 +70,10 @@ const _checkSingleBrandName = (ocrText, officialName) => {
       brand_name_correct: false,
       brand_name_not_found: true,
       possible_brand_name_error: false,
+      status: 'BRAND_NOT_FOUND',
       score: 0,
       matched_text: '',
+      official_name: cleanOfficial,
       message: 'Brand name not found in image (OCR text is empty).',
     };
   }
@@ -91,29 +90,22 @@ const _checkSingleBrandName = (ocrText, officialName) => {
       brand_name_correct: false,
       brand_name_not_found: true,
       possible_brand_name_error: false,
+      status: 'BRAND_NOT_FOUND',
       score: 0,
       matched_text: '',
+      official_name: cleanOfficial,
       message: 'Brand name not found in image.',
     };
   }
 
-  // Extract core brand name (e.g. without trailing legal or business suffixes)
+  // Extract core brand name (without trailing legal or entity suffixes)
   const coreBrandName = cleanOfficial
     .replace(/\s+(pvt\s+ltd|ltd|llc|inc|corp|co|organization|services|enterprises)\b/gi, '')
     .trim();
+  const normalizedCore = coreBrandName.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
 
-  let bestMatch = {
-    windowStr: '',
-    score: 0,
-    size: 0,
-    isCoreMatch: false,
-  };
-
-  let bestCoreMatch = {
-    windowStr: '',
-    score: 0,
-    size: 0,
-  };
+  let bestMatch = { windowStr: '', score: 0, size: 0 };
+  let bestCoreMatch = { windowStr: '', score: 0, size: 0 };
 
   // Sliding windows of size 2 to 5 consecutive tokens
   for (let size = 2; size <= Math.min(5, rawTokens.length); size++) {
@@ -122,70 +114,33 @@ const _checkSingleBrandName = (ocrText, officialName) => {
       const windowStr = windowTokens.join(' ');
       const normalizedWindow = windowStr.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '');
 
-      // Compare against full official name
       const fullScore = fuzz.ratio(normalizedWindow, normalizedOfficial);
-
-      // Also compare against core brand name if official name is a multi-word compound
       const coreScore = coreBrandName && coreBrandName !== cleanOfficial
-        ? fuzz.ratio(normalizedWindow, coreBrandName.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, ''))
+        ? fuzz.ratio(normalizedWindow, normalizedCore)
         : 0;
 
       if (coreScore > bestCoreMatch.score) {
         bestCoreMatch = { windowStr, score: coreScore, size };
       }
-
       if (fullScore > bestMatch.score) {
         bestMatch = { windowStr, score: fullScore, size };
       }
     }
   }
 
-  // Check primary key brand word (e.g. first distinctive word of organization_name)
-  const orgWords = cleanOfficial.split(/\s+/).filter((w) => w.length >= 3);
-  const primaryWord = orgWords[0] || cleanOfficial;
-  const cleanPrimary = primaryWord.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
-
-  let bestPrimarySim = 0;
-  let bestPrimaryCandidate = '';
-  for (const tok of rawTokens) {
-    const unhyphen = tok.replace(/[-_]/g, '');
-    const tokensToCheck = unhyphen !== tok ? [tok, unhyphen] : [tok];
-    for (const t of tokensToCheck) {
-      const cleanT = t.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
-      if (!cleanT || cleanT.length < 2) continue;
-      const sim = fuzz.ratio(cleanT, cleanPrimary);
-      if (sim > bestPrimarySim) {
-        bestPrimarySim = sim;
-        bestPrimaryCandidate = tok;
-      }
-    }
-  }
-
-  // If primary brand word is present but has an error (similarity 55-94%):
-  if (cleanPrimary.length >= 3 && bestPrimarySim >= 55 && bestPrimarySim < 95) {
-    const errorMsg = `Poster me brand name galat likha hai: '${bestPrimaryCandidate}' vs official '${primaryWord}' (${bestPrimarySim}% similarity < 95%). OCR ne sahi padha hai. Designer ko bolo: Poster me ${bestPrimaryCandidate} ki jagah '${primaryWord}' likho.`;
-    return {
-      verified: true,
-      brand_name_correct: false,
-      possible_brand_name_error: errorMsg,
-      brand_name_not_found: false,
-      score: bestPrimarySim,
-      matched_text: bestPrimaryCandidate,
-      official_name: cleanOfficial,
-      message: errorMsg,
-    };
-  }
-
-  // Classification: Brand Name requires >= 95% similarity
-  const isExactMatch = bestMatch.windowStr && normalizedOfficial &&
+  // 1. Full/Core Brand Name exact or high-confidence match (>= 85%)
+  const isExactFullMatch = bestMatch.windowStr && normalizedOfficial &&
     (bestMatch.windowStr.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '') === normalizedOfficial);
+  const isExactCoreMatch = bestCoreMatch.windowStr && normalizedCore &&
+    (bestCoreMatch.windowStr.toLowerCase().replace(/[^\w\s\u0900-\u097f]/g, '') === normalizedCore);
 
-  if (isExactMatch || bestMatch.score >= 95) {
+  if (isExactFullMatch || bestMatch.score >= 90) {
     return {
       verified: true,
       brand_name_correct: true,
       possible_brand_name_error: false,
       brand_name_not_found: false,
+      status: 'PASS',
       score: bestMatch.score,
       matched_text: bestMatch.windowStr,
       official_name: cleanOfficial,
@@ -193,38 +148,114 @@ const _checkSingleBrandName = (ocrText, officialName) => {
     };
   }
 
-  // If there's an error or discrepancy in the brand name (score in 55-94% range):
-  const reportedMatch = (bestCoreMatch.score >= 55 && bestCoreMatch.score < 95)
-    ? bestCoreMatch
-    : bestMatch;
+  if (isExactCoreMatch || bestCoreMatch.score >= 88) {
+    return {
+      verified: true,
+      brand_name_correct: true,
+      possible_brand_name_error: false,
+      brand_name_not_found: false,
+      status: 'PASS',
+      score: bestCoreMatch.score,
+      matched_text: bestCoreMatch.windowStr,
+      official_name: cleanOfficial,
+      message: `Official core brand name matched successfully (${bestCoreMatch.score}% similarity).`,
+    };
+  }
 
-  const effectiveScore = reportedMatch.score;
-  const effectiveText = reportedMatch.windowStr;
+  // 2. Distinctive Brand Word matching (filter out generic professional terms from official name)
+  const orgWords = cleanOfficial.split(/\s+/).filter((w) => w.length >= 3 && !isProfessionalTerm(w));
+  const distinctiveWords = orgWords.length > 0 ? orgWords : [cleanOfficial.split(/\s+/)[0] || cleanOfficial];
 
-  if (effectiveScore >= 55) {
-    const errorMsg = `Poster me brand name galat likha hai: '${effectiveText}' vs official '${cleanOfficial}' (${effectiveScore}% similarity < 95%). OCR ne sahi padha hai. Designer se theek karwao.`;
+  let bestDistinctiveMatch = null;
+  let bestDistinctiveScore = 0;
+  let candidateTypo = null;
+
+  for (const primaryWord of distinctiveWords) {
+    const cleanPrimary = primaryWord.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+    if (!cleanPrimary || cleanPrimary.length < 3) continue;
+
+    for (const tok of rawTokens) {
+      // Ignore generic professional / qualification terms
+      if (isProfessionalTerm(tok)) continue;
+
+      const unhyphen = tok.replace(/[-_]/g, '');
+      const tokensToCheck = unhyphen !== tok ? [tok, unhyphen] : [tok];
+
+      for (const t of tokensToCheck) {
+        const cleanT = t.toLowerCase().replace(/[^\w\u0900-\u097f]/g, '');
+        if (!cleanT || cleanT.length < 3) continue;
+
+        // Skip if this token is an authorized client whitelist word
+        if (clientWhitelist && clientWhitelist.some((w) => String(w).toLowerCase() === cleanT)) {
+          continue;
+        }
+
+        const sim = fuzz.ratio(cleanT, cleanPrimary);
+        const dist = getEditDistance(cleanT, cleanPrimary);
+
+        if (sim >= 95 || (cleanT === cleanPrimary)) {
+          if (sim > bestDistinctiveScore) {
+            bestDistinctiveScore = sim;
+            bestDistinctiveMatch = { word: t, score: sim, primaryWord };
+          }
+        } else if (sim >= 80 && dist <= 2 && cleanPrimary.length >= 4) {
+          // Genuine typographical distortion of the brand name (edit distance <= 2, high similarity)
+          if (!candidateTypo || sim > candidateTypo.score) {
+            candidateTypo = {
+              candidate: t,
+              primaryWord,
+              score: sim,
+              dist,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  if (bestDistinctiveMatch && bestDistinctiveScore >= 90) {
+    return {
+      verified: true,
+      brand_name_correct: true,
+      possible_brand_name_error: false,
+      brand_name_not_found: false,
+      status: 'PASS',
+      score: bestDistinctiveScore,
+      matched_text: bestDistinctiveMatch.word,
+      official_name: cleanOfficial,
+      message: `Distinctive brand token '${bestDistinctiveMatch.word}' matched official '${bestDistinctiveMatch.primaryWord}' (${bestDistinctiveScore}% similarity).`,
+    };
+  }
+
+  // 3. Brand Typo / Distortion: Only trigger when candidate is NOT a professional term,
+  // has high similarity (>= 80%) AND edit distance <= 2 to the brand word.
+  if (candidateTypo) {
+    const errorMsg = `Poster me brand name galat likha hai: '${candidateTypo.candidate}' vs official '${candidateTypo.primaryWord}' (${candidateTypo.score}% similarity, ${candidateTypo.dist} char diff). OCR ne sahi padha hai. Designer ko bolo: Poster me '${candidateTypo.candidate}' ki jagah '${candidateTypo.primaryWord}' likho.`;
     return {
       verified: true,
       brand_name_correct: false,
       possible_brand_name_error: errorMsg,
       brand_name_not_found: false,
-      score: effectiveScore,
-      matched_text: effectiveText,
+      status: 'BRAND_TYPO',
+      score: candidateTypo.score,
+      matched_text: candidateTypo.candidate,
       official_name: cleanOfficial,
       message: errorMsg,
     };
-  } else {
-    return {
-      verified: true,
-      brand_name_correct: false,
-      possible_brand_name_error: false,
-      brand_name_not_found: true,
-      score: effectiveScore,
-      matched_text: effectiveText || '',
-      official_name: cleanOfficial,
-      message: `Brand name not found in image (best candidate similarity: ${effectiveScore}%).`,
-    };
   }
+
+  // 4. Brand Not Found / Unauthorized Brand (poster does not contain this client's brand)
+  return {
+    verified: true,
+    brand_name_correct: false,
+    possible_brand_name_error: false,
+    brand_name_not_found: true,
+    status: 'BRAND_NOT_FOUND',
+    score: Math.max(bestMatch.score, bestCoreMatch.score),
+    matched_text: bestMatch.windowStr || '',
+    official_name: cleanOfficial,
+    message: `Brand name '${cleanOfficial}' not found in image.`,
+  };
 };
 
 /**
@@ -237,21 +268,28 @@ const _checkSingleBrandName = (ocrText, officialName) => {
  * @param {string} ocrText
  * @param {string} officialName Manual official name
  * @param {string} [gmbOfficialName] GMB fetched official name
+ * @param {Array<string>} [clientWhitelist] Client specific whitelist
  * @returns {Object}
  */
-const verifyBrandNamePresence = (ocrText, officialName, gmbOfficialName = '') => {
+const verifyBrandNamePresence = (ocrText, officialName, gmbOfficialName = '', clientWhitelist = []) => {
   const cleanManual = (officialName || '').trim();
   const cleanGmb = (gmbOfficialName || '').trim();
 
   if (!cleanManual && !cleanGmb) {
     return {
       verified: false,
-      reason: 'No official organization name registered',
+      brand_name_correct: false,
+      brand_name_not_found: true,
+      possible_brand_name_error: false,
+      status: 'UNAUTHORIZED_BRAND',
+      score: 0,
+      matched_text: '',
+      message: 'No official organization name registered. Unauthorized brand.',
     };
   }
 
-  const resManual = cleanManual ? _checkSingleBrandName(ocrText, cleanManual) : null;
-  const resGmb = cleanGmb && cleanGmb !== cleanManual ? _checkSingleBrandName(ocrText, cleanGmb) : null;
+  const resManual = cleanManual ? _checkSingleBrandName(ocrText, cleanManual, clientWhitelist) : null;
+  const resGmb = cleanGmb && cleanGmb !== cleanManual ? _checkSingleBrandName(ocrText, cleanGmb, clientWhitelist) : null;
 
   if (resManual && resManual.brand_name_correct) return resManual;
   if (resGmb && resGmb.brand_name_correct) return resGmb;

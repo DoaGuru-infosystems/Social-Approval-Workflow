@@ -1,0 +1,60 @@
+{
+  "matras": {
+    "ि": {
+      "name": "Chhoti I",
+      "unicode": "U+093F",
+      "position": "after_consonant",
+      "confused_with": ["ः", "ी"],
+      "visual_strokes": 1
+    },
+    "ी": {
+      "name": "Badi I",
+      "unicode": "U+0940",
+      "position": "after_consonant",
+      "confused_with": ["ि"],
+      "visual_strokes": 2
+    },
+    "ु": {
+      "name": "Chhota U",
+      "unicode": "U+0941",
+      "position": "below_consonant",
+      "confused_with": ["ू"],
+      "visual_strokes": 1
+    },
+    "ू": {
+      "name": "Bada U",
+      "unicode": "U+0942",
+      "position": "below_consonant",
+      "confused_with": ["ु"],
+      "visual_strokes": 2
+    },
+    "ः": {
+      "name": "Visarga",
+      "unicode": "U+0903",
+      "position": "after_consonant",
+      "confused_with": ["ि", "ी"],
+      "visual_strokes": 2
+    },
+    "ं": {
+      "name": "Anusvara",
+      "unicode": "U+0902",
+      "position": "above_consonant",
+      "confused_with": ["ँ"],
+      "visual_strokes": 1
+    },
+    "ँ": {
+      "name": "Chandrabindu",
+      "unicode": "U+0901",
+      "position": "above_consonant",
+      "confused_with": ["ं"],
+      "visual_strokes": 2
+    },
+    "्": {
+      "name": "Halant",
+      "unicode": "U+094D",
+      "position": "below_consonant",
+      "confused_with": ["़"],
+      "visual_strokes": 1
+    }
+  }
+}

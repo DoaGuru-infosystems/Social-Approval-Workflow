@@ -1,9 +1,59 @@
+const fs = require('fs');
+const path = require('path');
 const pool = require('../config/db');
 const fuzzball = require('fuzzball');
 
 let cachedClientsIndex = null;
 let lastCacheTime = 0;
 const CACHE_TTL_MS = 30000; // 30 seconds cache
+
+let cachedProfessionalTerms = null;
+
+/**
+ * Loads generic medical, healthcare, qualification, and business terms from professional_terms.json.
+ * Completely client-agnostic.
+ * @returns {Set<string>}
+ */
+const getProfessionalTermsSet = () => {
+  if (cachedProfessionalTerms) return cachedProfessionalTerms;
+  const terms = new Set();
+  const candPaths = [
+    path.resolve(__dirname, '..', 'dictionaries', 'professional_terms.json'),
+    path.resolve(__dirname, '..', '..', 'professional_terms.json'),
+    path.resolve(__dirname, 'professional_terms.json'),
+  ];
+  for (const p of candPaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+        for (const cat of Object.values(raw)) {
+          if (Array.isArray(cat)) {
+            cat.forEach((t) => terms.add(String(t).toLowerCase().trim()));
+          }
+        }
+        break;
+      } catch (e) {
+        console.warn('[crossClientService] Notice loading professional_terms.json:', e.message);
+      }
+    }
+  }
+  cachedProfessionalTerms = terms;
+  return cachedProfessionalTerms;
+};
+
+/**
+ * Check if a word/term is a generic professional, medical, or facility descriptor.
+ * @param {string} term
+ * @returns {boolean}
+ */
+const isProfessionalTerm = (term) => {
+  if (!term || typeof term !== 'string') return false;
+  const clean = term.toLowerCase().trim();
+  const terms = getProfessionalTermsSet();
+  if (terms.has(clean)) return true;
+  const stripped = clean.replace(/[^\w\u0900-\u097f]/g, '');
+  return terms.has(stripped);
+};
 
 /**
  * Normalizes text for brand matching: lowercases, removes non-alphanumeric except spaces.
@@ -64,15 +114,8 @@ const getClientsIndex = async (forceRefresh = false) => {
     'hospital', 'clinic', 'speciality', 'multi', 'systems', 'infosystems',
     'organics', 'centre', 'center', 'doctor', 'dr', 'solutions', 'services',
     'pvt', 'ltd', 'limited', 'care', 'health', 'wellness', 'technologies',
-    'technically', 'transforming', 'jabalpur', 'india', 'mp',
-    // Common medical degrees, qualifications, and roles
-    'mbbs', 'dnb', 'fcps', 'bams', 'bhms', 'bds', 'mch', 'dm', 'frcs', 'fico',
-    'bpt', 'mpt', 'consultant', 'visiting', 'surgeon', 'physician', 'specialist',
-    'fellowship', 'experience', 'timing', 'anubhav', 'opd', 'icu', 'nicu', 'picu',
-    // Common dictionary & healthcare terms (not proprietary brand names)
-    'life', 'best', 'good', 'super', 'child', 'children', 'neuro', 'eye', 'aankh',
-    'netra', 'operation', 'surgery', 'treatment', 'ilaj', 'swasthya', 'emergency',
-    'critical', 'cardiac', 'heart', 'joint', 'pain', 'laser', 'dialysis', 'infertility'
+    'technically', 'transforming', 'india', 'mp',
+    ...getProfessionalTermsSet(),
   ]);
 
   const index = clientRows.map((c) => {
@@ -250,4 +293,10 @@ module.exports = {
   extractDomains,
   getClientsIndex,
   detectCrossClientCollisions,
+  getProfessionalTermsSet,
+  isProfessionalTerm,
+  // Backward compatibility alias populated strictly from professional_terms.json (no client hardcoding)
+  get BRAND_STOP_WORDS() {
+    return Array.from(getProfessionalTermsSet());
+  },
 };

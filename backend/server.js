@@ -96,6 +96,28 @@ app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/admin', adminRoutes);
+
+// Human-in-the-Loop Global Whitelist Endpoint
+app.post('/api/whitelist/add', (req, res) => {
+  const { word } = req.body;
+  if (!word || typeof word !== 'string' || !word.trim()) {
+    return res.status(400).json({ error: 'Valid word is required' });
+  }
+  const hindiDictionaryService = require('./services/hindiDictionaryService');
+  const added = hindiDictionaryService.addWordToGlobalWhitelist(word.trim());
+  return res.status(200).json({
+    success: true,
+    word: word.trim(),
+    message: added ? 'Word added to global whitelist' : 'Word already exists in whitelist',
+  });
+});
+
+app.get('/api/whitelist', (req, res) => {
+  const hindiDictionaryService = require('./services/hindiDictionaryService');
+  return res.status(200).json({
+    whitelist: hindiDictionaryService.getGlobalWhitelist(),
+  });
+});
 // Legacy and alternative OAuth callback route
 app.get('/api/social/callback', async (req, res) => {
   const metaService = require('./services/metaService');

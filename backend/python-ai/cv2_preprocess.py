@@ -149,9 +149,10 @@ def _score_variants(variants):
 
 
 def _select_top7_variants(quality_scores, original_image):
-    """GUI wala same diversity quota - 1 CLAHE + 1 Gray + 1 Gamma + 1 Threshold + 1 Retinex + 2 filler."""
+    """GUI wala same diversity quota - 1 Upscaled/Orig + 1 CLAHE + 1 Gray + 1 Gamma + 1 Threshold + 1 Retinex + 1 filler."""
     ranked = sorted(quality_scores, key=quality_scores.get, reverse=True)
     required_groups = (
+        ("Original Upscaled", "Original Upscaled (2x)", "Original Upscaled (1.5x)", "Original"),
         ("CLAHE Enhanced (LAB L-channel)", "CLAHE Soft (1.5)"),
         ("Grayscale", "Denoised Grayscale", "CLAHE Soft Grayscale"),
         ("Gamma Brighter", "Gamma Darker", "Contrast Normalized (2-98%)"),
@@ -167,6 +168,10 @@ def _select_top7_variants(quality_scores, original_image):
         best = next((n for n in ranked if n in group and n not in selected), None)
         if best is not None:
             selected.append(best)
+    # Ensure upscaled variant is explicitly included in top 7 for small text preservation
+    upscaled_cand = next((n for n in ranked if "upscaled" in n.lower() and n not in selected), None)
+    if upscaled_cand and len(selected) < 7:
+        selected.append(upscaled_cand)
     for name in ranked:
         if len(selected) >= 7:
             break
@@ -185,9 +190,22 @@ def _build_all_variants(source):
     gray = cv2.cvtColor(adjusted, cv2.COLOR_BGR2GRAY)
 
     h, w = source.shape[:2]
-    # Optimization: bada poster hai to upscale mat karo, chhota hai to 2x karo
-    factor = UPSCALE_FACTOR if max(h, w) <= MAX_SIDE_FOR_UPSCALE else 1
-    upscaled = cv2.resize(adjusted, (w * factor, h * factor), interpolation=cv2.INTER_CUBIC) if factor > 1 else adjusted.copy()
+    # Small text preservation: 1.5x - 2.0x INTER_CUBIC upscaling
+    if max(h, w) <= 800:
+        factor = 2.0
+    elif max(h, w) <= MAX_SIDE_FOR_UPSCALE:
+        factor = 1.5
+    else:
+        factor = 1.25
+
+    upscaled_w = int(round(w * factor))
+    upscaled_h = int(round(h * factor))
+    if max(upscaled_w, upscaled_h) > 2400:
+        factor = 2400.0 / max(h, w)
+        upscaled_w = int(round(w * factor))
+        upscaled_h = int(round(h * factor))
+
+    upscaled = cv2.resize(adjusted, (upscaled_w, upscaled_h), interpolation=cv2.INTER_CUBIC)
 
     clahe_lightness = cv2.createCLAHE(clipLimit=CLAHE_CLIP, tileGridSize=(8, 8)).apply(lightness)
     enhanced_lab = lab.copy(); enhanced_lab[:, :, 0] = clahe_lightness
@@ -240,6 +258,12 @@ def _build_all_variants(source):
     bilateral = cv2.bilateralFilter(clahe_lightness, 9, 75, 75)
     bilateral_raw = cv2.threshold(bilateral, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     bilateral_threshold, _ = _correct_threshold_polarity(bilateral_raw)
+
+    # Phase 3: Unsharp mask + bilateral filter for halant and edge sharpness
+    gaussian_blur = cv2.GaussianBlur(clahe_lightness, (0, 0), 2.0)
+    unsharp_mask = cv2.addWeighted(clahe_lightness, 1.5, gaussian_blur, -0.5, 0)
+    unsharp_bilateral = cv2.bilateralFilter(unsharp_mask, 7, 50, 50)
+
     retinex_color = _msrcr(adjusted)
     retinex_lab = cv2.cvtColor(retinex_color, cv2.COLOR_BGR2LAB)
     retinex_lightness = retinex_lab[:, :, 0]
@@ -252,7 +276,10 @@ def _build_all_variants(source):
 
     return {
         "Original": source,
+        "Original Upscaled": upscaled,
         "Original Upscaled ({}x)".format(factor): upscaled,
+        "Original Upscaled (2x)": upscaled,
+        "Original Upscaled (1.5x)": upscaled,
         "Grayscale": gray,
         "Gamma Brighter": gamma_tone(0.75),
         "Gamma Darker": gamma_tone(1.35),
@@ -268,6 +295,7 @@ def _build_all_variants(source):
         "Otsu Threshold": otsu,
         "Inverted / Negative": cv2.bitwise_not(otsu),
         "Sharpened": sharpened,
+        "Unsharp Bilateral (Halant Sharp)": unsharp_bilateral,
         "Denoised Grayscale": bilateral,
         "Bilateral Filter + Threshold": bilateral_threshold,
         "BlackHat / Morphological": blackhat_threshold,
@@ -280,8 +308,8 @@ def _build_all_variants(source):
 def get_top10_variants(bgr_image):
     """
     Returns the exact 10 diverse families requested for A2 OCR:
-    1. Original, 2. Grayscale, 3. CLAHE Soft, 4. CLAHE Enhanced, 5. CLAHE Strong,
-    6. Retinex, 7. Contrast Normalized, 8. Otsu Threshold, 9. Adaptive Threshold, 10. Sharpened
+    1. Original, 2. Upscaled (Small Text), 3. Grayscale, 4. CLAHE Soft, 5. CLAHE Enhanced,
+    6. CLAHE Strong, 7. Retinex, 8. Contrast Normalized, 9. Otsu Threshold, 10. Adaptive Threshold
     """
     if bgr_image is None:
         raise ValueError("bgr_image is None")
@@ -294,6 +322,7 @@ def get_top10_variants(bgr_image):
     
     top10_mapping = [
         ("Original", "Original"),
+        ("Original Upscaled", "Original Upscaled"),
         ("Grayscale", "Grayscale"),
         ("CLAHE Soft", "CLAHE Soft (1.5)"),
         ("CLAHE Enhanced", "CLAHE Enhanced (LAB L-channel)"),
@@ -302,7 +331,6 @@ def get_top10_variants(bgr_image):
         ("Contrast Normalized", "Contrast Normalized (2-98%)"),
         ("Otsu", "Otsu Threshold"),
         ("Adaptive", "Adaptive Threshold Gaussian"),
-        ("Sharpened", "Sharpened"),
     ]
     
     top10 = []
