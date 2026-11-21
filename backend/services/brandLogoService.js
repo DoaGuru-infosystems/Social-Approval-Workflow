@@ -154,6 +154,14 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath, logoConfig = {
               if (!parsed.checked_by) {
                 parsed.checked_by = 'Python';
               }
+              if (parsed.reason === 'COLOR_CHANGED' || (parsed.status === 'PASS' && parsed.reason !== 'CORRECT')) {
+                parsed.enforcement_state = 'yellow_alert';
+                parsed.status = 'PASS';
+              } else if (parsed.status === 'PASS') {
+                parsed.enforcement_state = 'green_clean';
+              } else {
+                parsed.enforcement_state = 'red_block';
+              }
               return resolve(parsed);
             }
           } catch (parseErr) {

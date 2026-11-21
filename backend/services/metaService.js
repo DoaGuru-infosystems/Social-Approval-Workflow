@@ -77,7 +77,7 @@ const getFacebookAuthUrl = (clientId, frontendOrigin = null) => {
     authUrl,
     auth_url: authUrl,
   };
-};
+}; 
 
 /**
  * 2. Independent Instagram Flow:
@@ -267,6 +267,111 @@ const handleFacebookCallback = async (code, state, req = null) => {
 };
 
 /**
+ * Strictly query Meta's Instagram Graph API to retrieve verified user identity.
+ * Primary documented endpoint for Instagram Login:
+ *   GET https://graph.instagram.com/v21.0/me?fields=user_id,username
+ * Documented node endpoint using actual user_id from OAuth code exchange:
+ *   GET https://graph.instagram.com/v21.0/{user_id}?fields=user_id,username
+ *
+ * Logs exact hostname, API version, endpoint, HTTP status, and full Meta error JSON. Never logs access token.
+ * Never invents, guesses, or infers usernames from client business names.
+ */
+const fetchInstagramIdentity = async (accessToken, fallbackUserId = null) => {
+  if (!accessToken) {
+    return { id: null, username: null, account_type: null, error: 'Access token missing' };
+  }
+
+  const apiVersion = process.env.META_API_VERSION?.trim() || 'v21.0';
+  const cleanUserId = fallbackUserId ? String(fallbackUserId).trim() : null;
+
+  // Documented candidates:
+  // 1. Primary: GET https://graph.instagram.com/{version}/me?fields=user_id,username (minimal supported fields only)
+  // 2. User Node: GET https://graph.instagram.com/{version}/{user_id}?fields=user_id,username
+  const candidateRequests = [
+    {
+      hostname: 'graph.instagram.com',
+      apiVersion,
+      endpoint: '/me',
+      fields: 'user_id,username',
+      url: `https://graph.instagram.com/${apiVersion}/me?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+    },
+  ];
+
+  if (cleanUserId) {
+    candidateRequests.push({
+      hostname: 'graph.instagram.com',
+      apiVersion,
+      endpoint: `/${cleanUserId}`,
+      fields: 'user_id,username',
+      url: `https://graph.instagram.com/${apiVersion}/${encodeURIComponent(cleanUserId)}?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+    });
+  }
+
+  // Unversioned fallbacks
+  candidateRequests.push({
+    hostname: 'graph.instagram.com',
+    apiVersion: 'unversioned',
+    endpoint: '/me',
+    fields: 'user_id,username',
+    url: `https://graph.instagram.com/me?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+  });
+
+  if (cleanUserId) {
+    candidateRequests.push({
+      hostname: 'graph.instagram.com',
+      apiVersion: 'unversioned',
+      endpoint: `/${cleanUserId}`,
+      fields: 'user_id,username',
+      url: `https://graph.instagram.com/${encodeURIComponent(cleanUserId)}?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+    });
+  }
+
+  let lastError = null;
+  let errorDetails = null;
+
+  for (const req of candidateRequests) {
+    try {
+      const res = await fetch(req.url);
+      const data = await res.json();
+
+      // STRICT VALIDATION: Code 100 or data.error must NEVER be interpreted as success
+      if (data && !data.error && (data.username || data.user_id || data.id)) {
+        const verifiedId = String(data.user_id || data.id || cleanUserId);
+        const verifiedUsername = data.username ? String(data.username).trim() : null;
+
+        console.log(`[Instagram Identity] Verified via ${req.hostname} ${req.apiVersion}${req.endpoint} (HTTP ${res.status}): ID=${verifiedId}, username=${verifiedUsername}`);
+        return {
+          id: verifiedId,
+          username: verifiedUsername,
+          account_type: data.account_type || null,
+          name: data.name || null,
+          raw: data,
+          error: null,
+        };
+      }
+
+      if (data?.error) {
+        lastError = data.error.message || `Meta API Error ${data.error.code}`;
+        errorDetails = data.error;
+        console.warn(`[Instagram Identity] Diagnostic Log: hostname=${req.hostname}, apiVersion=${req.apiVersion}, endpoint=${req.endpoint}, fields=${req.fields}, HTTP=${res.status}, error=${JSON.stringify(data.error)}`);
+      }
+    } catch (err) {
+      lastError = err.message;
+      console.warn(`[Instagram Identity] Network failure on ${req.hostname} ${req.endpoint}:`, err.message);
+    }
+  }
+
+  return {
+    id: cleanUserId,
+    username: null,
+    account_type: null,
+    name: null,
+    error: lastError || 'Meta did not return a valid profile for this token',
+    errorDetails,
+  };
+};
+
+/**
  * Handle Instagram OAuth callback
  * Saves ONLY in instagram row, does NOT touch facebook row.
  */
@@ -355,55 +460,76 @@ const handleInstagramCallback = async (code, state, req = null) => {
     console.warn('[Instagram OAuth] Long-lived token exchange request failed:', longErr.message);
   }
 
-  // Retrieve Instagram account ID and username
-  let igUsername = null;
-  try {
-    const meRes = await fetch(
-      `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${encodeURIComponent(igAccessToken)}`
-    );
-    const meData = await meRes.json();
-    if (meData.username) igUsername = meData.username;
-    if (meData.id || meData.user_id) igUserId = String(meData.id || meData.user_id);
-  } catch (meErr) {
-    console.warn('[Instagram OAuth] Could not fetch profile from graph.instagram.com:', meErr.message);
+  // Retrieve Instagram account ID and username strictly from Meta API
+  let identity = await fetchInstagramIdentity(igAccessToken, igUserId);
+
+  // If long-lived token fails identity retrieval, attempt verification with short-lived token
+  if (!identity.username && igAccessToken !== shortToken) {
+    console.log('[Instagram OAuth] Attempting identity retrieval with short-lived token...');
+    const shortIdentity = await fetchInstagramIdentity(shortToken, igUserId);
+    if (shortIdentity.username) {
+      identity = shortIdentity;
+    }
   }
 
-  // Fallback: If username could not be fetched (e.g. dev mode restriction on /me),
-  // preserve existing username from database or derive from client name / guidelines
-  if (!igUsername) {
-    try {
-      const [existingRows] = await pool.query(
-        'SELECT platform_username, profile_url FROM client_social_accounts WHERE client_id = ? AND platform = "instagram"',
-        [clientId]
-      );
-      if (existingRows.length > 0 && existingRows[0].platform_username) {
-        igUsername = existingRows[0].platform_username;
-      } else {
-        const [guideRows] = await pool.query(
-          'SELECT whitelist_words FROM client_brand_guidelines WHERE client_id = ?',
-          [clientId]
-        );
-        if (guideRows.length > 0 && guideRows[0].whitelist_words) {
-          try {
-            const words = JSON.parse(guideRows[0].whitelist_words);
-            const igHandle = words.find((w) => w.includes('hospital') || w.includes('navjyoti') || w.includes('doaguru'));
-            if (igHandle) igUsername = igHandle.toLowerCase().replace(/[^a-z0-9._]/g, '');
-          } catch {}
-        }
-        if (!igUsername) {
-          const [clientRows] = await pool.query('SELECT name FROM clients WHERE id = ?', [clientId]);
-          if (clientRows.length > 0 && clientRows[0].name) {
-            igUsername = clientRows[0].name.toLowerCase().replace(/[^a-z0-9._]/g, '');
-          }
-        }
-      }
-    } catch {}
-  }
+  const verifiedUsername = identity.username ? String(identity.username).trim() : null;
+  const verifiedUserId = identity.id ? String(identity.id).trim() : (igUserId ? String(igUserId).trim() : null);
+  const verifiedAccountType = identity.account_type || null;
 
-  const profileUrl = igUsername ? `https://instagram.com/${igUsername}` : null;
   const encToken = encrypt(igAccessToken);
 
-  // Encrypt token and save ONLY the Instagram account record (never overwrite Facebook)
+  // STRICT IDENTITY GATE: If Meta did not return a verified username or ID, reject connection
+  // Never guess, synthesize, or infer usernames from client business names
+  if (!verifiedUsername || !verifiedUserId) {
+    const reasonMsg = identity.error || 'Meta authorized account but did not return a verified username';
+    console.error('[Instagram OAuth] Strict Identity Verification Failed:', reasonMsg);
+
+    // Save as UNCONNECTED record with NULL username/url to prevent false associations
+    await pool.query(
+      `INSERT INTO client_social_accounts (
+         client_id, platform, platform_id, platform_username, profile_url,
+         access_token_encrypted, token_expires_at, connection_method, is_connected, last_tested_at, last_error
+       )
+       VALUES (?, 'instagram', ?, NULL, NULL, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), 'oauth', FALSE, NOW(), ?)
+       ON DUPLICATE KEY UPDATE 
+         platform_id = VALUES(platform_id), 
+         platform_username = NULL, 
+         profile_url = NULL, 
+         access_token_encrypted = VALUES(access_token_encrypted), 
+         token_expires_at = VALUES(token_expires_at), 
+         connection_method = 'oauth', 
+         is_connected = FALSE, 
+         last_tested_at = NOW(), 
+         last_error = VALUES(last_error)`,
+      [clientId, verifiedUserId || null, encToken, tokenExpiresIn, `Identity Verification Failed: ${reasonMsg}`]
+    );
+
+    throw new Error(`Instagram identity verification failed: ${reasonMsg}`);
+  }
+
+  // Cross-client conflict check: detect if this Instagram account is already connected to another client
+  const [conflictRows] = await pool.query(
+    `SELECT csa.client_id, c.name as client_name, csa.platform_username
+     FROM client_social_accounts csa
+     JOIN clients c ON csa.client_id = c.id
+     WHERE csa.platform = 'instagram'
+       AND (csa.platform_id = ? OR (csa.platform_username IS NOT NULL AND LOWER(csa.platform_username) = LOWER(?)))
+       AND csa.client_id != ?
+       AND csa.is_connected = TRUE`,
+    [verifiedUserId, verifiedUsername, clientId]
+  );
+
+  let conflictWarning = null;
+  if (conflictRows.length > 0) {
+    const conflictingClient = conflictRows[0];
+    conflictWarning = `Instagram account @${verifiedUsername} is already connected to client "${conflictingClient.client_name}" (ID: ${conflictingClient.client_id}).`;
+    console.warn(`[Instagram OAuth] Multi-client conflict detected: @${verifiedUsername} (ID: ${verifiedUserId}) is already connected to Client ${conflictingClient.client_id} (${conflictingClient.client_name})`);
+  }
+
+  // Profile URL constructed ONLY from verified Meta username
+  const profileUrl = `https://instagram.com/${verifiedUsername}`;
+
+  // Encrypt token and save ONLY the verified Instagram account record
   await pool.query(
     `INSERT INTO client_social_accounts (
        client_id, platform, platform_id, platform_username, profile_url,
@@ -412,22 +538,25 @@ const handleInstagramCallback = async (code, state, req = null) => {
      VALUES (?, 'instagram', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), 'oauth', TRUE, NOW(), NULL)
      ON DUPLICATE KEY UPDATE 
        platform_id = VALUES(platform_id), 
-       platform_username = COALESCE(VALUES(platform_username), platform_username), 
-       profile_url = COALESCE(VALUES(profile_url), profile_url), 
+       platform_username = VALUES(platform_username), 
+       profile_url = VALUES(profile_url), 
        access_token_encrypted = VALUES(access_token_encrypted), 
        token_expires_at = VALUES(token_expires_at), 
        connection_method = 'oauth', 
        is_connected = TRUE, 
        last_tested_at = NOW(), 
        last_error = NULL`,
-    [clientId, igUserId || null, igUsername || null, profileUrl, encToken, tokenExpiresIn]
+    [clientId, verifiedUserId, verifiedUsername, profileUrl, encToken, tokenExpiresIn]
   );
 
   return {
     clientId,
     platform: 'instagram',
-    platformId: igUserId,
-    username: igUsername,
+    platformId: verifiedUserId,
+    username: verifiedUsername,
+    accountType: verifiedAccountType,
+    profileUrl,
+    warning: conflictWarning,
     frontendOrigin: decoded.frontendOrigin || null,
   };
 };
@@ -469,23 +598,15 @@ const testConnection = async (account) => {
 
   try {
     if (account.platform === 'instagram') {
-      // 1. Test via graph.instagram.com/me with standard professional fields
-      let igData = null;
-      try {
-        const igUrl = `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${encodeURIComponent(rawToken)}`;
-        const res = await fetch(igUrl);
-        igData = await res.json();
-      } catch (e) {
-        console.warn('[Instagram Test] /me fetch warning:', e.message);
-      }
-
-      if (igData && !igData.error && (igData.username || igData.id)) {
-        const accName = igData.username || account.platform_username || `Instagram User #${igData.id}`;
+      // 1. Strictly test via fetchInstagramIdentity against Meta endpoints
+      const identity = await fetchInstagramIdentity(rawToken, account.platform_id);
+      if (identity.username) {
         return {
           valid: true,
-          accountName: accName,
-          platformId: igData.id || account.platform_id,
-          profileUrl: igData.username ? `https://instagram.com/${igData.username}` : account.profile_url,
+          accountName: identity.username,
+          platformId: identity.id || account.platform_id,
+          profileUrl: `https://instagram.com/${identity.username}`,
+          accountType: identity.account_type || null,
         };
       }
 
@@ -495,33 +616,28 @@ const testConnection = async (account) => {
           const fbUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(account.platform_id)}?fields=id,username,name&access_token=${encodeURIComponent(rawToken)}`;
           const fbRes = await fetch(fbUrl);
           const fbData = await fbRes.json();
-          if (fbData && !fbData.error && (fbData.username || fbData.name || fbData.id)) {
-            const accName = fbData.username || fbData.name || account.platform_username;
+          if (fbData && !fbData.error && fbData.username) {
             return {
               valid: true,
-              accountName: accName,
+              accountName: fbData.username,
               platformId: fbData.id || account.platform_id,
-              profileUrl: fbData.username ? `https://instagram.com/${fbData.username}` : account.profile_url,
+              profileUrl: `https://instagram.com/${fbData.username}`,
             };
           }
         } catch (fbErr) {}
       }
 
-      // 3. Inspect Meta error response:
-      if (igData?.error) {
-        return {
-          valid: false,
-          error: igData.error.message || `Meta API Error ${igData.error.code || 100}`,
-          code: igData.error.code,
-          type: igData.error.type,
-          fbtrace_id: igData.error.fbtrace_id,
-          accountName: account.platform_username || null,
-          platformId: account.platform_id || null,
-          profileUrl: account.profile_url || null,
-        };
-      }
-
-      return { valid: false, error: 'Instagram token verification failed (No profile data returned)' };
+      // 3. Token verification failed or expired - NEVER return guessed or existing DB username
+      return {
+        valid: false,
+        error: identity.error || 'Instagram token verification failed (No verified profile data returned from Meta)',
+        code: identity.errorDetails?.code,
+        type: identity.errorDetails?.type,
+        fbtrace_id: identity.errorDetails?.fbtrace_id,
+        accountName: null,
+        platformId: account.platform_id || null,
+        profileUrl: null,
+      };
     }
 
     // Facebook test

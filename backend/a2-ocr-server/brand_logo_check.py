@@ -464,12 +464,27 @@ def check_brand_logo(post_image_bgr, reference_logo_path, logo_config=None):
 
     cand_sym = cand_crop[:max(10, int(bh * 0.65)), :]
     sym_score = 0.0
+    is_inverted_contrast = False
     if cand_sym.shape[0] >= 10 and cand_sym.shape[1] >= 10:
         try:
             cand_gray = cv2.cvtColor(cand_sym, cv2.COLOR_BGR2GRAY)
             sym_gray = cv2.cvtColor(sym_scaled, cv2.COLOR_BGR2GRAY)
             res = cv2.matchTemplate(cand_gray, sym_gray, cv2.TM_CCOEFF_NORMED)
-            sym_score = float(res[0][0])
+            raw_sym_score = float(res[0][0])
+
+            # Inverted contrast check (e.g. bright logo on dark poster vs dark logo on white reference)
+            cand_gray_inv = 255 - cand_gray
+            res_inv = cv2.matchTemplate(cand_gray_inv, sym_gray, cv2.TM_CCOEFF_NORMED)
+            raw_inv_score = float(res_inv[0][0])
+
+            if raw_inv_score > raw_sym_score:
+                sym_score = raw_inv_score
+                is_inverted_contrast = True
+            else:
+                sym_score = raw_sym_score
+                if raw_sym_score < 0 and abs(raw_sym_score) >= 0.60:
+                    is_inverted_contrast = True
+                    sym_score = abs(raw_sym_score)
         except Exception:
             sym_score = best_match_score
 
@@ -536,21 +551,27 @@ def check_brand_logo(post_image_bgr, reference_logo_path, logo_config=None):
     final_score = max(best_match_score, sym_score, token_score)
 
     if symbol_passed and name_passed and tagline_passed and layout_passed:
+        if is_inverted_contrast:
+            status = "PASS"
+            reason = "COLOR_CHANGED"
+            found = True
+            suggestion = SUGGESTION_RULES["COLOR_CHANGED"]
+        else:
+            status = "PASS"
+            reason = "CORRECT"
+            found = True
+            suggestion = SUGGESTION_RULES["CORRECT"]
+    elif final_score >= 0.70 and (symbol_passed or name_passed or sym_score >= 0.60):
+        # Color difference, dark mode variant, or minor typography variance -> YELLOW (Warning / Review), NOT RED BLOCK
         status = "PASS"
-        reason = "CORRECT"
+        reason = "COLOR_CHANGED"
         found = True
-        suggestion = SUGGESTION_RULES["CORRECT"]
-    elif final_score >= 0.75 and (symbol_passed or name_passed):
-        # Ambiguous match or minor typography variance -> Manual Review Blocked
-        status = "FAIL"
-        reason = "MANUAL_REVIEW_BLOCKED"
+        suggestion = SUGGESTION_RULES["COLOR_CHANGED"]
+    elif not tagline_passed and tagline_policy != "MANDATORY":
+        status = "PASS"
+        reason = "COLOR_CHANGED"
         found = True
-        suggestion = SUGGESTION_RULES["MANUAL_REVIEW_BLOCKED"]
-    elif not tagline_passed:
-        status = "FAIL"
-        reason = tagline_reason
-        found = True
-        suggestion = SUGGESTION_RULES.get(tagline_reason, SUGGESTION_RULES["WRONG_LOGO"])
+        suggestion = SUGGESTION_RULES["COLOR_CHANGED"]
     else:
         status = "FAIL"
         found = (final_score >= 0.35)

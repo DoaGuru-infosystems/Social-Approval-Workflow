@@ -4,6 +4,16 @@ const hindiDictionaryService = require('./hindiDictionaryService');
 const garbageFilterService = require('./garbageFilterService');
 
 const DEVANAGARI_REGEX = /[\u0900-\u097f]/;
+
+// Standard global platforms, digital marketing, and tech terminology (never flag as spelling errors)
+const GLOBAL_RECOGNIZED_TERMS = new Set([
+  // Social Media & Tech Platforms
+  'linkedin', 'instagram', 'facebook', 'youtube', 'meta', 'whatsapp', 'twitter', 'pinterest', 'snapchat', 'tiktok', 'telegram', 'threads', 'google', 'gmail', 'wordpress', 'x', 'fb', 'ig', 'yt',
+  // Digital Marketing & Business Terms
+  'seo', 'smo', 'ppc', 'roi', 'leads', 'reach', 'engagement', 'performance', 'strategy', 'overview', 'growth', 'creative', 'agency', 'metrics', 'clicks', 'likes', 'ads', 'posting', 'postings', 'poster', 'website', 'online', 'digital', 'content', 'brand', 'analytics', 'campaign', 'marketing', 'conversion', 'impressions',
+  // Common Client / Technical Tokens
+  'tech', 'technically', 'transforming', 'infosystems', 'doaguru', 'navjyoti', 'hospital', 'medicity', 'eye'
+]);
 const WORD_PATTERN = /[\u0900-\u097f]+|[A-Za-z]+(?:['’][A-Za-z]+)*/g;
 
 // Common valid English contractions without apostrophe commonly produced by OCR punctuation drops
@@ -105,6 +115,9 @@ const checkWord = async (word, whitelist = null) => {
 
   // Whitelist check (case-insensitive)
   const lowered = cleanWord.toLowerCase();
+  if (GLOBAL_RECOGNIZED_TERMS.has(lowered)) {
+    return { correct: true, suggestions: [] };
+  }
   if (whitelist) {
     if (whitelist instanceof Set) {
       if (whitelist.has(lowered)) return { correct: true, suggestions: [] };
@@ -224,6 +237,9 @@ const checkText = async (text, whitelist = null) => {
     seen.add(key);
 
     // Whitelist check (exact or fuzzy >= 80%)
+    if (GLOBAL_RECOGNIZED_TERMS.has(cleanWord.toLowerCase())) {
+      continue;
+    }
     if (whitelistSet.has(cleanWord.toLowerCase())) {
       continue;
     }

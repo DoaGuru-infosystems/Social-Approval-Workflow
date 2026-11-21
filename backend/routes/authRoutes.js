@@ -99,8 +99,9 @@ router.get('/meta/instagram/callback', async (req, res) => {
   try {
     const result = await metaService.handleInstagramCallback(code, state, req);
     const targetBase = result.frontendOrigin || redirectBase;
+    const warningParam = result.warning ? `&warning=${encodeURIComponent(result.warning)}` : '';
     return res.redirect(
-      `${targetBase}/admin?tab=clients&client=${result.clientId}&connected=instagram&success=true`
+      `${targetBase}/admin?tab=clients&client=${result.clientId}&connected=instagram&success=true${warningParam}`
     );
   } catch (err) {
     console.error('Instagram OAuth callback error:', err);

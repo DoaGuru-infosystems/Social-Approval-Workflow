@@ -202,6 +202,21 @@ const detectPosterIcon = (boxText, fullContext = '') => {
     };
   }
 
+  // 7. Social Media Vector Icons (LinkedIn, Instagram, Facebook, YouTube, Meta Ads, WhatsApp, Twitter/X)
+  if (
+    /^(in|fb|ig|yt|x|∞|८०|co|00)$/i.test(clean) ||
+    (/(^|\s)(in|fb|ig|yt)(\s|$)/i.test(clean) && /(linkedin|facebook|instagram|youtube|meta|social|share|follow)/i.test(ctxLower)) ||
+    (/(^|\s)in(\s|$)/i.test(clean) && /linkedin/i.test(ctxLower)) ||
+    (/(linkedin|facebook|instagram|youtube|meta ads|whatsapp|twitter)/i.test(ctxLower) && clean.length <= 8)
+  ) {
+    return {
+      isIcon: true,
+      iconType: 'social_media_icon',
+      iconName: 'Social Media Vector Icon',
+      iconSymbol: '📱',
+    };
+  }
+
   return { isIcon: false, iconType: null, iconName: null, iconSymbol: null };
 };
 

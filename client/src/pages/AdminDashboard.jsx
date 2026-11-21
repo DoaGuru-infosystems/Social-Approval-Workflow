@@ -2072,16 +2072,23 @@ const AdminDashboard = () => {
                                     <h4 className="text-base font-bold text-[#2B2A27] capitalize">
                                       {platformKey}
                                     </h4>
-                                    <span
-                                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                                        p.is_connected
-                                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                          : 'bg-stone-100 text-stone-600 border border-stone-200'
-                                      }`}
-                                    >
-                                      <span className={`w-1.5 h-1.5 rounded-full ${p.is_connected ? 'bg-emerald-500 animate-pulse' : 'bg-stone-400'}`} />
-                                      {p.is_connected ? 'Connected' : 'Not Connected'}
-                                    </span>
+                                    {p.is_connected && (!p.platform_username || !p.profile_url) ? (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                        Identity Verification Pending
+                                      </span>
+                                    ) : (
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                          p.is_connected
+                                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                            : 'bg-stone-100 text-stone-600 border border-stone-200'
+                                        }`}
+                                      >
+                                        <span className={`w-1.5 h-1.5 rounded-full ${p.is_connected ? 'bg-emerald-500 animate-pulse' : 'bg-stone-400'}`} />
+                                        {p.is_connected ? 'Connected' : 'Not Connected'}
+                                      </span>
+                                    )}
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">
                                       Auto-Refresh: ON
                                     </span>
@@ -2101,7 +2108,9 @@ const AdminDashboard = () => {
                                         <ExternalLink className="w-3 h-3 shrink-0" />
                                       </a>
                                     ) : (
-                                      <span className="text-xs text-stone-400 italic">No profile URL configured</span>
+                                      <span className="text-xs text-amber-600 italic font-medium">
+                                        {p.is_connected ? 'Identity Verification Pending' : 'No profile URL configured'}
+                                      </span>
                                     )}
                                   </div>
                                 </div>
@@ -2112,7 +2121,14 @@ const AdminDashboard = () => {
                             {p.is_connected && (
                               <div className="p-3 rounded-xl bg-stone-50 border border-[#E5E2DA] flex items-center gap-4 text-xs font-mono text-stone-600 flex-wrap">
                                 <div><span className="text-stone-400">Method: </span><span className="font-semibold uppercase text-stone-800">{p.connection_method || 'oauth'}</span></div>
-                                {p.platform_username && <div><span className="text-stone-400">Username: </span><span className="font-semibold text-stone-800">@{p.platform_username}</span></div>}
+                                <div>
+                                  <span className="text-stone-400">Username: </span>
+                                  {p.platform_username ? (
+                                    <span className="font-semibold text-stone-800">@{p.platform_username}</span>
+                                  ) : (
+                                    <span className="font-semibold text-amber-700 italic">Identity Verification Pending</span>
+                                  )}
+                                </div>
                                 {p.platform_id && <div><span className="text-stone-400">Account ID: </span><span className="text-stone-800">{p.platform_id}</span></div>}
                                 {p.masked_access_token && <div><span className="text-stone-400">Token: </span><span className="text-stone-800">{p.masked_access_token}</span></div>}
                                 {p.token_expires_at && <div><span className="text-stone-400">Expires: </span><span className="text-stone-800">{formatDate(p.token_expires_at)}</span></div>}

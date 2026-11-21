@@ -540,10 +540,12 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     const firstCol = textCrossClientReport.collisions[0];
     const reasonMsg = `Caption/Title me dusre client '${firstCol?.foreignClient?.name}' ke brand elements mile (${firstCol?.reasons?.join('; ')})`;
     textEnforcementReasons.push(reasonMsg);
-  } else if (hasSpellingIssues || hasBannedWords) {
+  } else if (hasBannedWords) {
     textEnforcementState = 'red_block';
-    if (hasBannedWords) textEnforcementReasons.push(`Banned brand terms found: ${bannedWordsFound.join(', ')}`);
-    if (hasSpellingIssues) textEnforcementReasons.push(`Text spelling errors: ${spellingIssues.length} issue(s) detected`);
+    textEnforcementReasons.push(`Banned brand terms found: ${bannedWordsFound.join(', ')}`);
+  } else if (hasSpellingIssues) {
+    textEnforcementState = 'yellow_alert';
+    textEnforcementReasons.push(`Text spelling warning: ${spellingIssues.length} issue(s) detected. Visually verify before publishing.`);
   }
 
   const passed = textEnforcementState === 'green_clean' && !hasMissingMandatory && !hasPhoneIssues;
@@ -1035,6 +1037,11 @@ const buildAnnotatedPosterBoxes = ({
       }
     }
 
+    // Check if box text contains mixed scripts (Latin + Devanagari in short fragment)
+    if (!boxNoiseReason && /[A-Za-z]/.test(text) && /[\u0900-\u097f]/.test(text) && text.length < 40) {
+      boxNoiseReason = `Mixed script OCR artifact (Latin + Devanagari graphic/icon noise in '${text}')`;
+    }
+
     // 3. Derive poster_expected dynamically from caption and brand rules
     let posterExpected = text;
     if (isForeignCollision) {
@@ -1172,14 +1179,14 @@ const buildAnnotatedPosterBoxes = ({
       statusLabel = 'GREEN = OK';
       reason = 'Isolated UI element — spelling check skipped (UI chrome).';
     } else if (boxSpellError && !isSpellWordWhitelisted) {
-      if (regionType === 'uncertain') {
-        status = 'yellow';
-        statusLabel = 'YELLOW = Manual Check';
+      status = 'yellow';
+      statusLabel = 'YELLOW = OCR Doubt';
+      if (confPercent < 80) {
+        reason = `OCR Doubt: Low confidence (${confPercent}% < 80%) on text "${boxSpellError.word}". Font styling or icon artifact.`;
+      } else if (regionType === 'uncertain') {
         reason = `Spelling uncertainty: "${boxSpellError.word}" (geometric region uncertain — manual check recommended)`;
       } else {
-        status = 'red';
-        statusLabel = 'RED = Real Error';
-        reason = `Spelling error detected on poster: "${boxSpellError.word}"${boxSpellError.suggestion ? ` (Did you mean: "${boxSpellError.suggestion}"?)` : ''}`;
+        reason = `Spelling check notice: "${boxSpellError.word}"${boxSpellError.suggestion ? ` (Did you mean: "${boxSpellError.suggestion}"?)` : ''} — OCR doubt/icon artifact ho sakta hai (Poster is NOT penalized).`;
       }
     } else if (suspectWords && suspectWords.length > 0) {
       const firstSuspect = suspectWords[0];
@@ -1830,16 +1837,27 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
         `Cross-Client / Brand Compliance Block: Post me na to official logo mila, na brand name mila, aur na hi registered phone number mila (Teeno mandatory checks fail ho gaye). Galat client ka content submit nahi kiya ja sakta.`
       );
     }
-  } else if (realErrorsOnPoster.length > 0) {
-    imageEnforcementState = 'red_block';
-    imageEnforcementReasons.push(`Poster par ${realErrorsOnPoster.length} real error(s) detect huye hain.`);
   } else if (hasBannedWords) {
     imageEnforcementState = 'red_block';
     imageEnforcementReasons.push(`Banned brand terms detected: ${bannedWordsFound.join(', ')}.`);
   }
 
   // YELLOW ALERT (Soft Gate): At least 1 anchor passed -> Proceed with warning!
+  // Note: Spelling check issues (OCR doubts/misreads/icons) do NOT block posting; they produce a Yellow Alert warning.
   if (imageEnforcementState !== 'red_block') {
+    if (realErrorsOnPoster.length > 0) {
+      imageEnforcementState = 'yellow_alert';
+      const errorWords = realErrorsOnPoster
+        .map((e) => {
+          const match = (e.reason || '').match(/"([^"]+)"/);
+          return match ? match[1] : (e.ocr_read || 'Error');
+        })
+        .slice(0, 4)
+        .join(', ');
+      imageEnforcementReasons.push(
+        `Poster Spelling Warning: Poster par ${realErrorsOnPoster.length} spelling check alert(s) detect huye hain (${errorWords}). OCR misread/icon ho sakta hai, visually verify karke proceed karein.`
+      );
+    }
     if (isLogoColorChanged) {
       imageEnforcementState = 'yellow_alert';
       imageEnforcementReasons.push(

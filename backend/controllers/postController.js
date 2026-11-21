@@ -1248,22 +1248,23 @@ const enrichAiReport = (r) => {
     );
   }
 
-  // Rule B: All 3 Anchors Failed OR Real Spelling Mistakes on Poster -> RED BLOCK
+  // Rule B: All 3 Anchors Failed -> RED BLOCK
   if (anchorsCount === 0) {
     reasons.push(
       'Cross-Client / Brand Compliance Block: Post me na to official logo mila, na brand name mila, aur na hi registered phone number mila (Teeno mandatory checks fail ho gaye).'
     );
+  }
+
+  let enforcementState = r.enforcement_state;
+  if (isLogoWrongOrMissing || anchorsCount === 0) {
+    enforcementState = 'red_block';
   } else if (realErrorsOnPoster.length > 0) {
+    enforcementState = 'yellow_alert';
     const errorWords = realErrorsOnPoster.map((e) => {
       const match = (e.reason || '').match(/"([^"]+)"/);
       return match ? match[1] : (e.ocr_read || 'Error');
     }).slice(0, 4).join(', ');
-    reasons.push(`Poster par ${realErrorsOnPoster.length} real spelling mistake(s) detect huye hain (${errorWords}). Pehle creative me theek karein.`);
-  }
-
-  let enforcementState = r.enforcement_state;
-  if (isLogoWrongOrMissing || anchorsCount === 0 || realErrorsOnPoster.length > 0) {
-    enforcementState = 'red_block';
+    reasons.push(`Poster Spelling Warning: Poster par ${realErrorsOnPoster.length} spelling check alert(s) detect huye hain (${errorWords}). OCR misread/icon ho sakta hai, visually verify karke proceed karein.`);
   } else if (isLogoColorChanged) {
     enforcementState = 'yellow_alert';
     reasons.push(

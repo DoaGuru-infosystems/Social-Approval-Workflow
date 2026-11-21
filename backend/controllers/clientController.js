@@ -187,7 +187,7 @@ const getClientById = async (req, res) => {
     // Fetch connected social accounts (no tokens, supports both client_social_accounts and legacy social_accounts)
     const [socialAccounts] = await pool.query(
       `SELECT id, client_id, platform, 
-              COALESCE(platform_username, platform) AS account_name, 
+              COALESCE(platform_username, 'Identity Verification Pending') AS account_name, 
               platform_id AS platform_account_id, 
               profile_url,
               is_connected AS is_active, 
