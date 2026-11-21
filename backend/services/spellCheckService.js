@@ -1,9 +1,19 @@
 const fs = require('fs');
 const path = require('path');
 const hindiDictionaryService = require('./hindiDictionaryService');
+const garbageFilterService = require('./garbageFilterService');
 
 const DEVANAGARI_REGEX = /[\u0900-\u097f]/;
 const WORD_PATTERN = /[\u0900-\u097f]+|[A-Za-z]+(?:['’][A-Za-z]+)*/g;
+
+// Common valid English contractions without apostrophe commonly produced by OCR punctuation drops
+const COMMON_CONTRACTIONS = new Set([
+  'thats', 'isnt', 'theyre', 'arent', 'dont', 'didnt', 'doesnt', 'wont',
+  'cant', 'couldnt', 'shouldnt', 'wouldnt', 'hasnt', 'havent', 'hadnt',
+  'youre', 'weve', 'theyve', 'youve', 'youll', 'theyll', 'shell', 'hell',
+  'itll', 'whats', 'whos', 'wheres', 'whens', 'whys', 'hows', 'lets',
+  'competitors', 'clients', 'todays'
+]);
 
 // Module-level in-memory cache for dictionaries
 let cachedEnglishSpell = null;
@@ -108,6 +118,10 @@ const checkWord = async (word, whitelist = null) => {
   const isHindi = isDevanagariWord(cleanWord);
 
   if (isHindi) {
+    // Digits or invalid matras inside Devanagari words are OCR artifacts, not words
+    if (/[\u0966-\u096F]/.test(cleanWord) || /^[\u093e-\u094f]/.test(cleanWord)) {
+      return { correct: true, suggestions: [] };
+    }
     const isOk = hindiDictionaryService.isCorrect(cleanWord, whitelist);
     if (isOk) {
       return { correct: true, suggestions: [] };
@@ -115,6 +129,10 @@ const checkWord = async (word, whitelist = null) => {
     const suggestions = hindiDictionaryService.suggest(cleanWord, whitelist, 5);
     return { correct: false, suggestions };
   } else {
+    // English contraction tolerance (OCR dropped apostrophe)
+    if (COMMON_CONTRACTIONS.has(lowered)) {
+      return { correct: true, suggestions: [] };
+    }
     // English / Latin check (check exact case and lowercase)
     const isCorrect =
       cachedEnglishSpell.correct(cleanWord) || cachedEnglishSpell.correct(lowered);
@@ -183,13 +201,19 @@ const checkText = async (text, whitelist = null) => {
     // Skip pure numerals (Devanagari or Arabic digits)
     if (/^[\u0966-\u096f0-9]+$/.test(cleanWord)) continue;
 
+    // Skip OCR noise and icon artifacts identified by garbageFilterService
+    if (garbageFilterService.isGarbageToken(cleanWord, whitelistSet)) continue;
+
     const isHindi = isDevanagariWord(cleanWord);
+
+    // Skip Hindi tokens containing numerals or invalid matras
+    if (isHindi && (/[\u0966-\u096F]/.test(cleanWord) || /^[\u093e-\u094f]/.test(cleanWord))) continue;
+
+    // Skip common English contractions without apostrophe (OCR dropped apostrophe)
+    if (!isHindi && COMMON_CONTRACTIONS.has(cleanWord.toLowerCase())) continue;
 
     // Skip uppercase Latin acronyms (e.g. OPD, MBBS, DNB, IAP, PDF, NEUROLOGY)
     if (!isHindi && /^[A-Z]{2,8}$/.test(cleanWord)) continue;
-
-    // Skip OCR detached matra ligature artifacts (e.g. isolated short-i matra)
-    if (isHindi && /^[\u093e-\u094f]/.test(cleanWord)) continue;
 
     const script = isHindi ? 'hindi' : 'english';
     const key = `${script}:${cleanWord.toLowerCase()}`;

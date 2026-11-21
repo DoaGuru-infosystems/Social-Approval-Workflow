@@ -434,6 +434,10 @@ const getBrandGuidelines = async (req, res) => {
         whitelist_words: typeof g.whitelist_words === 'string' ? JSON.parse(g.whitelist_words) : g.whitelist_words || [],
         banned_words: typeof g.banned_words === 'string' ? JSON.parse(g.banned_words) : g.banned_words || [],
         mandatory_phrases: typeof g.mandatory_phrases === 'string' ? JSON.parse(g.mandatory_phrases) : g.mandatory_phrases || [],
+        required_brand_tokens: typeof g.required_brand_tokens === 'string' ? JSON.parse(g.required_brand_tokens) : g.required_brand_tokens || [],
+        official_logo_brand_name: g.official_logo_brand_name || null,
+        tagline_policy: g.tagline_policy || 'NONE',
+        tagline_text: g.tagline_text || null,
       },
     });
   } catch (error) {
@@ -453,24 +457,48 @@ const getBrandGuidelines = async (req, res) => {
 const updateBrandGuidelines = async (req, res) => {
   try {
     const { id } = req.params;
-    const { whitelist_words, banned_words, mandatory_phrases } = req.body;
+    const {
+      whitelist_words,
+      banned_words,
+      mandatory_phrases,
+      official_logo_brand_name,
+      required_brand_tokens,
+      tagline_policy,
+      tagline_text,
+    } = req.body;
 
     const cleanWhitelist = parseCleanList(whitelist_words);
     const cleanBanned = parseCleanList(banned_words);
     const cleanMandatory = parseCleanList(mandatory_phrases);
+    const cleanTokens = parseCleanList(required_brand_tokens);
+    const validTaglinePolicy = ['MANDATORY', 'OPTIONAL', 'NONE'].includes(String(tagline_policy).toUpperCase())
+      ? String(tagline_policy).toUpperCase()
+      : 'NONE';
 
     await pool.query(
-      `INSERT INTO client_brand_guidelines (client_id, whitelist_words, banned_words, mandatory_phrases)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO client_brand_guidelines (
+         client_id, whitelist_words, banned_words, mandatory_phrases,
+         official_logo_brand_name, required_brand_tokens, tagline_policy, tagline_text, logo_config_updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
        ON DUPLICATE KEY UPDATE
          whitelist_words = VALUES(whitelist_words),
          banned_words = VALUES(banned_words),
-         mandatory_phrases = VALUES(mandatory_phrases)`,
+         mandatory_phrases = VALUES(mandatory_phrases),
+         official_logo_brand_name = VALUES(official_logo_brand_name),
+         required_brand_tokens = VALUES(required_brand_tokens),
+         tagline_policy = VALUES(tagline_policy),
+         tagline_text = VALUES(tagline_text),
+         logo_config_updated_at = NOW()`,
       [
         id,
         JSON.stringify(cleanWhitelist),
         JSON.stringify(cleanBanned),
         JSON.stringify(cleanMandatory),
+        official_logo_brand_name ? String(official_logo_brand_name).trim() : null,
+        cleanTokens.length > 0 ? JSON.stringify(cleanTokens) : null,
+        validTaglinePolicy,
+        tagline_text ? String(tagline_text).trim() : null,
       ]
     );
 
@@ -482,6 +510,10 @@ const updateBrandGuidelines = async (req, res) => {
         whitelist_words: cleanWhitelist,
         banned_words: cleanBanned,
         mandatory_phrases: cleanMandatory,
+        official_logo_brand_name: official_logo_brand_name ? String(official_logo_brand_name).trim() : null,
+        required_brand_tokens: cleanTokens,
+        tagline_policy: validTaglinePolicy,
+        tagline_text: tagline_text ? String(tagline_text).trim() : null,
       },
     });
   } catch (error) {

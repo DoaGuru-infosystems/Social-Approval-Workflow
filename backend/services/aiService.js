@@ -11,6 +11,7 @@ const googleVisionService = require('./googleVisionService');
 const brandLogoService = require('./brandLogoService');
 const grammarService = require('./grammarService');
 const crossClientService = require('./crossClientService');
+const emojiIconService = require('./emojiIconService');
 const fuzzball = require('fuzzball');
 
 // Ensure environment variables are loaded if invoked directly
@@ -39,7 +40,7 @@ const getClientGuidelines = async (clientId) => {
 
   // Fetch brand guidelines and client official identity (including GMB synced data)
   const [rows] = await pool.query(
-    'SELECT whitelist_words, banned_words, mandatory_phrases, reference_logo_url FROM client_brand_guidelines WHERE client_id = ?',
+    'SELECT * FROM client_brand_guidelines WHERE client_id = ?',
     [clientId]
   );
 
@@ -150,6 +151,11 @@ const getClientGuidelines = async (clientId) => {
     gmb_phone: gmbSnapshot?.nationalPhoneNumber || gmbSnapshot?.internationalPhoneNumber || '',
     gmb_address: gmbSnapshot?.formattedAddress || '',
     reference_logo_url: g?.reference_logo_url || null,
+    official_logo_brand_name: g?.official_logo_brand_name || null,
+    required_brand_tokens: parseList(g?.required_brand_tokens, false),
+    tagline_policy: g?.tagline_policy || 'NONE',
+    tagline_text: g?.tagline_text || null,
+    logo_config_updated_at: g?.logo_config_updated_at || null,
   };
 };
 
@@ -325,6 +331,9 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
   if (title && title.trim()) textParts.push(title.trim());
   if (caption && caption.trim()) textParts.push(caption.trim());
   const combinedText = textParts.join('\n');
+
+  // Detect and analyze emojis in text/caption
+  const textEmojiReport = emojiIconService.detectTextEmojis(combinedText);
 
   const isDevanagari = (text) => {
     if (!text || typeof text !== 'string') return false;
@@ -556,6 +565,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     text_status: 'completed',
     passed,
     summary,
+    emoji_analysis: textEmojiReport,
     enforcement_state: textEnforcementState,
     enforcement_reasons: textEnforcementReasons,
     cross_client_report: textCrossClientReport,
@@ -1111,6 +1121,9 @@ const buildAnnotatedPosterBoxes = ({
 
     const isIsolatedElement = (regionType === 'isolated_element') && !hasBrandingOrContact;
 
+    // Detect Graphic Vector Icons & Emojis on poster
+    const iconAnalysis = emojiIconService.detectPosterIcon(text, caption || '');
+
     if (isForeignCollision) {
       if (clientIdentityAnchorsCount >= 1) {
         status = 'yellow';
@@ -1149,6 +1162,11 @@ const buildAnnotatedPosterBoxes = ({
       status = 'red';
       statusLabel = 'RED = Real Error';
       reason = brandErrorReason;
+    } else if (iconAnalysis.isIcon && !hasBrandingOrContact) {
+      status = 'green';
+      statusLabel = 'GREEN = OK';
+      reason = `Graphic element verified: ${iconAnalysis.iconName} ${iconAnalysis.iconSymbol || ''} recognized on poster.`;
+      posterExpected = `${iconAnalysis.iconName} ${iconAnalysis.iconSymbol || ''}`;
     } else if (isIsolatedElement) {
       status = 'green';
       statusLabel = 'GREEN = OK';
@@ -1623,28 +1641,55 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     error_type: 'HUMAN_ERROR',
   }));
 
-  // Dedicated Brand Logo Verification Pipeline (Guaranteed Dual-Image Auditor + Python CV Fallback)
+  // Dedicated Universal Brand Logo Verification Pipeline (Independent Symbol + Name + Tagline + Layout)
   let logoCheck = null;
 
+  const logoConfig = {
+    official_logo_brand_name: guidelines.official_logo_brand_name,
+    required_brand_tokens: guidelines.required_brand_tokens || [],
+    tagline_policy: guidelines.tagline_policy || 'NONE',
+    tagline_text: guidelines.tagline_text || null,
+    ocr_blocks: (remoteResult?.ocr_boxes || remoteResult?.annotated_regions || []).map((b) => ({
+      text: b.ocr_read || b.text || '',
+      rect: b.rect || b.bbox || [],
+      confidence: b.confidence || 0,
+    })),
+  };
+
   if (!resolvedLogoPath) {
-    // Logo upload nahi hai to SKIPPED dikhao, FAIL mat maano
     logoCheck = {
-      status: 'SKIPPED',
+      status: 'FAIL',
+      code: 'REFERENCE_LOGO_UNCONFIGURED',
       found: false,
       score: 0.0,
       location: 'unknown',
-      location_hindi: 'Kahin nahi mila',
+      location_hindi: 'Kahin nahi mila (unknown)',
       size_percent: 0,
-      reason: 'SKIPPED',
-      suggestion: 'Logo Check Skipped - Logo upload nahi hai',
-      checked_by: 'System',
+      reason: 'REFERENCE_LOGO_UNCONFIGURED',
+      suggestion: 'Client Brand Guidelines me official brand logo configure nahi hai. Pehle official logo upload karein.',
+      checked_by: 'Python',
+      enforcement_state: 'red_block',
+    };
+  } else if (!guidelines.official_logo_brand_name) {
+    logoCheck = {
+      status: 'FAIL',
+      code: 'LOGO_IDENTITY_UNCONFIGURED',
+      found: false,
+      score: 0.0,
+      location: 'unknown',
+      location_hindi: 'Kahin nahi mila (unknown)',
+      size_percent: 0,
+      reason: 'LOGO_IDENTITY_UNCONFIGURED',
+      suggestion: 'Client Brand Guidelines me official logo identity (official_logo_brand_name) configure nahi hai. Pehle brand name configure karein.',
+      checked_by: 'Python',
+      enforcement_state: 'red_block',
     };
   } else {
-    // Always use dedicated brand logo auditor with auto tight-crop, dual-zone CV, and strict emblem verification
     try {
       logoCheck = await brandLogoService.checkBrandLogo({
         postImagePath: resolvedImagePath,
         referenceLogoPath: resolvedLogoPath,
+        logoConfig,
       });
       if (!logoCheck || !logoCheck.checked_by) {
         if (logoCheck) logoCheck.checked_by = 'Python';
@@ -1656,26 +1701,36 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
         found: false,
         score: 0.0,
         location: 'unknown',
-        location_hindi: 'Kahin nahi mila',
+        location_hindi: 'Kahin nahi mila (unknown)',
         size_percent: 0,
         reason: 'MISSING',
         suggestion: 'Logo post me kahin nahi mila. Logo ko post me lagayein.',
         checked_by: 'Python',
+        enforcement_state: 'red_block',
       };
     }
+  }
+
+  // Cryptographic integrity hashes
+  let verifiedImageHash = null;
+  let verifiedLogoConfigHash = null;
+  if (resolvedImagePath && fs.existsSync(resolvedImagePath)) {
+    const crypto = require('crypto');
+    verifiedImageHash = crypto.createHash('sha256').update(fs.readFileSync(resolvedImagePath)).digest('hex');
+    verifiedLogoConfigHash = crypto.createHash('sha256').update(JSON.stringify(logoConfig)).digest('hex');
   }
 
   // 3-Pillar Mandatory Cross-Client Identity Evaluation:
   // 1. Logo (Non-negotiable if configured)
   // 2. Brand Name
   // 3. Phone Number
-  const isLogoConfigured = Boolean(logoCheck && logoCheck.status !== 'SKIPPED');
+  const isLogoConfigured = Boolean(logoCheck);
   const isLogoWrongOrMissing = Boolean(
-    isLogoConfigured &&
-    (logoCheck.status === 'FAIL' || logoCheck.reason === 'WRONG_LOGO' || logoCheck.reason === 'MISSING')
+    logoCheck &&
+    (logoCheck.status === 'FAIL' || logoCheck.reason === 'WRONG_LOGO' || logoCheck.reason === 'MISSING' || logoCheck.reason === 'REFERENCE_LOGO_UNCONFIGURED' || logoCheck.reason === 'LOGO_IDENTITY_UNCONFIGURED')
   );
   const isLogoColorChanged = Boolean(
-    isLogoConfigured &&
+    logoCheck &&
     (logoCheck.reason === 'COLOR_CHANGED' || (logoCheck.status === 'PASS' && logoCheck.reason === 'COLOR_CHANGED'))
   );
   const logoFound = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found && !isLogoWrongOrMissing);
@@ -1875,6 +1930,9 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     brand_identity_check: brandIdentityCheck,
     logo_check: logoCheck,
     is_cross_client_mismatch: isCrossClientMismatch,
+    verified_image_hash: verifiedImageHash,
+    verified_logo_config_hash: verifiedLogoConfigHash,
+    manual_review_required: Boolean(logoCheck?.reason === 'MANUAL_REVIEW_BLOCKED'),
   };
 };
 
@@ -2073,6 +2131,7 @@ const mergeAiCheckResults = (textResult, imageResult) => {
     brand_identity_check: mergedBrandIdentity,
     brand_rules_applied: textResult?.brand_rules_applied || {},
     logo_check: imageResult?.logo_check || null,
+    emoji_analysis: textResult?.emoji_analysis || null,
     text_result: textResult,
     image_result: imageResult,
   };

@@ -63,13 +63,23 @@ const analyzeToken = (token, whitelist = null) => {
     return { isGarbage: false, reason: null };
   }
 
-  // Pure numbers, valid punctuation, or dates (e.g. "2026", "0761-4927230", "14")
-  if (/^[\d\s,.\-+/:()]+$/.test(raw)) {
+  // Pure numbers, valid punctuation, or dates (e.g. "2026", "0761-4927230", "14", Devanagari numerals "९१", "२")
+  if (/^[\d\s,.\-+/:()]+$/.test(raw) || /^[\u0966-\u096F\s,.\-+/:()]+$/.test(raw)) {
     // Lone single punctuation symbol like "-" or "?" or "1?"
-    if (raw.length <= 2 && !/^\d+$/.test(raw)) {
+    if (raw.length <= 2 && !/^\d+$/.test(raw) && !/^[\u0966-\u096F]+$/.test(raw)) {
       return { isGarbage: true, reason: 'isolated_symbol' };
     }
-    return { isGarbage: false, reason: null };
+    return { isGarbage: false, reason: null, isNumeric: true };
+  }
+
+  // Devanagari Matra on Digit or Non-Consonant (e.g. "८ो", "४ो", "१ा", "९े")
+  // In Devanagari, matras (vowel signs U+093E to U+094F) can ONLY attach to consonants.
+  // A matra on a digit or isolated matras is 100% an OCR graphic artifact from an icon or vector artwork.
+  if (/[\u0966-\u096F][\u093E-\u094F]/.test(raw) || /^[\u093E-\u094F]+$/.test(raw)) {
+    return {
+      isGarbage: true,
+      reason: 'invalid_devanagari_glyph (matra on digit or isolated matra artifact from icon)',
+    };
   }
 
   const hasDevanagari = DEVANAGARI_REGEX.test(raw);
@@ -157,7 +167,7 @@ const analyzeToken = (token, whitelist = null) => {
   const stripped = raw.replace(/[.,:;'"_()\\[\\]{}]/g, '');
   if (stripped.length <= 2) {
     const strippedLower = stripped.toLowerCase();
-    if (!VALID_SHORT_WORDS.has(strippedLower)) {
+    if (!VALID_SHORT_WORDS.has(strippedLower) && !VALID_SHORT_WORDS.has(stripped)) {
       // Single latin letter (like "h", "k", "s", "q") except 'a' or 'i'
       if (stripped.length === 1 && hasLatin) {
         return {
@@ -165,8 +175,15 @@ const analyzeToken = (token, whitelist = null) => {
           reason: 'isolated_single_character (low semantic value)',
         };
       }
+      // Isolated Devanagari character / glyph not in valid words (e.g. isolated "ञ", "ङ")
+      if (stripped.length <= 2 && hasDevanagari) {
+        return {
+          isGarbage: true,
+          reason: 'unrecognized_short_devanagari (isolated 1-2 char glyph artifact)',
+        };
+      }
       // 2-letter token not recognized as valid word or acronym
-      if (stripped.length <= 2 && (hasLatin || !hasDevanagari)) {
+      if (stripped.length <= 2) {
         return {
           isGarbage: true,
           reason: 'unrecognized_short_token (length <= 2 and not a standard word)',

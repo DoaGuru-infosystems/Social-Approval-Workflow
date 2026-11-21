@@ -21,6 +21,47 @@ const publishPost = async (postId) => {
   const post = posts[0];
   const clientId = post.client_id;
 
+  // Detect whether media is video or image
+  const isVideo = Boolean(post.image_path && /\.(mp4|mov|avi|webm|mkv|wmv)$/i.test(post.image_path));
+
+  // ZERO-TRUST PUBLISHING GATE: Strict Brand Logo Verification & Asset Integrity Check
+  if (post.image_path && !isVideo) {
+    const [checkRows] = await pool.query(
+      'SELECT logo_check, enforcement_state FROM ai_check_results WHERE post_id = ? ORDER BY id DESC LIMIT 1',
+      [postId]
+    );
+
+    let logoCheck = null;
+    let enforcementState = null;
+    if (checkRows.length > 0) {
+      enforcementState = checkRows[0].enforcement_state;
+      try {
+        logoCheck = typeof checkRows[0].logo_check === 'string'
+          ? JSON.parse(checkRows[0].logo_check)
+          : checkRows[0].logo_check;
+      } catch (_) {}
+    }
+
+    if (!logoCheck || logoCheck.status !== 'PASS' || enforcementState === 'red_block') {
+      const errReason = logoCheck?.reason || (enforcementState === 'red_block' ? 'RED_BLOCK' : 'LOGO_UNVERIFIED');
+      throw new Error(`Zero-Trust Publishing Gate: Post ${postId} cannot be published. Brand logo check is ${logoCheck?.status || 'MISSING'} (${errReason}).`);
+    }
+
+    // Cryptographic hash integrity check
+    if (post.verified_image_hash) {
+      const crypto = require('crypto');
+      const fs = require('fs');
+      const path = require('path');
+      const resolvedPath = path.resolve(__dirname, '..', post.image_path);
+      if (fs.existsSync(resolvedPath)) {
+        const currentHash = crypto.createHash('sha256').update(fs.readFileSync(resolvedPath)).digest('hex');
+        if (currentHash !== post.verified_image_hash) {
+          throw new Error(`Zero-Trust Publishing Gate: Post ${postId} image has been altered since AI verification (hash mismatch). Re-verification required.`);
+        }
+      }
+    }
+  }
+
   // Determine target platforms
   let targets = [];
   if (post.target_platforms) {

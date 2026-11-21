@@ -1,95 +1,70 @@
 """
-Brand Logo Verification Engine for Doaguru Social Approval Platform.
-Architecture: AI FIRST (Vision AI / Gemini), with OpenCV PYTHON FALLBACK (SIFT + ORB + Template Matching).
+Universal Client Logo Verification Engine for Social Approval Platform.
+Architecture: Multi-Component Independent Verification (Symbol + Brand Name + Tagline + Layout).
 
 Strict Policies:
 - NO-DISK policy: Operates entirely in RAM with in-memory buffers.
-- A2 Memory Guard: Downscales poster to max 1600px before inspection.
-- Location Independent: Searches the entire canvas without spatial bias.
+- A2 Memory Guard: Downscales large posters/logos to safe dimensions in RAM before processing.
+- Alpha-Channel Aware: Preserves RGBA transparency, crops to visible artwork, composites on dual backdrops.
+- Universal Dynamic Design: Zero hardcoded client names or logos.
+- Zero-Trust Policy: Missing logo or identity config strictly returns FAIL.
 """
 
 import os
 import sys
 import json
 import base64
-import urllib.request
+import difflib
 from pathlib import Path
 import cv2
 import numpy as np
 
-# A2 memory guard
+# Memory & dimension guards
 MAX_POST_SIDE = 1600
 MAX_LOGO_SIDE = 800
+
+# Decision thresholds
 PASS_THRESHOLD = 0.85
+SYMBOL_PASS_THRESHOLD = 0.75
+TEXT_EXACT_THRESHOLD = 0.98
 
-# Suggestion Rules (System fallback if AI gives no suggestion or on Python fallback)
-SUGGESTION_RULES = {
-    "MISSING": "Logo post me kahin nahi mila. Logo ko post me lagayein.",
-    "WRONG_LOGO": "Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein.",
-    "TOO_SMALL": "Logo bahut chhota hai. Logo ko kam se kam 10% bada karein.",
-    "HIDDEN": "Logo text ke peeche chhup gaya hai. Logo ko khali jagah pe le jayein.",
-    "COLOR_CHANGED": "Logo ka rang badal gaya hai. Logo ka original rang wapas rakhein.",
-    "CORRECT": "Logo bilkul sahi jagah aur size me laga hua hai.",
-    "SKIPPED": "Logo Check Skipped - Logo upload nahi hai",
-}
-
+# Hindi location mapping
 LOCATION_HINDI_MAP = {
-    "top-left": "Upar Left corner me",
-    "top-right": "Upar Right corner me",
-    "bottom-left": "Neeche Left corner me",
-    "bottom-right": "Neeche Right corner me",
-    "center": "Beech me (Center)",
-    "top": "Upar beech me",
-    "bottom": "Neeche beech me",
+    "top-left": "Upar Left corner me (top-left)",
+    "top-right": "Upar Right corner me (top-right)",
+    "bottom-left": "Neeche Left corner me (bottom-left)",
+    "bottom-right": "Neeche Right corner me (bottom-right)",
+    "center": "Beech me (center)",
+    "top": "Upar beech me (top)",
+    "bottom": "Neeche beech me (bottom)",
     "left": "Left side me",
     "right": "Right side me",
-    "unknown": "Kahin nahi mila",
+    "unknown": "Kahin nahi mila (unknown)",
+}
+
+SUGGESTION_RULES = {
+    "MISSING": "Poster par official brand logo nahi mila. Brand Guidelines se official logo lagayein.",
+    "WRONG_LOGO": "Poster par laga logo official brand logo se match nahi karta. Brand Guidelines se download karke lagayein.",
+    "REFERENCE_LOGO_UNCONFIGURED": "Client Brand Guidelines me official brand logo configure nahi hai. Pehle official logo upload karein.",
+    "LOGO_IDENTITY_UNCONFIGURED": "Client Brand Guidelines me official logo identity configure nahi hai. Pehle brand name configure karein.",
+    "TAGLINE_MISSING": "Official brand logo ka mandatory tagline poster par missing hai. Tagline ke saath complete logo lagayein.",
+    "WRONG_TAGLINE": "Logo ka tagline galat hai ya official tagline se match nahi karta.",
+    "TOO_SMALL": "Logo bahut chhota hai. Logo ko kam se kam 10% bada karein.",
+    "HIDDEN": "Logo text ya graphics ke peeche chhup gaya hai.",
+    "COLOR_CHANGED": "Logo ka rang badal gaya hai. Official color palette use karein.",
+    "MANUAL_REVIEW_BLOCKED": "Logo match me minor difference detect hua hai. Admin dwara manual review required hai.",
+    "CORRECT": "Logo bilkul sahi jagah, size aur typography me laga hua hai.",
 }
 
 
-def _is_dummy_key(key):
-    if not key or not isinstance(key, str):
-        return True
-    k = key.strip().lower()
-    return k == "" or k == "your_gemini_api_key" or "dummy" in k or "test" in k
+# ==============================================================================
+# IN-MEMORY IMAGE LOADING & PREPROCESSING (ALPHA-AWARE)
+# ==============================================================================
 
-
-def _get_api_key():
-    """Retrieve Gemini API key from environment or local .env file. Skips dummy/test keys."""
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if api_key and not _is_dummy_key(api_key):
-        return api_key.strip()
-
-    # Try loading from backend/.env if not present in os.environ
-    search_paths = [
-        Path(__file__).resolve().parent.parent / ".env",
-        Path(__file__).resolve().parent / ".env",
-        Path.cwd() / "backend" / ".env",
-        Path.cwd() / ".env",
-    ]
-    for env_path in search_paths:
-        if env_path.is_file():
-            try:
-                with open(env_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith("GEMINI_API_KEY="):
-                            val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                            if val and not _is_dummy_key(val):
-                                return val
-            except Exception:
-                pass
-    return None
-
-
-def _load_image_to_bgr(image_or_path):
+def _load_image_raw(image_or_path):
     """
-    Load an image into a BGR numpy array in RAM.
-    Accepts:
-      - numpy ndarray (already loaded BGR image)
-      - file path (string or Path)
-      - base64 string or data-uri
-      - raw bytes
+    Load an image in RAM maintaining alpha channel if present (IMREAD_UNCHANGED).
+    Accepts: numpy array, raw bytes, base64 data-uri, file path.
     """
     if image_or_path is None:
         return None
@@ -99,11 +74,10 @@ def _load_image_to_bgr(image_or_path):
 
     if isinstance(image_or_path, bytes):
         file_bytes = np.frombuffer(image_or_path, dtype=np.uint8)
-        return cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        return cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
 
     if isinstance(image_or_path, (str, Path)):
         str_val = str(image_or_path).strip()
-        # 1. Base64 string check
         if str_val.startswith("data:image") or len(str_val) > 500:
             raw_b64 = str_val
             if "," in raw_b64 and raw_b64.startswith("data:"):
@@ -111,577 +85,509 @@ def _load_image_to_bgr(image_or_path):
             try:
                 b_data = base64.b64decode(raw_b64)
                 file_bytes = np.frombuffer(b_data, dtype=np.uint8)
-                img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                if img is not None:
-                    return img
+                return cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
             except Exception:
                 pass
 
-        # 2. File path check
         path_obj = Path(str_val).expanduser().resolve()
         if path_obj.is_file():
-            img = cv2.imread(str(path_obj))
+            img = cv2.imread(str(path_obj), cv2.IMREAD_UNCHANGED)
             if img is not None:
                 return img
-            # Fallback for unicode paths on Windows
             try:
                 with open(str(path_obj), "rb") as f:
                     file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
-                    return cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                    return cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
             except Exception:
                 pass
 
     return None
 
 
-def _downscale_in_ram(bgr_image, max_side):
+def _downscale_in_ram(image, max_side):
     """A2 Guard: Downscale large image in RAM while maintaining aspect ratio."""
-    if bgr_image is None:
+    if image is None:
         return None
-    h, w = bgr_image.shape[:2]
+    h, w = image.shape[:2]
     if max(h, w) > max_side:
         scale = float(max_side) / float(max(h, w))
         new_w = max(1, int(round(w * scale)))
         new_h = max(1, int(round(h * scale)))
-        return cv2.resize(bgr_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    return bgr_image
+        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return image
 
 
-def _tight_crop_logo(bgr_img):
+def _prepare_alpha_composites(raw_logo):
     """
-    Remove surrounding white or transparent borders from reference logo.
-    Finds bounding box of non-white pixels with small padding.
+    Given a raw reference logo (potentially 4-channel RGBA):
+    1. Extracts alpha channel.
+    2. Tight-crops to visible artwork bounding box (alpha > 20).
+    3. Composites onto white (255) and dark (0) backgrounds.
+    Returns: (comp_white, comp_dark, alpha_mask, crop_bbox)
     """
-    if bgr_img is None or bgr_img.size == 0:
-        return bgr_img
+    if raw_logo is None or raw_logo.size == 0:
+        return None, None, None, None
 
-    if len(bgr_img.shape) == 3 and bgr_img.shape[2] == 4:
-        alpha = bgr_img[:, :, 3]
-        non_transparent = alpha > 20
-        if np.any(non_transparent):
-            coords = cv2.findNonZero(non_transparent.astype(np.uint8))
-            if coords is not None:
-                x, y, w, h = cv2.boundingRect(coords)
-                pad = 4
-                x1 = max(0, x - pad)
-                y1 = max(0, y - pad)
-                x2 = min(bgr_img.shape[1], x + w + pad)
-                y2 = min(bgr_img.shape[0], y + h + pad)
-                return cv2.cvtColor(bgr_img[y1:y2, x1:x2], cv2.COLOR_BGRA2BGR)
+    h, w = raw_logo.shape[:2]
+    has_alpha = (len(raw_logo.shape) == 3 and raw_logo.shape[2] == 4)
 
-    gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
-    non_white = gray < 240
-    if np.any(non_white):
-        coords = cv2.findNonZero(non_white.astype(np.uint8))
-        if coords is not None:
-            x, y, w, h = cv2.boundingRect(coords)
-            if w > 20 and h > 20:
-                pad = 4
-                x1 = max(0, x - pad)
-                y1 = max(0, y - pad)
-                x2 = min(bgr_img.shape[1], x + w + pad)
-                y2 = min(bgr_img.shape[0], y + h + pad)
-                return bgr_img[y1:y2, x1:x2]
+    if has_alpha:
+        alpha = raw_logo[:, :, 3]
+        visible_mask = alpha > 20
+        y_idx, x_idx = np.where(visible_mask)
 
-    return bgr_img
+        if len(y_idx) > 10 and len(x_idx) > 10:
+            y1, y2 = max(0, int(y_idx.min())), min(h, int(y_idx.max()) + 1)
+            x1, x2 = max(0, int(x_idx.min())), min(w, int(x_idx.max()) + 1)
+        else:
+            y1, y2, x1, x2 = 0, h, 0, w
+
+        cropped_raw = raw_logo[y1:y2, x1:x2]
+        bgr = cropped_raw[:, :, :3].astype(np.float32)
+        a_factor = (cropped_raw[:, :, 3].astype(np.float32) / 255.0)[:, :, np.newaxis]
+
+        # White backdrop composite
+        white_bg = np.ones_like(bgr) * 255.0
+        comp_white = (bgr * a_factor + white_bg * (1.0 - a_factor)).astype(np.uint8)
+
+        # Dark backdrop composite
+        comp_dark = (bgr * a_factor).astype(np.uint8)
+
+        return comp_white, comp_dark, cropped_raw[:, :, 3], (x1, y1, x2 - x1, y2 - y1)
+    else:
+        # 3-channel image (JPEG or flat PNG)
+        bgr = raw_logo[:, :, :3] if len(raw_logo.shape) == 3 else cv2.cvtColor(raw_logo, cv2.COLOR_GRAY2BGR)
+        # Tight-crop surrounding white/black borders
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        mask = (gray < 245) & (gray > 10)
+        y_idx, x_idx = np.where(mask)
+        if len(y_idx) > 10 and len(x_idx) > 10:
+            y1, y2 = max(0, int(y_idx.min()) - 4), min(h, int(y_idx.max()) + 5)
+            x1, x2 = max(0, int(x_idx.min()) - 4), min(w, int(x_idx.max()) + 5)
+            bgr = bgr[y1:y2, x1:x2]
+        return bgr, bgr, None, (0, 0, bgr.shape[1], bgr.shape[0])
 
 
-def _encode_bgr_to_base64_data_uri(bgr_img, ext=".png"):
-    """Encode BGR numpy array to base64 data URI in memory (NO-DISK)."""
+def _encode_bgr_to_base64_data_uri(bgr_img):
+    """Encode BGR numpy array directly to Base64 Data URI."""
     if bgr_img is None or bgr_img.size == 0:
         return None
     try:
-        ok, buf = cv2.imencode(ext, bgr_img)
-        if ok:
-            b64 = base64.b64encode(buf).decode("utf-8")
-            mime = "image/png" if ext == ".png" else "image/jpeg"
-            return f"data:{mime};base64,{b64}"
+        ok, buf = cv2.imencode(".png", bgr_img)
+        if not ok:
+            return None
+        b64_str = base64.b64encode(buf).decode("utf-8")
+        return f"data:image/png;base64,{b64_str}"
     except Exception:
-        pass
-    return None
+        return None
 
 
-def _map_location_hindi(location):
-    """Normalize location and return Hindi description."""
-    clean_loc = str(location or "").strip().lower().replace("_", "-")
-    for key, val in LOCATION_HINDI_MAP.items():
-        if key in clean_loc:
-            return key, val
-    return "unknown", LOCATION_HINDI_MAP["unknown"]
+def _classify_location(center_x, center_y, img_w, img_h):
+    """Determine human-friendly poster quadrant location."""
+    x_ratio = center_x / float(img_w)
+    y_ratio = center_y / float(img_h)
+
+    if y_ratio < 0.35:
+        y_pos = "top"
+    elif y_ratio > 0.65:
+        y_pos = "bottom"
+    else:
+        y_pos = "middle"
+
+    if x_ratio < 0.35:
+        x_pos = "left"
+    elif x_ratio > 0.65:
+        x_pos = "right"
+    else:
+        x_pos = "center"
+
+    if y_pos == "middle" and x_pos == "center":
+        return "center"
+    if y_pos == "middle":
+        return f"{x_pos}"
+    if x_pos == "center":
+        return f"{y_pos}"
+    return f"{y_pos}-{x_pos}"
 
 
 # ==============================================================================
-# STEP 1 - AI FIRST (Vision AI / Gemini)
+# MULTI-COMPONENT INDEPENDENT VERIFIER
 # ==============================================================================
 
-def _check_logo_with_vision_ai(post_bgr, logo_bgr, api_key=None, timeout_sec=12):
+def _normalize_text(text):
+    """Normalize string for robust token and fuzzy comparison."""
+    if not text:
+        return ""
+    import re
+    cleaned = re.sub(r"[^\w\s]", " ", str(text).upper())
+    return " ".join(cleaned.split())
+
+
+def _verify_brand_name(candidate_text, official_name, required_tokens):
     """
-    Call Multimodal Vision AI with reference logo and post image.
-    Prompt:
-      "Find this reference logo anywhere in this post image. Return JSON: {found, match_score 0-1, location: top-left/top-right/bottom-left/bottom-right/center, size_percent, reason}"
+    Component 2: Verify Brand Name & Typography.
+    Returns: (name_passed, token_score, diff_details)
     """
-    if api_key is None:
-        api_key = _get_api_key()
+    cand_norm = _normalize_text(candidate_text)
+    official_norm = _normalize_text(official_name)
 
-    if not api_key:
-        return None
+    if not official_norm:
+        return False, 0.0, "OFFICIAL_NAME_EMPTY"
 
-    # Encode in memory (RAM only)
-    ok1, logo_buf = cv2.imencode(".png", logo_bgr)
-    ok2, post_buf = cv2.imencode(".jpg", post_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
-    if not ok1 or not ok2:
-        return None
+    # Token-level presence check
+    tokens = required_tokens if (required_tokens and len(required_tokens) > 0) else official_norm.split()
+    matched_count = 0
+    missing_tokens = []
 
-    logo_b64 = base64.b64encode(logo_buf).decode("utf-8")
-    post_b64 = base64.b64encode(post_buf).decode("utf-8")
+    for tok in tokens:
+        tok_clean = _normalize_text(tok)
+        if not tok_clean:
+            continue
+        if tok_clean in cand_norm:
+            matched_count += 1
+        else:
+            # Check for close Levenshtein match on word level
+            cand_words = cand_norm.split()
+            close_match = any(
+                difflib.SequenceMatcher(None, tok_clean, cw).ratio() >= 0.85
+                for cw in cand_words
+            )
+            if close_match:
+                matched_count += 1
+            else:
+                missing_tokens.append(tok_clean)
 
-    prompt = (
-        "You are a strict, brand-agnostic logo auditor.\n"
-        "Image 1 is the official reference brand logo from Brand Guidelines.\n"
-        "Image 2 is a social media poster to inspect.\n\n"
-        "TASK:\n"
-        "Determine whether the EXACT brand logo shown in Image 1 appears anywhere on the poster in Image 2.\n\n"
-        "CRITICAL BRAND-AGNOSTIC VALIDATION RULES:\n"
-        "1. EMBLEM / ARTWORK INTEGRITY: Look at the exact central drawing, emblem, and iconography in Image 1. "
-        "The candidate logo on Image 2 MUST have the exact same drawing. If the inner drawing is changed, substituted, "
-        "or morphed (e.g. a different organ, icon, or drawing inside a similar border), you MUST return found: false, match_score: 0.50, reason: 'WRONG_LOGO'.\n"
-        "2. FULL TEXT & TYPOGRAPHY: All words and company title written in the logo in Image 1 MUST be completely and accurately present on the logo in Image 2. "
-        "If any word, suffix, or part of the brand title is omitted, missing, or altered, you MUST return found: false, match_score: 0.50, reason: 'WRONG_LOGO'.\n"
-        "3. FOREIGN OR UNRELATED BRAND: If Image 2 contains a different organization's logo or branding, return found: false, match_score: 0.0, reason: 'WRONG_LOGO'.\n"
-        "4. NEVER return found: true merely because the outer shape, circle, frame, or color matches. Both the inner artwork AND the full text must match Image 1.\n\n"
-        "Return STRICT JSON with these exact keys:\n"
-        "{\n"
-        '  "found": true or false,\n'
-        '  "match_score": number between 0.0 and 1.0 (>= 0.85 only if clear exact match with Image 1),\n'
-        '  "location": "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center" | "unknown",\n'
-        '  "size_percent": integer percentage of image width or area occupied by logo,\n'
-        '  "reason": "CORRECT" | "MISSING" | "WRONG_LOGO" | "TOO_SMALL" | "HIDDEN" | "COLOR_CHANGED",\n'
-        '  "suggestion": "One line actionable suggestion in Hindi/Hinglish for the graphic designer"\n'
-        "}"
-    )
+    total_tokens = len(tokens)
+    token_score = (matched_count / float(total_tokens)) if total_tokens > 0 else 0.0
 
-    body = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": "image/png", "data": logo_b64}},
-                    {"text": "Above is Image 1 (Official Reference Logo). Below is Image 2 (Social Media Post Image):"},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": post_b64}},
-                ]
-            }
-        ],
-        "generationConfig": {
-            "response_mime_type": "application/json",
-            "temperature": 0.1,
-        },
+    # Character-level Levenshtein similarity
+    char_sim = difflib.SequenceMatcher(None, official_norm, cand_norm).ratio()
+
+    # Exact token presence is required for PASS
+    passed = (token_score >= 0.98) or (token_score >= 0.80 and char_sim >= 0.85)
+
+    return passed, token_score, {
+        "token_score": round(token_score, 2),
+        "char_sim": round(char_sim, 2),
+        "missing_tokens": missing_tokens,
     }
 
-    # Fast multimodal vision models
-    env_model = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
-    candidate_models = list(dict.fromkeys([
-        env_model,
-        "gemini-flash-lite-latest",
-        "gemini-flash-latest"
-    ]))
-    encoded_body = json.dumps(body).encode("utf-8")
 
-    for model in candidate_models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        req = urllib.request.Request(
-            url,
-            data=encoded_body,
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
-                if resp.status == 200:
-                    resp_json = json.loads(resp.read().decode("utf-8"))
-                    candidates = resp_json.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts and "text" in parts[0]:
-                            parsed = json.loads(parts[0]["text"])
-                            return parsed
-        except Exception:
-            continue
-
-    return None
-
-
-# ==============================================================================
-# STEP 2 - PYTHON FALLBACK (OpenCV SIFT + ORB + Multi-Scale Template Matching)
-# ==============================================================================
-
-def _check_logo_with_python_cv(post_bgr, logo_bgr):
+def _verify_tagline(candidate_text, tagline_policy, tagline_text):
     """
-    Python fallback engine using:
-    - Tight-crop Reference Logo (strips whitespace borders)
-    - Multi-scale Template Matching across the WHOLE image (8% to 35% of post width)
-    - SIFT feature matching with spatial consistency
-    - Dual-Zone Structural Correlation (Emblem Zone vs Typography/Text Zone)
-    - Strict thresholding (>= 0.75 composite required for PASS)
-    - HSV Color Histogram comparison for style/tint change detection (Yellow Warning)
-    Returns: dict(found, score, location, size_percent, reason, bbox, candidate_crop_base64, reference_crop_base64)
+    Component 3: Verify Tagline according to configured policy.
+    Returns: (tagline_passed, reason)
+    """
+    policy = str(tagline_policy or "NONE").upper().strip()
+    if policy == "NONE":
+        return True, "NONE"
+
+    cand_norm = _normalize_text(candidate_text)
+    tagline_norm = _normalize_text(tagline_text or "")
+
+    if not tagline_norm:
+        return True, "TAGLINE_EMPTY_CONFIG"
+
+    tagline_present = tagline_norm in cand_norm or difflib.SequenceMatcher(None, tagline_norm, cand_norm).ratio() >= 0.70
+
+    if policy == "MANDATORY":
+        if tagline_present:
+            return True, "CORRECT"
+        else:
+            return False, "TAGLINE_MISSING"
+
+    if policy == "OPTIONAL":
+        return True, "OPTIONAL_SATISFIED"
+
+    return True, "UNKNOWN_POLICY"
+
+
+# ==============================================================================
+# MAIN MULTI-SCALE DETECTION ENGINE
+# ==============================================================================
+
+def _detect_best_logo_location(post_bgr, comp_white, comp_dark):
+    """
+    Multi-scale template matching across the poster using white and dark composites.
+    Returns: (best_score, best_bbox, best_comp_type)
     """
     post_h, post_w = post_bgr.shape[:2]
-    tight_logo = _tight_crop_logo(logo_bgr)
-    logo_h, logo_w = tight_logo.shape[:2]
-
     post_gray = cv2.cvtColor(post_bgr, cv2.COLOR_BGR2GRAY)
-    logo_gray = cv2.cvtColor(tight_logo, cv2.COLOR_BGR2GRAY)
 
-    best_template_score = 0.0
-    best_template_box = (0, 0, max(20, int(post_w * 0.1)), max(20, int(post_h * 0.1)))
+    best_score = -1.0
+    best_bbox = (0, 0, 0, 0)
+    best_comp = "white"
 
-    # 1. Multi-Scale Template Matching with sliding window
-    # Search logo sizes between 8% and 35% of post width
-    min_target_w = max(20, int(post_w * 0.08))
-    max_target_w = min(post_w - 5, int(post_w * 0.35))
+    # Evaluate both white and dark composites to handle bright and dark poster areas
+    composites = [("white", comp_white), ("dark", comp_dark)]
 
-    target_widths = np.linspace(min_target_w, max_target_w, num=15, dtype=int)
-    for tw in target_widths:
-        th = max(20, int(round(tw * (logo_h / float(logo_w)))))
-        if tw >= post_w or th >= post_h:
-            continue
+    # Dynamic scale range from 0.12 to 0.55 of poster width
+    scales = np.linspace(0.12, 0.52, 28)
 
-        scaled_logo = cv2.resize(logo_gray, (tw, th), interpolation=cv2.INTER_AREA)
-        res = cv2.matchTemplate(post_gray, scaled_logo, cv2.TM_CCOEFF_NORMED)
-        _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(res)
+    for comp_name, comp_img in composites:
+        logo_gray = cv2.cvtColor(comp_img, cv2.COLOR_BGR2GRAY)
+        lh, lw = logo_gray.shape[:2]
 
-        if max_val > best_template_score:
-            best_template_score = float(max_val)
-            best_template_box = (max_loc[0], max_loc[1], tw, th)
+        for scale in scales:
+            sw = int(lw * scale)
+            sh = int(lh * scale)
 
-    bx, by, bw, bh = best_template_box
+            if sw < 20 or sh < 20 or sw >= post_w or sh >= post_h:
+                continue
 
-    # 2. Extract Candidate Crop and compute Dual-Zone Structural Correlation
-    cand_crop = post_bgr[max(0, by):min(post_h, by + bh), max(0, bx):min(post_w, bx + bw)]
-    dual_zone_score = 0.0
+            scaled_logo = cv2.resize(logo_gray, (sw, sh), interpolation=cv2.INTER_AREA)
+            res = cv2.matchTemplate(post_gray, scaled_logo, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
 
-    if cand_crop.size > 0 and bw > 10 and bh > 10:
-        try:
-            cand_resized = cv2.resize(cand_crop, (logo_w, logo_h), interpolation=cv2.INTER_AREA)
-            cand_gray = cv2.cvtColor(cand_resized, cv2.COLOR_BGR2GRAY)
+            # Spatial anchor bonus for corners and headers (where brand logos belong)
+            bx, by = max_loc
+            cx, cy = bx + sw // 2, by + sh // 2
+            is_anchor = (cx < post_w * 0.35 or cx > post_w * 0.65 or cy < post_h * 0.25 or cy > post_h * 0.75)
+            effective_score = max_val + (0.05 if is_anchor else 0.0)
 
-            # Zone 1: Upper Emblem (top 60%)
-            split_y = int(logo_h * 0.6)
-            emb_logo = logo_gray[:split_y, :]
-            emb_cand = cand_gray[:split_y, :]
-            res_emb = max(0.0, float(cv2.matchTemplate(emb_cand, emb_logo, cv2.TM_CCOEFF_NORMED)[0][0]))
+            if effective_score > best_score:
+                best_score = effective_score
+                best_bbox = (bx, by, sw, sh)
+                best_comp = comp_name
 
-            # Zone 2: Lower Typography / Text (bottom 40%)
-            txt_logo = logo_gray[split_y:, :]
-            txt_cand = cand_gray[split_y:, :]
-            res_txt = max(0.0, float(cv2.matchTemplate(txt_cand, txt_logo, cv2.TM_CCOEFF_NORMED)[0][0]))
-
-            dual_zone_score = (res_emb * 0.5) + (res_txt * 0.5)
-        except Exception:
-            dual_zone_score = 0.0
-
-    # 3. SIFT Feature Matching with Spatial Consistency
-    sift_score = 0.0
-    sift_box = None
-    inlier_ratio = 0.0
-    try:
-        sift = cv2.SIFT_create(nfeatures=1500)
-        kp_logo, des_logo = sift.detectAndCompute(logo_gray, None)
-        kp_post, des_post = sift.detectAndCompute(post_gray, None)
-
-        if des_logo is not None and des_post is not None and len(kp_logo) >= 4 and len(kp_post) >= 4:
-            bf = cv2.BFMatcher(cv2.NORM_L2)
-            matches = bf.knnMatch(des_logo, des_post, k=2)
-
-            good_matches = []
-            for m_n in matches:
-                if len(m_n) == 2:
-                    m, n = m_n
-                    if m.distance < 0.75 * n.distance:
-                        good_matches.append(m)
-
-            if len(good_matches) >= 4:
-                src_pts = np.float32([kp_logo[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-                dst_pts = np.float32([kp_post[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-
-                _matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-                if mask is not None:
-                    inliers = int(np.sum(mask))
-                    inlier_ratio = inliers / float(len(good_matches))
-                    sift_score = min(1.0, (inliers / 15.0) * 0.7 + inlier_ratio * 0.3)
-
-                    inlier_pts = dst_pts[mask.ravel() == 1]
-                    if len(inlier_pts) >= 4:
-                        x, y, w, h = cv2.boundingRect(inlier_pts)
-                        sift_box = (x, y, w, h)
-
-                        pts_2d = inlier_pts.reshape(-1, 2)
-                        w_ratio = w / float(post_w)
-                        h_ratio = h / float(post_h)
-                        std_x = float(np.std(pts_2d[:, 0]))
-                        std_y = float(np.std(pts_2d[:, 1]))
-
-                        if w_ratio > 0.60 or h_ratio > 0.60 or (std_x > post_w * 0.25 and std_y > post_h * 0.25):
-                            sift_score *= 0.3
-    except Exception:
-        pass
-
-    # 4. Composite Score with Strict Dual-Zone Emblem Guard
-    composite_score = round((best_template_score * 0.5) + (dual_zone_score * 0.5), 2)
-    feature_score = sift_score
-
-    # Strict Emblem Guard:
-    # If the inner emblem or typography fails (< 0.55), the logo is wrong!
-    # SIFT matches on a generic outer circle/frame must NOT inflate the score.
-    if dual_zone_score < 0.55 or best_template_score < 0.55:
-        final_score = composite_score
-        chosen_box = best_template_box
-    elif composite_score >= 0.75:
-        final_score = composite_score
-        chosen_box = best_template_box
-    elif feature_score >= 0.75 and inlier_ratio >= 0.35:
-        final_score = round((composite_score * 0.5) + (feature_score * 0.5), 2)
-        chosen_box = best_template_box
-    else:
-        final_score = composite_score
-        chosen_box = best_template_box
-
-    # Calculate normalized location
-    cbx, cby, cbw, cbh = chosen_box
-    cx = (cbx + cbw / 2.0) / float(post_w)
-    cy = (cby + cbh / 2.0) / float(post_h)
-
-    if 0.35 <= cx <= 0.65 and 0.35 <= cy <= 0.65:
-        loc = "center"
-    else:
-        v_part = "top" if cy < 0.5 else "bottom"
-        h_part = "left" if cx < 0.5 else "right"
-        loc = f"{v_part}-{h_part}"
-
-    size_percent = max(1, int(round((cbw / float(post_w)) * 100)))
-
-    # 5. Strict Verdict & Color Verification
-    if final_score >= 0.75:
-        # Check Color Integrity (HSV Histogram Correlation)
-        try:
-            if cand_crop.size > 0:
-                crop_hsv = cv2.cvtColor(cand_crop, cv2.COLOR_BGR2HSV)
-                logo_hsv = cv2.cvtColor(tight_logo, cv2.COLOR_BGR2HSV)
-                hist_crop = cv2.calcHist([crop_hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
-                hist_logo = cv2.calcHist([logo_hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
-                cv2.normalize(hist_crop, hist_crop, 0, 1, cv2.NORM_MINMAX)
-                cv2.normalize(hist_logo, hist_logo, 0, 1, cv2.NORM_MINMAX)
-                color_corr = cv2.compareHist(hist_crop, hist_logo, cv2.HISTCMP_CORREL)
-
-                if color_corr < 0.25:
-                    reason = "COLOR_CHANGED"
-                    found = True
-                else:
-                    reason = "CORRECT"
-                    found = True
-            else:
-                found = False
-                reason = "MISSING"
-        except Exception:
-            reason = "CORRECT"
-            found = True
-    else:
-        found = False
-        if final_score >= 0.20:
-            reason = "WRONG_LOGO"
-        else:
-            reason = "MISSING"
-
-    cand_crop_b64 = _encode_bgr_to_base64_data_uri(cand_crop)
-    ref_crop_b64 = _encode_bgr_to_base64_data_uri(tight_logo)
-
-    return {
-        "found": found,
-        "score": round(max(0.0, min(1.0, final_score)), 2),
-        "location": loc,
-        "size_percent": size_percent,
-        "reason": reason,
-        "candidate_crop_base64": cand_crop_b64,
-        "reference_crop_base64": ref_crop_b64,
-        "bbox": [int(cbx), int(cby), int(cbw), int(cbh)],
-    }
+    return max(0.0, min(1.0, best_score)), best_bbox, best_comp
 
 
 # ==============================================================================
-# MAIN PUBLIC API
+# PUBLIC VERIFICATION ENTRYPOINT
 # ==============================================================================
 
-def check_brand_logo(post_image_bgr, reference_logo_path):
+def check_brand_logo(post_image_bgr, reference_logo_path, logo_config=None):
     """
-    Check if the client's official brand logo is correctly present in the post image.
-
-    Flow:
-      Step 1 - AI FIRST (Priority):
-        - Calls Gemini Vision AI with focused, tight-cropped logo.
-        - If AI returns found=true and match_score >= 0.85 => PASS.
-      Step 2 - PYTHON FALLBACK:
-        - OpenCV Multi-scale Template Matching + Dual-Zone Structural Correlation + SIFT.
-        - Strict threshold >= 0.75 for PASS. Color change mapped to COLOR_CHANGED warning.
-
-    Returns:
-      dict matching exact JSON schema with candidate_crop_base64 and reference_crop_base64.
+    Universal Client Logo Verification Engine.
+    Executes independent multi-component verification across Symbol, Brand Name, Tagline, and Layout.
     """
-    # 1. Load and guard post image in RAM
-    post_img = _load_image_to_bgr(post_image_bgr)
-    if post_img is None:
+    if logo_config is None:
+        logo_config = {}
+
+    # 1. Guard: Reference logo configured
+    if not reference_logo_path:
         return {
             "status": "FAIL",
+            "code": "REFERENCE_LOGO_UNCONFIGURED",
             "found": False,
             "score": 0.0,
             "location": "unknown",
-            "location_hindi": "Kahin nahi mila",
+            "location_hindi": LOCATION_HINDI_MAP["unknown"],
+            "size_percent": 0,
+            "reason": "REFERENCE_LOGO_UNCONFIGURED",
+            "suggestion": SUGGESTION_RULES["REFERENCE_LOGO_UNCONFIGURED"],
+            "checked_by": "Python",
+            "candidate_crop_base64": None,
+            "reference_crop_base64": None,
+        }
+
+    raw_logo = _load_image_raw(reference_logo_path)
+    if raw_logo is None:
+        return {
+            "status": "FAIL",
+            "code": "REFERENCE_LOGO_UNCONFIGURED",
+            "found": False,
+            "score": 0.0,
+            "location": "unknown",
+            "location_hindi": LOCATION_HINDI_MAP["unknown"],
+            "size_percent": 0,
+            "reason": "REFERENCE_LOGO_UNCONFIGURED",
+            "suggestion": SUGGESTION_RULES["REFERENCE_LOGO_UNCONFIGURED"],
+            "checked_by": "Python",
+            "candidate_crop_base64": None,
+            "reference_crop_base64": None,
+        }
+
+    # 2. Guard: Official Logo Identity configured
+    official_brand_name = (logo_config.get("official_logo_brand_name") or "").strip()
+    if not official_brand_name:
+        return {
+            "status": "FAIL",
+            "code": "LOGO_IDENTITY_UNCONFIGURED",
+            "found": False,
+            "score": 0.0,
+            "location": "unknown",
+            "location_hindi": LOCATION_HINDI_MAP["unknown"],
+            "size_percent": 0,
+            "reason": "LOGO_IDENTITY_UNCONFIGURED",
+            "suggestion": SUGGESTION_RULES["LOGO_IDENTITY_UNCONFIGURED"],
+            "checked_by": "Python",
+            "candidate_crop_base64": None,
+            "reference_crop_base64": None,
+        }
+
+    # 3. Load Poster
+    post_img = _load_image_raw(post_image_bgr)
+    if post_img is None:
+        return {
+            "status": "FAIL",
+            "code": "POST_IMAGE_MISSING",
+            "found": False,
+            "score": 0.0,
+            "location": "unknown",
+            "location_hindi": LOCATION_HINDI_MAP["unknown"],
             "size_percent": 0,
             "reason": "MISSING",
             "suggestion": SUGGESTION_RULES["MISSING"],
+            "checked_by": "Python",
             "candidate_crop_base64": None,
             "reference_crop_base64": None,
         }
 
     post_img = _downscale_in_ram(post_img, MAX_POST_SIDE)
+    raw_logo = _downscale_in_ram(raw_logo, MAX_LOGO_SIDE)
 
-    # 2. Load, downscale, and tight-crop reference logo in RAM
-    logo_img = _load_image_to_bgr(reference_logo_path)
-    if logo_img is None:
-        return {
-            "status": "FAIL",
-            "found": False,
-            "score": 0.0,
-            "location": "unknown",
-            "location_hindi": "Kahin nahi mila",
-            "size_percent": 0,
-            "reason": "MISSING",
-            "suggestion": SUGGESTION_RULES["MISSING"],
-            "candidate_crop_base64": None,
-            "reference_crop_base64": None,
-        }
+    # 4. Alpha-Aware Crop & Composites
+    comp_white, comp_dark, alpha_mask, crop_bbox = _prepare_alpha_composites(raw_logo)
+    ref_crop_b64 = _encode_bgr_to_base64_data_uri(comp_white)
 
-    logo_img = _downscale_in_ram(logo_img, MAX_LOGO_SIDE)
-    tight_logo = _tight_crop_logo(logo_img)
-    ref_crop_b64 = _encode_bgr_to_base64_data_uri(tight_logo)
+    # 5. Multi-Scale Anchor Zone Template Matching
+    best_match_score, best_bbox, best_comp = _detect_best_logo_location(post_img, comp_white, comp_dark)
+    bx, by, bw, bh = best_bbox
 
-    # Pre-extract candidate crop via fast Python template matching for UI visual comparison
-    quick_py_result = None
-    cand_crop_b64 = None
-    try:
-        quick_py_result = _check_logo_with_python_cv(post_img, tight_logo)
-        cand_crop_b64 = quick_py_result.get("candidate_crop_base64")
-    except Exception as e:
-        print(f"[BrandLogoCheck] Quick CV pre-extraction notice: {e}", file=sys.stderr)
+    post_h, post_w = post_img.shape[:2]
+    cand_crop = post_img[max(0, by):min(post_h, by + bh), max(0, bx):min(post_w, bx + bw)]
+    cand_crop_b64 = _encode_bgr_to_base64_data_uri(cand_crop)
 
-    # ==========================================================================
-    # Step 1 - AI FIRST (Priority)
-    # ==========================================================================
-    ai_result = None
-    try:
-        ai_result = _check_logo_with_vision_ai(post_img, tight_logo)
-    except Exception as e:
-        print(f"[BrandLogoCheck] AI Vision error (will use Python fallback): {e}", file=sys.stderr)
+    # Location & Size
+    cx, cy = bx + bw // 2, by + bh // 2
+    loc_key = _classify_location(cx, cy, post_w, post_h)
+    loc_hindi = LOCATION_HINDI_MAP.get(loc_key, LOCATION_HINDI_MAP["unknown"])
+    size_percent = int(round((bw / float(post_w)) * 100))
 
-    if isinstance(ai_result, dict):
-        found = bool(ai_result.get("found", False))
+    # 6. Component 1: Symbol Verification
+    # Extract symbol zone (upper 65% of reference logo)
+    sym_h = max(10, int(comp_white.shape[0] * 0.65))
+    sym_white = comp_white[:sym_h, :]
+    sym_scaled = cv2.resize(sym_white, (bw, max(10, int(bh * 0.65))), interpolation=cv2.INTER_AREA)
+
+    cand_sym = cand_crop[:max(10, int(bh * 0.65)), :]
+    sym_score = 0.0
+    if cand_sym.shape[0] >= 10 and cand_sym.shape[1] >= 10:
         try:
-            score = float(ai_result.get("match_score", 0.0))
-        except (ValueError, TypeError):
-            score = 0.0
+            cand_gray = cv2.cvtColor(cand_sym, cv2.COLOR_BGR2GRAY)
+            sym_gray = cv2.cvtColor(sym_scaled, cv2.COLOR_BGR2GRAY)
+            res = cv2.matchTemplate(cand_gray, sym_gray, cv2.TM_CCOEFF_NORMED)
+            sym_score = float(res[0][0])
+        except Exception:
+            sym_score = best_match_score
 
-        raw_location = str(ai_result.get("location", quick_py_result.get("location", "top-left") if quick_py_result else "top-left"))
-        loc_key, loc_hindi = _map_location_hindi(raw_location)
+    symbol_passed = (sym_score >= SYMBOL_PASS_THRESHOLD) or (best_match_score >= 0.85)
 
-        try:
-            size_pct = int(ai_result.get("size_percent", quick_py_result.get("size_percent", 10) if quick_py_result else 10))
-        except (ValueError, TypeError):
-            size_pct = 10
+    # 7. Component 2: Brand Name & Typography Verification
+    # Gather OCR text from candidate region
+    candidate_ocr_text = ""
+    ocr_blocks = logo_config.get("ocr_blocks") or []
+    for block in ocr_blocks:
+        b_text = block.get("text") or ""
+        rect = block.get("rect") or block.get("bbox") or []
+        has_rect = False
+        rx, ry, rw, rh = 0, 0, 0, 0
 
-        raw_reason = str(ai_result.get("reason", "")).strip().upper()
-        if raw_reason not in SUGGESTION_RULES:
-            raw_reason = "CORRECT" if (found and score >= PASS_THRESHOLD) else "WRONG_LOGO"
+        if isinstance(rect, dict):
+            rx = float(rect.get("left", rect.get("x", 0)))
+            ry = float(rect.get("top", rect.get("y", 0)))
+            rw = float(rect.get("width", rect.get("w", 0)))
+            rh = float(rect.get("height", rect.get("h", 0)))
+            has_rect = True
+        elif isinstance(rect, (list, tuple)) and len(rect) >= 4:
+            rx, ry, rw, rh = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+            has_rect = True
 
-        custom_suggestion = ai_result.get("suggestion")
-        suggestion = custom_suggestion if (custom_suggestion and str(custom_suggestion).strip()) else SUGGESTION_RULES.get(raw_reason, SUGGESTION_RULES["MISSING"])
+        if has_rect:
+            # Check percentage vs absolute coordinates
+            if rx <= 100.0 and ry <= 100.0 and post_w > 0 and post_h > 0:
+                rx_px = (rx / 100.0) * post_w if rx > 1.0 else rx * post_w
+                ry_px = (ry / 100.0) * post_h if ry > 1.0 else ry * post_h
+                rw_px = (rw / 100.0) * post_w if rw > 1.0 else rw * post_w
+                rh_px = (rh / 100.0) * post_h if rh > 1.0 else rh * post_h
+            else:
+                rx_px, ry_px, rw_px, rh_px = rx, ry, rw, rh
 
-        if found and score >= PASS_THRESHOLD:
-            return {
-                "status": "PASS",
-                "found": True,
-                "score": round(score, 2),
-                "location": loc_key,
-                "location_hindi": loc_hindi,
-                "size_percent": size_pct,
-                "reason": "CORRECT",
-                "suggestion": suggestion,
-                "checked_by": "Gemini",
-                "candidate_crop_base64": cand_crop_b64,
-                "reference_crop_base64": ref_crop_b64,
-            }
+            # Proximity check with candidate bbox (within 150px)
+            if (rx_px + rw_px >= bx - 100 and rx_px <= bx + bw + 100 and ry_px + rh_px >= by - 100 and ry_px <= by + bh + 200):
+                candidate_ocr_text += " " + b_text
+            elif any(tok.lower() in b_text.lower() for tok in (logo_config.get("required_brand_tokens") or [])):
+                # If block explicitly contains official brand tokens, include it
+                candidate_ocr_text += " " + b_text
         else:
-            return {
-                "status": "FAIL",
-                "found": False,
-                "score": round(score, 2),
-                "location": loc_key if loc_key != "unknown" else "unknown",
-                "location_hindi": loc_hindi if loc_key != "unknown" else "Kahin nahi mila",
-                "size_percent": size_pct if found else 0,
-                "reason": raw_reason if raw_reason in SUGGESTION_RULES else "WRONG_LOGO",
-                "suggestion": suggestion,
-                "checked_by": "Gemini",
-                "candidate_crop_base64": cand_crop_b64,
-                "reference_crop_base64": ref_crop_b64,
-            }
+            candidate_ocr_text += " " + b_text
 
-    # ==========================================================================
-    # Step 2 - PYTHON FALLBACK (Only if AI fails / timeout / low confidence)
-    # ==========================================================================
-    print("[BrandLogoCheck] Executing Step 2: OpenCV Python Fallback (SIFT + ORB + Template Matching)...", file=sys.stderr)
-    py_result = quick_py_result or _check_logo_with_python_cv(post_img, tight_logo)
+    required_tokens = logo_config.get("required_brand_tokens") or []
+    name_passed, token_score, name_details = _verify_brand_name(candidate_ocr_text, official_brand_name, required_tokens)
 
-    found = bool(py_result["found"])
-    score = float(py_result["score"])
-    loc_key, loc_hindi = _map_location_hindi(py_result["location"])
-    size_pct = int(py_result["size_percent"])
-    reason = str(py_result["reason"]).strip().upper()
+    # 8. Component 3: Tagline Policy Verification
+    tagline_policy = logo_config.get("tagline_policy") or "NONE"
+    tagline_text = logo_config.get("tagline_text")
+    tagline_passed, tagline_reason = _verify_tagline(candidate_ocr_text, tagline_policy, tagline_text)
 
-    if found and score >= 0.75:
+    # 9. Component 4: Layout and Structure Verification
+    layout_passed = True
+    if cand_crop.shape[0] > 0 and cand_crop.shape[1] > 0:
+        # Check aspect ratio ratio between reference and candidate
+        ref_aspect = comp_white.shape[1] / float(comp_white.shape[0])
+        cand_aspect = cand_crop.shape[1] / float(cand_crop.shape[0])
+        aspect_ratio_diff = abs(ref_aspect - cand_aspect) / ref_aspect
+        if aspect_ratio_diff > 0.45 and not name_passed:
+            layout_passed = False
+
+    # 10. Composite Decision Matrix
+    final_score = max(best_match_score, sym_score, token_score)
+
+    if symbol_passed and name_passed and tagline_passed and layout_passed:
         status = "PASS"
-        if reason != "COLOR_CHANGED":
-            reason = "CORRECT"
+        reason = "CORRECT"
+        found = True
+        suggestion = SUGGESTION_RULES["CORRECT"]
+    elif final_score >= 0.75 and (symbol_passed or name_passed):
+        # Ambiguous match or minor typography variance -> Manual Review Blocked
+        status = "FAIL"
+        reason = "MANUAL_REVIEW_BLOCKED"
+        found = True
+        suggestion = SUGGESTION_RULES["MANUAL_REVIEW_BLOCKED"]
+    elif not tagline_passed:
+        status = "FAIL"
+        reason = tagline_reason
+        found = True
+        suggestion = SUGGESTION_RULES.get(tagline_reason, SUGGESTION_RULES["WRONG_LOGO"])
     else:
         status = "FAIL"
-        found = False
-        if reason not in ["WRONG_LOGO", "MISSING", "TOO_SMALL", "HIDDEN"]:
-            reason = "WRONG_LOGO" if score >= 0.20 else "MISSING"
-
-    if not found or reason == "MISSING":
-        loc_key = "unknown"
-        loc_hindi = LOCATION_HINDI_MAP["unknown"]
-        size_pct = 0
-
-    suggestion = SUGGESTION_RULES.get(reason, SUGGESTION_RULES["MISSING"])
+        found = (final_score >= 0.35)
+        reason = "WRONG_LOGO" if found else "MISSING"
+        suggestion = SUGGESTION_RULES[reason]
 
     return {
         "status": status,
         "found": found,
-        "score": round(score, 2),
+        "score": round(max(0.0, min(1.0, final_score)), 2),
         "location": loc_key,
         "location_hindi": loc_hindi,
-        "size_percent": size_pct,
+        "size_percent": size_percent,
         "reason": reason,
         "suggestion": suggestion,
         "checked_by": "Python",
-        "candidate_crop_base64": py_result.get("candidate_crop_base64"),
+        "symbol_score": round(sym_score, 2),
+        "token_score": round(token_score, 2),
+        "candidate_crop_base64": cand_crop_b64,
         "reference_crop_base64": ref_crop_b64,
+        "bbox": [int(bx), int(by), int(bw), int(bh)],
     }
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python brand_logo_check.py <post_image_path> <reference_logo_path>")
+        print("Usage: python brand_logo_check.py <post_image_path> <reference_logo_path> [config_json]")
         sys.exit(1)
 
     p_path = sys.argv[1]
     l_path = sys.argv[2]
-    res = check_brand_logo(p_path, l_path)
+    cfg = {}
+    if len(sys.argv) > 3:
+        try:
+            cfg = json.loads(sys.argv[3])
+        except Exception:
+            cfg = {}
+
+    res = check_brand_logo(p_path, l_path, cfg)
     print(json.dumps(res, indent=2, ensure_ascii=False))

@@ -127,6 +127,27 @@ const executeBackgroundImageCheck = async ({
         revisionId,
       ]
     );
+
+    // Update posts table with verified integrity hashes and status
+    const postStatus = (combinedResult.enforcement_state === 'red_block')
+      ? 'ai_checked'
+      : (imageResult.manual_review_required ? 'ai_checked' : 'pending_manager_approval');
+
+    await pool.query(
+      `UPDATE posts
+       SET verified_image_hash = ?,
+           verified_logo_config_hash = ?,
+           manual_review_required = ?,
+           status = CASE WHEN status = 'ai_checking' THEN ? ELSE status END
+       WHERE id = ?`,
+      [
+        imageResult.verified_image_hash || null,
+        imageResult.verified_logo_config_hash || null,
+        imageResult.manual_review_required ? 1 : 0,
+        postStatus,
+        postId,
+      ]
+    );
   } catch (err) {
     console.error(`Background image check error for post ${postId}:`, err);
     await pool.query(
@@ -785,6 +806,23 @@ const adminReview = async (req, res) => {
     let normalizedAction;
 
     if (action === 'approve' || action === 'approved') {
+      // Zero-Trust Gate: Cannot approve a post with failing logo or unconfigured logo
+      const [aiCheckRows] = await pool.query(
+        'SELECT logo_check, enforcement_state FROM ai_check_results WHERE post_id = ? ORDER BY id DESC LIMIT 1',
+        [postId]
+      );
+      if (aiCheckRows.length > 0) {
+        let lc = null;
+        try {
+          lc = typeof aiCheckRows[0].logo_check === 'string' ? JSON.parse(aiCheckRows[0].logo_check) : aiCheckRows[0].logo_check;
+        } catch (_) {}
+        if (!lc || lc.status !== 'PASS' || aiCheckRows[0].enforcement_state === 'red_block') {
+          return res.status(400).json({
+            success: false,
+            message: `Zero-Trust Policy: Post cannot be approved. Brand logo verification is ${lc?.status || 'MISSING'} (${lc?.reason || 'RED_BLOCK'}).`,
+          });
+        }
+      }
       newStatus = 'admin_approved';
       normalizedAction = 'approved';
     } else if (action === 'reject' || action === 'rejected') {

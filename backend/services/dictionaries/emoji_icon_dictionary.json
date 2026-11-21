@@ -1,0 +1,83 @@
+{
+  "version": "1.0.0",
+  "description": "Universal Emoji & Graphic Icon Dictionary for Social Approval Workflow Platform",
+  "emojis": {
+    "🚀": { "name": "Rocket / Launch", "category": "action", "description": "High performance, startup, launch, rapid growth" },
+    "💡": { "name": "Lightbulb / Idea", "category": "creative", "description": "Strategy, creative idea, insight, innovation" },
+    "🎯": { "name": "Direct Hit / Target", "category": "strategy", "description": "Target audience, goals, precision marketing" },
+    "📊": { "name": "Bar Chart / Analytics", "category": "business", "description": "Data analysis, reports, growth statistics" },
+    "📈": { "name": "Trending Up / Growth", "category": "business", "description": "Success, increase in ROI, revenue growth" },
+    "📉": { "name": "Trending Down", "category": "business", "description": "Cost reduction, risk decrease" },
+    "📱": { "name": "Mobile Phone", "category": "contact", "description": "Call, SMS, WhatsApp, mobile application" },
+    "📞": { "name": "Telephone Receiver", "category": "contact", "description": "Direct phone call, helpline, inquiry" },
+    "☎️": { "name": "Telephone", "category": "contact", "description": "Office phone, landline support" },
+    "📍": { "name": "Round Pushpin / Location", "category": "contact", "description": "Office address, branch location, Google Map pin" },
+    "📌": { "name": "Pushpin / Important", "category": "highlight", "description": "Important notice, key takeaway" },
+    "🌐": { "name": "Globe / Website", "category": "contact", "description": "Official website, global presence, URL" },
+    "💻": { "name": "Laptop / Tech", "category": "business", "description": "Software, web development, IT solutions" },
+    "🔍": { "name": "Magnifying Glass / SEO", "category": "business", "description": "Search engine optimization, research" },
+    "🔎": { "name": "Magnifying Glass Right", "category": "business", "description": "Deep inspection, analysis" },
+    "✉️": { "name": "Envelope / Mail", "category": "contact", "description": "Email address, customer contact" },
+    "📧": { "name": "E-Mail Icon", "category": "contact", "description": "Direct electronic mail" },
+    "📨": { "name": "Incoming Envelope", "category": "contact", "description": "Newsletter, messages" },
+    "💙": { "name": "Blue Heart / Trust", "category": "brand", "description": "Brand loyalty, healthcare, trust" },
+    "❤️": { "name": "Red Heart / Love", "category": "brand", "description": "Customer love, passion, appreciation" },
+    "💚": { "name": "Green Heart / Wellness", "category": "brand", "description": "Organic, healthcare, sustainability" },
+    "⭐": { "name": "Star / Top Rated", "category": "rating", "description": "5-star service, quality excellence" },
+    "🌟": { "name": "Glowing Star", "category": "highlight", "description": "Special feature, festive, highlight" },
+    "✨": { "name": "Sparkles / New", "category": "highlight", "description": "Clean, new release, premium quality" },
+    "🔥": { "name": "Fire / Trending", "category": "action", "description": "Hot offer, trending topic, popular" },
+    "🎉": { "name": "Party Popper / Celebration", "category": "celebration", "description": "Festival, anniversary, milestone celebration" },
+    "🎊": { "name": "Confetti Ball", "category": "celebration", "description": "Greetings, achievement" },
+    "✅": { "name": "White Heavy Check Mark", "category": "status", "description": "Verified, completed, approved" },
+    "✔️": { "name": "Check Mark", "category": "status", "description": "Confirmed, authentic" },
+    "⚠️": { "name": "Warning Sign", "category": "alert", "description": "Notice, caution, health advisory" },
+    "🔔": { "name": "Bell / Notification", "category": "alert", "description": "Reminder, subscribe, stay tuned" },
+    "📢": { "name": "Loudspeaker / Announcement", "category": "announcement", "description": "Special announcement, breaking news" },
+    "📣": { "name": "Megaphone", "category": "announcement", "description": "Marketing campaign, shoutout" },
+    "🏆": { "name": "Trophy / Winner", "category": "achievement", "description": "Award, #1 ranking, champion" },
+    "🥇": { "name": "1st Place Medal", "category": "achievement", "description": "Leading provider, top rank" },
+    "🤝": { "name": "Handshake / Partnership", "category": "business", "description": "Collaboration, agreement, trust" },
+    "💼": { "name": "Briefcase / Career", "category": "business", "description": "Corporate, hiring, business solution" },
+    "🕒": { "name": "Clock / Timings", "category": "contact", "description": "Working hours, OPD timing, appointment" },
+    "🗓️": { "name": "Calendar / Schedule", "category": "contact", "description": "Date, event date, schedule" }
+  },
+  "poster_icons": {
+    "phone": {
+      "name": "Phone / Calling Vector Icon",
+      "symbol": "📞",
+      "ocr_confusion_glyphs": ["८ो", "९१", "४ो", "+91", "☎", "✆", "c"],
+      "context_keywords": ["contact", "call", "phone", "helpline", "inquiry", "+91", "mobile"]
+    },
+    "globe": {
+      "name": "Globe / Website Vector Icon",
+      "symbol": "🌐",
+      "ocr_confusion_glyphs": ["४ो", "⊙", "⨁", "o", "w"],
+      "context_keywords": ["www", "http", ".com", ".in", ".org", ".net", "visit", "website", "online"]
+    },
+    "email": {
+      "name": "Email / Mail Envelope Icon",
+      "symbol": "✉️",
+      "ocr_confusion_glyphs": ["ञ", "ऋ", "✉", "📧", "@", "e"],
+      "context_keywords": ["info", "mail", "email", "@", "support", "help", "contact"]
+    },
+    "lightbulb": {
+      "name": "Lightbulb / Strategy Graphic Icon",
+      "symbol": "💡",
+      "ocr_confusion_glyphs": ["८ो", "२", "☼", "☀", "💡"],
+      "context_keywords": ["strategy", "move", "tip", "idea", "growth", "smarter", "creative", "note"]
+    },
+    "location": {
+      "name": "Location Pin Icon",
+      "symbol": "📍",
+      "ocr_confusion_glyphs": ["९", "⚲", "📍", "p"],
+      "context_keywords": ["address", "road", "nagar", "town", "city", "jabalpur", "bhopal", "delhi", "pin", "floor"]
+    },
+    "bullet": {
+      "name": "Typographic Bullet / Marker",
+      "symbol": "•",
+      "ocr_confusion_glyphs": ["•", "·", "●", "○", "■", "□", "★", "✓", "✔"],
+      "context_keywords": []
+    }
+  }
+}

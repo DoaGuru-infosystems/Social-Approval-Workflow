@@ -32,28 +32,34 @@ const resolveAssetPath = (rawPath) => {
 
 /**
  * Check Brand Logo in Post Image.
- * Flow:
- * - If reference logo is not configured / not on disk: returns SKIPPED (not FAIL).
- * - If reference logo is configured: executes brand_logo_check.py (SIFT + ORB + Template Matching).
+ * Universal Zero-Trust Brand Logo Verification Engine.
+ *
+ * Rules:
+ * - If reference logo is not configured / not on disk: returns FAIL (code: REFERENCE_LOGO_UNCONFIGURED).
+ * - If official logo brand name is not configured: returns FAIL (code: LOGO_IDENTITY_UNCONFIGURED).
+ * - Missing or unconfigured logos strictly block approval and publishing.
  *
  * @param {Object} params
  * @param {string} params.postImagePath Absolute or relative path to post image
  * @param {string} [params.referenceLogoPath] Absolute or relative path to client reference logo
+ * @param {Object} [params.logoConfig] Client brand logo configuration
  * @returns {Promise<Object>}
  */
-const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
+const checkBrandLogo = async ({ postImagePath, referenceLogoPath, logoConfig = {} }) => {
   // 1. Guard: Check if reference logo is configured
   if (!referenceLogoPath) {
     return {
-      status: 'SKIPPED',
+      status: 'FAIL',
+      code: 'REFERENCE_LOGO_UNCONFIGURED',
       found: false,
       score: 0.0,
       location: 'unknown',
       location_hindi: 'Kahin nahi mila',
       size_percent: 0,
-      reason: 'SKIPPED',
-      suggestion: 'Logo Check Skipped - Logo upload nahi hai',
+      reason: 'REFERENCE_LOGO_UNCONFIGURED',
+      suggestion: 'Client Brand Guidelines me official brand logo configure nahi hai. Pehle official logo upload karein.',
       checked_by: 'Python',
+      enforcement_state: 'red_block',
     };
   }
 
@@ -62,15 +68,35 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
 
   if (!resolvedLogoPath || !fs.existsSync(resolvedLogoPath)) {
     return {
-      status: 'SKIPPED',
+      status: 'FAIL',
+      code: 'REFERENCE_LOGO_UNCONFIGURED',
       found: false,
       score: 0.0,
       location: 'unknown',
       location_hindi: 'Kahin nahi mila',
       size_percent: 0,
-      reason: 'SKIPPED',
-      suggestion: 'Logo Check Skipped - Logo upload nahi hai',
+      reason: 'REFERENCE_LOGO_UNCONFIGURED',
+      suggestion: 'Client Brand Guidelines me official brand logo disk par maujood nahi hai. Pehle official logo upload karein.',
       checked_by: 'Python',
+      enforcement_state: 'red_block',
+    };
+  }
+
+  // 2. Guard: Official Logo Identity configuration
+  const officialBrandName = (logoConfig.official_logo_brand_name || '').trim();
+  if (!officialBrandName) {
+    return {
+      status: 'FAIL',
+      code: 'LOGO_IDENTITY_UNCONFIGURED',
+      found: false,
+      score: 0.0,
+      location: 'unknown',
+      location_hindi: 'Kahin nahi mila',
+      size_percent: 0,
+      reason: 'LOGO_IDENTITY_UNCONFIGURED',
+      suggestion: 'Client Brand Guidelines me official logo identity (official_logo_brand_name) configure nahi hai. Pehle brand name configure karein.',
+      checked_by: 'Python',
+      enforcement_state: 'red_block',
     };
   }
 
@@ -80,23 +106,33 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
   if (!resolvedPostPath || !fs.existsSync(resolvedPostPath)) {
     return {
       status: 'FAIL',
+      code: 'POST_IMAGE_MISSING',
       found: false,
       score: 0.0,
       location: 'unknown',
       location_hindi: 'Kahin nahi mila',
       size_percent: 0,
       reason: 'MISSING',
-      suggestion: 'Logo post me kahin nahi mila. Logo ko post me lagayein.',
+      suggestion: 'Post image disk par nahi mili.',
       checked_by: 'Python',
+      enforcement_state: 'red_block',
     };
   }
 
-  // 2. Execute Python brand_logo_check.py (SIFT + ORB + Multi-scale Template Matching)
+  // 3. Execute Python brand_logo_check.py (Multi-component independent verification)
+  const configPayload = JSON.stringify({
+    official_logo_brand_name: officialBrandName,
+    required_brand_tokens: logoConfig.required_brand_tokens || [],
+    tagline_policy: logoConfig.tagline_policy || 'NONE',
+    tagline_text: logoConfig.tagline_text || null,
+    ocr_blocks: logoConfig.ocr_blocks || [],
+  });
+
   return new Promise((resolve) => {
     const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
     execFile(
       pythonExe,
-      [PYTHON_SCRIPT_PATH, resolvedPostPath, resolvedLogoPath],
+      [PYTHON_SCRIPT_PATH, resolvedPostPath, resolvedLogoPath, configPayload],
       {
         timeout: 40000,
         maxBuffer: 4 * 1024 * 1024,
@@ -136,6 +172,7 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
           reason: 'MISSING',
           suggestion: 'Logo post me kahin nahi mila. Logo ko post me lagayein.',
           checked_by: 'Python',
+          enforcement_state: 'red_block',
         });
       }
     );
