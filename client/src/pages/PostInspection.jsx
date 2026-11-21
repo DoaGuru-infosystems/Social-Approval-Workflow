@@ -291,7 +291,8 @@ const PostInspection = () => {
   const latestAi = post.latest_ai_check || {};
   const isImagePending = latestAi.image_status === 'pending';
   const isImageFailed = latestAi.image_status === 'failed';
-  const imgSrc = post.image_path ? `${SERVER_URL}/${post.image_path}` : null;
+  const imgSrc = post.image_path ? `${SERVER_URL}/${post.image_path.replace(/^[/\\]+/, '')}` : null;
+  const refLogoSrc = post.reference_logo_url ? `${SERVER_URL}/${post.reference_logo_url.replace(/^[/\\]+/, '')}` : null;
   const spellingIssues = latestAi.spelling_issues || [];
   const textSpellingIssues = spellingIssues.filter((s) => (s.source || 'text') === 'text');
   const imageSpellingIssues = spellingIssues.filter((s) => s.source === 'image');
@@ -407,6 +408,7 @@ const PostInspection = () => {
                   logoCheck={latestAi.logo_check}
                   aiProvider={latestAi.ai_provider}
                   fallbackUsed={latestAi.fallback_used}
+                  referenceLogoUrl={refLogoSrc}
                 />
               </div>
             )}

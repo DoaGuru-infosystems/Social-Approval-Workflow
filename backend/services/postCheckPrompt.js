@@ -51,23 +51,22 @@ CRITICAL INSTRUCTIONS ACROSS 5 TASKS:
 4. BRAND LOGO CHECK:
 ${
   hasReferenceLogo
-    ? `- The FIRST image provided is the official reference brand logo. The SECOND image is the social media poster creative to inspect.
-- Search the ENTIRE poster canvas for this reference logo. The logo can be ANYWHERE in the image; do NOT assume position (it could be in top-left, top-right, bottom-left, bottom-right, or center).
+    ? `- Image 1 is the official reference brand logo from Brand Guidelines. Image 2 is the social media poster creative to inspect.
+- Determine whether the EXACT brand logo shown in Image 1 appears anywhere on the poster in Image 2.
+- CRITICAL EMBLEM & TYPOGRAPHY VALIDATION RULES:
+  * EMBLEM / ARTWORK INTEGRITY: Look closely at the exact central drawing, emblem, and iconography in Image 1. The candidate logo on Image 2 MUST have the exact same drawing. If the inner drawing is changed, substituted, or morphed (e.g. a different organ, icon, or drawing inside a similar border), you MUST return found: false, score: 0.50, reason: "WRONG_LOGO", status: "FAIL".
+  * FULL TEXT & TYPOGRAPHY: All words and company title written in the logo in Image 1 MUST be completely and accurately present on the logo in Image 2. If any word, suffix, or part of the brand title is omitted, missing, or altered, you MUST return found: false, score: 0.50, reason: "WRONG_LOGO", status: "FAIL".
+  * FOREIGN OR UNRELATED BRAND: If Image 2 contains a different organization's logo or branding, return found: false, score: 0.0, reason: "WRONG_LOGO", status: "FAIL".
+  * NEVER return status: "PASS" merely because the outer shape, circle, frame, or color matches. Both the inner artwork AND the full text must match Image 1.
 - Determine:
-  * "found": boolean (true if the reference logo is clearly present, else false).
+  * "found": boolean (true ONLY if the exact reference logo with matching emblem and full typography is clearly present, else false).
   * "score": match confidence score between 0.0 and 1.0 (>= 0.85 means genuine match).
   * "location": "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center" | "unknown"
   * "location_hindi": "Upar Left corner me" | "Upar Right corner me" | "Neeche Left corner me" | "Neeche Right corner me" | "Beech me (Center)" | "Kahin nahi mila"
   * "size_percent": integer percentage of poster width occupied by logo (e.g. 5, 10, 15).
   * "reason": one of "CORRECT" | "MISSING" | "WRONG_LOGO" | "TOO_SMALL" | "HIDDEN" | "COLOR_CHANGED"
   * "status": "PASS" (if found is true AND score >= 0.85 AND reason is CORRECT), otherwise "FAIL".
-  * "suggestion": actionable designer suggestion in Hindi/Hinglish following these exact rules:
-      MISSING => "Logo post me kahin nahi mila. Logo ko post me lagayein."
-      WRONG_LOGO => "Ye galat / purana logo hai. Brand Guidelines se naya logo download karke wahi lagayein."
-      TOO_SMALL => "Logo bahut chhota hai. Logo ko kam se kam 10% bada karein."
-      HIDDEN => "Logo text ke peeche chhup gaya hai. Logo ko khali jagah pe le jayein."
-      COLOR_CHANGED => "Logo ka rang badal gaya hai. Logo ka original rang wapas rakhein."
-      CORRECT => "Logo bilkul sahi jagah aur size me laga hua hai."`
+  * "suggestion": actionable designer suggestion in Hindi/Hinglish explaining why it failed or passed.`
     : `- No reference logo is configured in Brand Guidelines.
 - Set logo_check to:
   {

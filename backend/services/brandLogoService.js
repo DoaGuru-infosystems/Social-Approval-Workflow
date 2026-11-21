@@ -98,7 +98,7 @@ const checkBrandLogo = async ({ postImagePath, referenceLogoPath }) => {
       pythonExe,
       [PYTHON_SCRIPT_PATH, resolvedPostPath, resolvedLogoPath],
       {
-        timeout: 25000,
+        timeout: 40000,
         maxBuffer: 4 * 1024 * 1024,
         env: { ...process.env },
       },

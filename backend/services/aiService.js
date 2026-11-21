@@ -1623,8 +1623,8 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     error_type: 'HUMAN_ERROR',
   }));
 
-  // Brand Logo Verification (Gemini Primary, Guaranteed Python Fallback)
-  let logoCheck = remoteResult?.logo_check || null;
+  // Dedicated Brand Logo Verification Pipeline (Guaranteed Dual-Image Auditor + Python CV Fallback)
+  let logoCheck = null;
 
   if (!resolvedLogoPath) {
     // Logo upload nahi hai to SKIPPED dikhao, FAIL mat maano
@@ -1637,20 +1637,20 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       size_percent: 0,
       reason: 'SKIPPED',
       suggestion: 'Logo Check Skipped - Logo upload nahi hai',
-      checked_by: aiProvider === 'gemini' ? 'Gemini' : 'Python',
+      checked_by: 'System',
     };
-  } else if (fallbackUsed || !logoCheck) {
-    // Python Fallback: guaranteed SIFT + ORB + Template Matching
+  } else {
+    // Always use dedicated brand logo auditor with auto tight-crop, dual-zone CV, and strict emblem verification
     try {
       logoCheck = await brandLogoService.checkBrandLogo({
         postImagePath: resolvedImagePath,
         referenceLogoPath: resolvedLogoPath,
       });
-      if (!logoCheck.checked_by) {
-        logoCheck.checked_by = 'Python';
+      if (!logoCheck || !logoCheck.checked_by) {
+        if (logoCheck) logoCheck.checked_by = 'Python';
       }
     } catch (logoErr) {
-      console.warn('[runImageCheck] Logo check notice:', logoErr.message);
+      console.warn('[runImageCheck] Dedicated Brand Logo check notice:', logoErr.message);
       logoCheck = {
         status: 'FAIL',
         found: false,
@@ -1663,18 +1663,22 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
         checked_by: 'Python',
       };
     }
-  } else {
-    // Checked by Gemini
-    if (!logoCheck.checked_by) {
-      logoCheck.checked_by = 'Gemini';
-    }
   }
 
   // 3-Pillar Mandatory Cross-Client Identity Evaluation:
-  // 1. Logo
+  // 1. Logo (Non-negotiable if configured)
   // 2. Brand Name
   // 3. Phone Number
-  const logoFound = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found);
+  const isLogoConfigured = Boolean(logoCheck && logoCheck.status !== 'SKIPPED');
+  const isLogoWrongOrMissing = Boolean(
+    isLogoConfigured &&
+    (logoCheck.status === 'FAIL' || logoCheck.reason === 'WRONG_LOGO' || logoCheck.reason === 'MISSING')
+  );
+  const isLogoColorChanged = Boolean(
+    isLogoConfigured &&
+    (logoCheck.reason === 'COLOR_CHANGED' || (logoCheck.status === 'PASS' && logoCheck.reason === 'COLOR_CHANGED'))
+  );
+  const logoFound = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found && !isLogoWrongOrMissing);
 
   const primaryBrandToken = (guidelines.organization_name || '').split(/\s+/)[0].toLowerCase();
   const rawOcrLower = (rawOcrText || '').toLowerCase();
@@ -1735,7 +1739,7 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       String(p.found_phone || '').replace(/\D/g, '').length === 10
   );
 
-  const hasLogoError = Boolean(logoCheck && logoCheck.status === 'FAIL');
+  const hasLogoError = Boolean(isLogoWrongOrMissing);
   const ocrUnreliable = !ocrReliable;
   const hasSpellingIssues = realSpellingIssues.length > 0;
   const hasBannedWords = bannedWordsFound.length > 0;
@@ -1745,17 +1749,21 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
 
   // Strict 2-Tier Enforcement Gate Calculation:
   // RULE (Per User Mandate):
-  // Logo, Brand Name & Phone Number are mandatory checks for cross-client.
-  // - If AT LEAST ONE passes (clientIdentityAnchorsCount >= 1):
-  //     ALLOW TO PROCEED (Warning ke saath aage jaane do).
-  // - If ALL THREE FAIL (clientIdentityAnchorsCount === 0):
-  //     HARD RED BLOCK (Post belongs to different client or is completely unbranded).
+  // 1. Logo FAIL (Wrong/Missing) is a STRICT NON-NEGOTIABLE RED BLOCK (cannot be bypassed by phone or name).
+  // 2. Color Change in Logo is a soft warning (Yellow Zone), allowing artistic theme styling.
+  // 3. If ALL THREE FAIL (clientIdentityAnchorsCount === 0): HARD RED BLOCK.
+  // 4. If at least one anchor passes (without Logo Fail): YELLOW ALERT / PROCEED.
   let imageEnforcementState = 'green_clean';
   const imageEnforcementReasons = [];
 
   const allThreeFailed = (clientIdentityAnchorsCount === 0);
 
-  if (allThreeFailed) {
+  if (isLogoWrongOrMissing) {
+    imageEnforcementState = 'red_block';
+    imageEnforcementReasons.push(
+      `Brand Logo Block: ${logoCheck?.suggestion || 'Galat ya missing logo detect hua hai. Brand Guidelines ka official logo lagayein.'}`
+    );
+  } else if (allThreeFailed) {
     imageEnforcementState = 'red_block';
     if (hasCrossClient) {
       const firstCol = crossClientReport.collisions[0];
@@ -1777,7 +1785,12 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
 
   // YELLOW ALERT (Soft Gate): At least 1 anchor passed -> Proceed with warning!
   if (imageEnforcementState !== 'red_block') {
-    if (hasCrossClient) {
+    if (isLogoColorChanged) {
+      imageEnforcementState = 'yellow_alert';
+      imageEnforcementReasons.push(
+        `Logo Color Notice: Logo ka structure aur text sahi hai lekin color original logo se alag hai. Verify karke proceed karein.`
+      );
+    } else if (hasCrossClient) {
       imageEnforcementState = 'yellow_alert';
       imageEnforcementReasons.push(
         `Review Notice: Target client identity (${passedAnchors.join(', ')}) verify ho gayi hai, lekin kuch foreign keywords review ke liye flag huye hain.`

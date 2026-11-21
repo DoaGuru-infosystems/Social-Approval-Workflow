@@ -147,6 +147,60 @@ def _downscale_in_ram(bgr_image, max_side):
     return bgr_image
 
 
+def _tight_crop_logo(bgr_img):
+    """
+    Remove surrounding white or transparent borders from reference logo.
+    Finds bounding box of non-white pixels with small padding.
+    """
+    if bgr_img is None or bgr_img.size == 0:
+        return bgr_img
+
+    if len(bgr_img.shape) == 3 and bgr_img.shape[2] == 4:
+        alpha = bgr_img[:, :, 3]
+        non_transparent = alpha > 20
+        if np.any(non_transparent):
+            coords = cv2.findNonZero(non_transparent.astype(np.uint8))
+            if coords is not None:
+                x, y, w, h = cv2.boundingRect(coords)
+                pad = 4
+                x1 = max(0, x - pad)
+                y1 = max(0, y - pad)
+                x2 = min(bgr_img.shape[1], x + w + pad)
+                y2 = min(bgr_img.shape[0], y + h + pad)
+                return cv2.cvtColor(bgr_img[y1:y2, x1:x2], cv2.COLOR_BGRA2BGR)
+
+    gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
+    non_white = gray < 240
+    if np.any(non_white):
+        coords = cv2.findNonZero(non_white.astype(np.uint8))
+        if coords is not None:
+            x, y, w, h = cv2.boundingRect(coords)
+            if w > 20 and h > 20:
+                pad = 4
+                x1 = max(0, x - pad)
+                y1 = max(0, y - pad)
+                x2 = min(bgr_img.shape[1], x + w + pad)
+                y2 = min(bgr_img.shape[0], y + h + pad)
+                return bgr_img[y1:y2, x1:x2]
+
+    return bgr_img
+
+
+def _encode_bgr_to_base64_data_uri(bgr_img, ext=".png"):
+    """Encode BGR numpy array to base64 data URI in memory (NO-DISK)."""
+    if bgr_img is None or bgr_img.size == 0:
+        return None
+    try:
+        ok, buf = cv2.imencode(ext, bgr_img)
+        if ok:
+            b64 = base64.b64encode(buf).decode("utf-8")
+            mime = "image/png" if ext == ".png" else "image/jpeg"
+            return f"data:{mime};base64,{b64}"
+    except Exception:
+        pass
+    return None
+
+
 def _map_location_hindi(location):
     """Normalize location and return Hindi description."""
     clean_loc = str(location or "").strip().lower().replace("_", "-")
@@ -182,19 +236,23 @@ def _check_logo_with_vision_ai(post_bgr, logo_bgr, api_key=None, timeout_sec=12)
     post_b64 = base64.b64encode(post_buf).decode("utf-8")
 
     prompt = (
-        "You are a strict brand logo auditor.\n"
-        "Image 1 is the official reference brand logo of the client.\n"
+        "You are a strict, brand-agnostic logo auditor.\n"
+        "Image 1 is the official reference brand logo from Brand Guidelines.\n"
         "Image 2 is a social media poster to inspect.\n\n"
         "TASK:\n"
-        "Determine whether the EXACT brand logo shown in Image 1 appears anywhere on the poster in Image 2.\n"
-        "CRITICAL RULES:\n"
-        "- Compare visual features, iconography, text, shape, and symbols strictly.\n"
-        "- If Image 2 contains a DIFFERENT logo or company branding (e.g. an eye hospital logo when Image 1 is different, or a different organization's logo), or does NOT contain Image 1, you MUST return found: false, match_score: 0.0, reason: 'WRONG_LOGO' or 'MISSING'.\n"
-        "- NEVER return found: true merely because an arbitrary logo is present on the poster; it MUST be the specific logo from Image 1.\n\n"
+        "Determine whether the EXACT brand logo shown in Image 1 appears anywhere on the poster in Image 2.\n\n"
+        "CRITICAL BRAND-AGNOSTIC VALIDATION RULES:\n"
+        "1. EMBLEM / ARTWORK INTEGRITY: Look at the exact central drawing, emblem, and iconography in Image 1. "
+        "The candidate logo on Image 2 MUST have the exact same drawing. If the inner drawing is changed, substituted, "
+        "or morphed (e.g. a different organ, icon, or drawing inside a similar border), you MUST return found: false, match_score: 0.50, reason: 'WRONG_LOGO'.\n"
+        "2. FULL TEXT & TYPOGRAPHY: All words and company title written in the logo in Image 1 MUST be completely and accurately present on the logo in Image 2. "
+        "If any word, suffix, or part of the brand title is omitted, missing, or altered, you MUST return found: false, match_score: 0.50, reason: 'WRONG_LOGO'.\n"
+        "3. FOREIGN OR UNRELATED BRAND: If Image 2 contains a different organization's logo or branding, return found: false, match_score: 0.0, reason: 'WRONG_LOGO'.\n"
+        "4. NEVER return found: true merely because the outer shape, circle, frame, or color matches. Both the inner artwork AND the full text must match Image 1.\n\n"
         "Return STRICT JSON with these exact keys:\n"
         "{\n"
         '  "found": true or false,\n'
-        '  "match_score": number between 0.0 and 1.0 (>= 0.85 only if clear match with Image 1),\n'
+        '  "match_score": number between 0.0 and 1.0 (>= 0.85 only if clear exact match with Image 1),\n'
         '  "location": "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center" | "unknown",\n'
         '  "size_percent": integer percentage of image width or area occupied by logo,\n'
         '  "reason": "CORRECT" | "MISSING" | "WRONG_LOGO" | "TOO_SMALL" | "HIDDEN" | "COLOR_CHANGED",\n'
@@ -219,14 +277,13 @@ def _check_logo_with_vision_ai(post_bgr, logo_bgr, api_key=None, timeout_sec=12)
         },
     }
 
-    # Fast multimodal vision models (includes latest 3.8-flash and stable flash endpoints)
-    candidate_models = [
-        "gemini-3.8-flash",
-        "gemini-flash-latest",
-        "gemini-3.1-flash-lite",
+    # Fast multimodal vision models
+    env_model = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
+    candidate_models = list(dict.fromkeys([
+        env_model,
         "gemini-flash-lite-latest",
-        "gemini-3.5-flash-lite"
-    ]
+        "gemini-flash-latest"
+    ]))
     encoded_body = json.dumps(body).encode("utf-8")
 
     for model in candidate_models:
@@ -259,25 +316,28 @@ def _check_logo_with_vision_ai(post_bgr, logo_bgr, api_key=None, timeout_sec=12)
 def _check_logo_with_python_cv(post_bgr, logo_bgr):
     """
     Python fallback engine using:
-    - Multi-scale Template Matching across the WHOLE image
-    - SIFT (Scale-Invariant Feature Transform) keypoint matching
-    - ORB feature matching
-    Returns: dict(found, score, bbox, reason)
+    - Tight-crop Reference Logo (strips whitespace borders)
+    - Multi-scale Template Matching across the WHOLE image (8% to 35% of post width)
+    - SIFT feature matching with spatial consistency
+    - Dual-Zone Structural Correlation (Emblem Zone vs Typography/Text Zone)
+    - Strict thresholding (>= 0.75 composite required for PASS)
+    - HSV Color Histogram comparison for style/tint change detection (Yellow Warning)
+    Returns: dict(found, score, location, size_percent, reason, bbox, candidate_crop_base64, reference_crop_base64)
     """
     post_h, post_w = post_bgr.shape[:2]
-    logo_h, logo_w = logo_bgr.shape[:2]
+    tight_logo = _tight_crop_logo(logo_bgr)
+    logo_h, logo_w = tight_logo.shape[:2]
 
     post_gray = cv2.cvtColor(post_bgr, cv2.COLOR_BGR2GRAY)
-    logo_gray = cv2.cvtColor(logo_bgr, cv2.COLOR_BGR2GRAY)
+    logo_gray = cv2.cvtColor(tight_logo, cv2.COLOR_BGR2GRAY)
 
     best_template_score = 0.0
-    best_template_box = None  # (x, y, w, h)
-    best_scale = 1.0
+    best_template_box = (0, 0, max(20, int(post_w * 0.1)), max(20, int(post_h * 0.1)))
 
     # 1. Multi-Scale Template Matching with sliding window
-    # Search logo sizes between 4% and 40% of post width
-    min_target_w = max(20, int(post_w * 0.04))
-    max_target_w = min(post_w - 5, int(post_w * 0.45))
+    # Search logo sizes between 8% and 35% of post width
+    min_target_w = max(20, int(post_w * 0.08))
+    max_target_w = min(post_w - 5, int(post_w * 0.35))
 
     target_widths = np.linspace(min_target_w, max_target_w, num=15, dtype=int)
     for tw in target_widths:
@@ -286,19 +346,43 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
             continue
 
         scaled_logo = cv2.resize(logo_gray, (tw, th), interpolation=cv2.INTER_AREA)
-
-        # Standard normalized cross correlation
         res = cv2.matchTemplate(post_gray, scaled_logo, cv2.TM_CCOEFF_NORMED)
         _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(res)
 
         if max_val > best_template_score:
             best_template_score = float(max_val)
             best_template_box = (max_loc[0], max_loc[1], tw, th)
-            best_scale = tw / float(logo_w)
 
-    # 2. SIFT Feature Matching
+    bx, by, bw, bh = best_template_box
+
+    # 2. Extract Candidate Crop and compute Dual-Zone Structural Correlation
+    cand_crop = post_bgr[max(0, by):min(post_h, by + bh), max(0, bx):min(post_w, bx + bw)]
+    dual_zone_score = 0.0
+
+    if cand_crop.size > 0 and bw > 10 and bh > 10:
+        try:
+            cand_resized = cv2.resize(cand_crop, (logo_w, logo_h), interpolation=cv2.INTER_AREA)
+            cand_gray = cv2.cvtColor(cand_resized, cv2.COLOR_BGR2GRAY)
+
+            # Zone 1: Upper Emblem (top 60%)
+            split_y = int(logo_h * 0.6)
+            emb_logo = logo_gray[:split_y, :]
+            emb_cand = cand_gray[:split_y, :]
+            res_emb = max(0.0, float(cv2.matchTemplate(emb_cand, emb_logo, cv2.TM_CCOEFF_NORMED)[0][0]))
+
+            # Zone 2: Lower Typography / Text (bottom 40%)
+            txt_logo = logo_gray[split_y:, :]
+            txt_cand = cand_gray[split_y:, :]
+            res_txt = max(0.0, float(cv2.matchTemplate(txt_cand, txt_logo, cv2.TM_CCOEFF_NORMED)[0][0]))
+
+            dual_zone_score = (res_emb * 0.5) + (res_txt * 0.5)
+        except Exception:
+            dual_zone_score = 0.0
+
+    # 3. SIFT Feature Matching with Spatial Consistency
     sift_score = 0.0
     sift_box = None
+    inlier_ratio = 0.0
     try:
         sift = cv2.SIFT_create(nfeatures=1500)
         kp_logo, des_logo = sift.detectAndCompute(logo_gray, None)
@@ -308,7 +392,6 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
             bf = cv2.BFMatcher(cv2.NORM_L2)
             matches = bf.knnMatch(des_logo, des_post, k=2)
 
-            # Lowe's ratio test
             good_matches = []
             for m_n in matches:
                 if len(m_n) == 2:
@@ -324,85 +407,48 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
                 if mask is not None:
                     inliers = int(np.sum(mask))
                     inlier_ratio = inliers / float(len(good_matches))
-                    # Compute SIFT confidence
                     sift_score = min(1.0, (inliers / 15.0) * 0.7 + inlier_ratio * 0.3)
 
-                    # Compute bounding box of inlier dst_pts
                     inlier_pts = dst_pts[mask.ravel() == 1]
                     if len(inlier_pts) >= 4:
                         x, y, w, h = cv2.boundingRect(inlier_pts)
                         sift_box = (x, y, w, h)
 
-                        # A5: Spatial consistency guard against scattered inliers across cluttered poster
                         pts_2d = inlier_pts.reshape(-1, 2)
                         w_ratio = w / float(post_w)
                         h_ratio = h / float(post_h)
                         std_x = float(np.std(pts_2d[:, 0]))
                         std_y = float(np.std(pts_2d[:, 1]))
 
-                        # If points are scattered over > 60% of poster in either dimension
-                        # or std dev indicates diffuse scatter rather than a localized cluster
                         if w_ratio > 0.60 or h_ratio > 0.60 or (std_x > post_w * 0.25 and std_y > post_h * 0.25):
                             sift_score *= 0.3
     except Exception:
         pass
 
-    # 3. ORB Feature Matching with RANSAC Geometric Verification
-    orb_score = 0.0
-    orb_box = None
-    try:
-        orb = cv2.ORB_create(nfeatures=1000)
-        kp_logo_orb, des_logo_orb = orb.detectAndCompute(logo_gray, None)
-        kp_post_orb, des_post_orb = orb.detectAndCompute(post_gray, None)
+    # 4. Composite Score with Strict Dual-Zone Emblem Guard
+    composite_score = round((best_template_score * 0.5) + (dual_zone_score * 0.5), 2)
+    feature_score = sift_score
 
-        if des_logo_orb is not None and des_post_orb is not None and len(kp_logo_orb) >= 8 and len(kp_post_orb) >= 8:
-            bf_orb = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-            orb_matches = bf_orb.match(des_logo_orb, des_post_orb)
-            good_orb = [m for m in orb_matches if m.distance < 50]
-            if len(good_orb) >= 10:
-                src_pts = np.float32([kp_logo_orb[m.queryIdx].pt for m in good_orb]).reshape(-1, 1, 2)
-                dst_pts = np.float32([kp_post_orb[m.trainIdx].pt for m in good_orb]).reshape(-1, 1, 2)
-                _matrix, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-                if mask is not None:
-                    inliers = int(np.sum(mask))
-                    inlier_ratio = inliers / float(len(good_orb))
-                    if inliers >= 10 and inlier_ratio >= 0.35:
-                        inlier_pts = dst_pts[mask.ravel() == 1]
-                        x, y, w, h = cv2.boundingRect(inlier_pts)
-                        pts_2d = inlier_pts.reshape(-1, 2)
-                        w_ratio = w / float(post_w)
-                        h_ratio = h / float(post_h)
-                        std_x = float(np.std(pts_2d[:, 0]))
-                        std_y = float(np.std(pts_2d[:, 1]))
-                        # Spatial consistency: inliers must form a localized cluster
-                        if w_ratio <= 0.35 and h_ratio <= 0.35 and std_x <= post_w * 0.15 and std_y <= post_h * 0.15:
-                            orb_score = min(1.0, (inliers / 20.0) * 0.7 + inlier_ratio * 0.3)
-                            orb_box = (x, y, w, h)
-    except Exception:
-        pass
-
-    # 4. Composite Score Calculation
-    # Template matching gives exact visual shape alignment; SIFT & ORB give scale/rotation robustness
-    feature_score = max(sift_score, orb_score)
-    feature_box = sift_box if sift_score >= orb_score else orb_box
-
-    if best_template_score >= 0.75:
-        final_score = best_template_score
+    # Strict Emblem Guard:
+    # If the inner emblem or typography fails (< 0.55), the logo is wrong!
+    # SIFT matches on a generic outer circle/frame must NOT inflate the score.
+    if dual_zone_score < 0.55 or best_template_score < 0.55:
+        final_score = composite_score
         chosen_box = best_template_box
-    elif feature_score >= 0.75:
-        final_score = feature_score
-        chosen_box = feature_box
-    elif best_template_score >= 0.60 and feature_score >= 0.50:
-        final_score = (best_template_score * 0.6) + (feature_score * 0.4)
-        chosen_box = best_template_box or feature_box
+    elif composite_score >= 0.75:
+        final_score = composite_score
+        chosen_box = best_template_box
+    elif feature_score >= 0.75 and inlier_ratio >= 0.35:
+        final_score = round((composite_score * 0.5) + (feature_score * 0.5), 2)
+        chosen_box = best_template_box
     else:
-        final_score = max(best_template_score, feature_score)
-        chosen_box = best_template_box or feature_box or (0, 0, int(post_w * 0.1), int(post_h * 0.1))
+        final_score = composite_score
+        chosen_box = best_template_box
 
-    # Calculate location and size percent
-    bx, by, bw, bh = chosen_box
-    cx = (bx + bw / 2.0) / float(post_w)
-    cy = (by + bh / 2.0) / float(post_h)
+    # Calculate normalized location
+    cbx, cby, cbw, cbh = chosen_box
+    cx = (cbx + cbw / 2.0) / float(post_w)
+    cy = (cby + cbh / 2.0) / float(post_h)
 
     if 0.35 <= cx <= 0.65 and 0.35 <= cy <= 0.65:
         loc = "center"
@@ -411,44 +457,42 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
         h_part = "left" if cx < 0.5 else "right"
         loc = f"{v_part}-{h_part}"
 
-    size_percent = max(1, int(round((bw / float(post_w)) * 100)))
+    size_percent = max(1, int(round((cbw / float(post_w)) * 100)))
 
-    # Determine Reason
-    # Computer Vision on graphic posters with textured/gradient backgrounds produces 0.48-0.70 normalized match
-    is_in_corner = loc in ["top-left", "top-right", "top", "bottom-left", "bottom-right", "bottom", "center"]
-    found = final_score >= 0.48 or (final_score >= 0.45 and is_in_corner)
-    if final_score >= 0.50 and is_in_corner:
-        reason = "CORRECT"
-    elif not found:
-        reason = "MISSING"
-        found = False
-        loc = "unknown"
-        size_percent = 0
-    elif size_percent < 4:
-        reason = "TOO_SMALL"
-    else:
-        # Check if color distribution matches
+    # 5. Strict Verdict & Color Verification
+    if final_score >= 0.75:
+        # Check Color Integrity (HSV Histogram Correlation)
         try:
-            crop = post_bgr[max(0, by):min(post_h, by+bh), max(0, bx):min(post_w, bx+bw)]
-            if crop.size > 0:
-                crop_hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-                logo_hsv = cv2.cvtColor(logo_bgr, cv2.COLOR_BGR2HSV)
+            if cand_crop.size > 0:
+                crop_hsv = cv2.cvtColor(cand_crop, cv2.COLOR_BGR2HSV)
+                logo_hsv = cv2.cvtColor(tight_logo, cv2.COLOR_BGR2HSV)
                 hist_crop = cv2.calcHist([crop_hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
                 hist_logo = cv2.calcHist([logo_hsv], [0, 1], None, [16, 16], [0, 180, 0, 256])
                 cv2.normalize(hist_crop, hist_crop, 0, 1, cv2.NORM_MINMAX)
                 cv2.normalize(hist_logo, hist_logo, 0, 1, cv2.NORM_MINMAX)
                 color_corr = cv2.compareHist(hist_crop, hist_logo, cv2.HISTCMP_CORREL)
-                if color_corr < 0.15:
+
+                if color_corr < 0.25:
                     reason = "COLOR_CHANGED"
+                    found = True
                 else:
                     reason = "CORRECT"
+                    found = True
             else:
-                reason = "MISSING"
                 found = False
-                loc = "unknown"
-                size_percent = 0
+                reason = "MISSING"
         except Exception:
+            reason = "CORRECT"
+            found = True
+    else:
+        found = False
+        if final_score >= 0.20:
             reason = "WRONG_LOGO"
+        else:
+            reason = "MISSING"
+
+    cand_crop_b64 = _encode_bgr_to_base64_data_uri(cand_crop)
+    ref_crop_b64 = _encode_bgr_to_base64_data_uri(tight_logo)
 
     return {
         "found": found,
@@ -456,6 +500,9 @@ def _check_logo_with_python_cv(post_bgr, logo_bgr):
         "location": loc,
         "size_percent": size_percent,
         "reason": reason,
+        "candidate_crop_base64": cand_crop_b64,
+        "reference_crop_base64": ref_crop_b64,
+        "bbox": [int(cbx), int(cby), int(cbw), int(cbh)],
     }
 
 
@@ -469,25 +516,14 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
 
     Flow:
       Step 1 - AI FIRST (Priority):
-        - Calls Gemini Vision AI with whole image search.
-        - If AI returns found=true and match_score >= 0.85 => PASS, do NOT run Python.
+        - Calls Gemini Vision AI with focused, tight-cropped logo.
+        - If AI returns found=true and match_score >= 0.85 => PASS.
       Step 2 - PYTHON FALLBACK:
-        - Only if AI fails, times out, or returns score < 0.85.
-        - Runs OpenCV SIFT + ORB + Multi-scale Template Matching sliding window.
-        - If match_score >= 0.85 => PASS else FAIL.
+        - OpenCV Multi-scale Template Matching + Dual-Zone Structural Correlation + SIFT.
+        - Strict threshold >= 0.75 for PASS. Color change mapped to COLOR_CHANGED warning.
 
     Returns:
-      dict matching exact JSON schema:
-      {
-        "status": "PASS" | "FAIL",
-        "found": bool,
-        "score": float,
-        "location": str,
-        "location_hindi": str,
-        "size_percent": int,
-        "reason": "CORRECT" | "MISSING" | "WRONG_LOGO" | "TOO_SMALL" | "HIDDEN" | "COLOR_CHANGED",
-        "suggestion": str
-      }
+      dict matching exact JSON schema with candidate_crop_base64 and reference_crop_base64.
     """
     # 1. Load and guard post image in RAM
     post_img = _load_image_to_bgr(post_image_bgr)
@@ -501,11 +537,13 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
             "size_percent": 0,
             "reason": "MISSING",
             "suggestion": SUGGESTION_RULES["MISSING"],
+            "candidate_crop_base64": None,
+            "reference_crop_base64": None,
         }
 
     post_img = _downscale_in_ram(post_img, MAX_POST_SIDE)
 
-    # 2. Load and guard reference logo in RAM
+    # 2. Load, downscale, and tight-crop reference logo in RAM
     logo_img = _load_image_to_bgr(reference_logo_path)
     if logo_img is None:
         return {
@@ -517,16 +555,29 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
             "size_percent": 0,
             "reason": "MISSING",
             "suggestion": SUGGESTION_RULES["MISSING"],
+            "candidate_crop_base64": None,
+            "reference_crop_base64": None,
         }
 
     logo_img = _downscale_in_ram(logo_img, MAX_LOGO_SIDE)
+    tight_logo = _tight_crop_logo(logo_img)
+    ref_crop_b64 = _encode_bgr_to_base64_data_uri(tight_logo)
+
+    # Pre-extract candidate crop via fast Python template matching for UI visual comparison
+    quick_py_result = None
+    cand_crop_b64 = None
+    try:
+        quick_py_result = _check_logo_with_python_cv(post_img, tight_logo)
+        cand_crop_b64 = quick_py_result.get("candidate_crop_base64")
+    except Exception as e:
+        print(f"[BrandLogoCheck] Quick CV pre-extraction notice: {e}", file=sys.stderr)
 
     # ==========================================================================
     # Step 1 - AI FIRST (Priority)
     # ==========================================================================
     ai_result = None
     try:
-        ai_result = _check_logo_with_vision_ai(post_img, logo_img)
+        ai_result = _check_logo_with_vision_ai(post_img, tight_logo)
     except Exception as e:
         print(f"[BrandLogoCheck] AI Vision error (will use Python fallback): {e}", file=sys.stderr)
 
@@ -537,22 +588,21 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
         except (ValueError, TypeError):
             score = 0.0
 
-        raw_location = str(ai_result.get("location", "bottom-right"))
+        raw_location = str(ai_result.get("location", quick_py_result.get("location", "top-left") if quick_py_result else "top-left"))
         loc_key, loc_hindi = _map_location_hindi(raw_location)
 
         try:
-            size_pct = int(ai_result.get("size_percent", 10))
+            size_pct = int(ai_result.get("size_percent", quick_py_result.get("size_percent", 10) if quick_py_result else 10))
         except (ValueError, TypeError):
             size_pct = 10
 
         raw_reason = str(ai_result.get("reason", "")).strip().upper()
         if raw_reason not in SUGGESTION_RULES:
-            raw_reason = "CORRECT" if (found and score >= PASS_THRESHOLD) else "MISSING"
+            raw_reason = "CORRECT" if (found and score >= PASS_THRESHOLD) else "WRONG_LOGO"
 
         custom_suggestion = ai_result.get("suggestion")
         suggestion = custom_suggestion if (custom_suggestion and str(custom_suggestion).strip()) else SUGGESTION_RULES.get(raw_reason, SUGGESTION_RULES["MISSING"])
 
-        # If AI returned a definitive verdict, trust Gemini's inspection result
         if found and score >= PASS_THRESHOLD:
             return {
                 "status": "PASS",
@@ -564,6 +614,8 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
                 "reason": "CORRECT",
                 "suggestion": suggestion,
                 "checked_by": "Gemini",
+                "candidate_crop_base64": cand_crop_b64,
+                "reference_crop_base64": ref_crop_b64,
             }
         else:
             return {
@@ -573,16 +625,18 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
                 "location": loc_key if loc_key != "unknown" else "unknown",
                 "location_hindi": loc_hindi if loc_key != "unknown" else "Kahin nahi mila",
                 "size_percent": size_pct if found else 0,
-                "reason": raw_reason if raw_reason in SUGGESTION_RULES else "MISSING",
+                "reason": raw_reason if raw_reason in SUGGESTION_RULES else "WRONG_LOGO",
                 "suggestion": suggestion,
                 "checked_by": "Gemini",
+                "candidate_crop_base64": cand_crop_b64,
+                "reference_crop_base64": ref_crop_b64,
             }
 
     # ==========================================================================
     # Step 2 - PYTHON FALLBACK (Only if AI fails / timeout / low confidence)
     # ==========================================================================
     print("[BrandLogoCheck] Executing Step 2: OpenCV Python Fallback (SIFT + ORB + Template Matching)...", file=sys.stderr)
-    py_result = _check_logo_with_python_cv(post_img, logo_img)
+    py_result = quick_py_result or _check_logo_with_python_cv(post_img, tight_logo)
 
     found = bool(py_result["found"])
     score = float(py_result["score"])
@@ -590,11 +644,15 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
     size_pct = int(py_result["size_percent"])
     reason = str(py_result["reason"]).strip().upper()
 
-    if found and (reason == "CORRECT" or score >= 0.50):
+    if found and score >= 0.75:
         status = "PASS"
-        reason = "CORRECT"
+        if reason != "COLOR_CHANGED":
+            reason = "CORRECT"
     else:
         status = "FAIL"
+        found = False
+        if reason not in ["WRONG_LOGO", "MISSING", "TOO_SMALL", "HIDDEN"]:
+            reason = "WRONG_LOGO" if score >= 0.20 else "MISSING"
 
     if not found or reason == "MISSING":
         loc_key = "unknown"
@@ -613,6 +671,8 @@ def check_brand_logo(post_image_bgr, reference_logo_path):
         "reason": reason,
         "suggestion": suggestion,
         "checked_by": "Python",
+        "candidate_crop_base64": py_result.get("candidate_crop_base64"),
+        "reference_crop_base64": ref_crop_b64,
     }
 
 

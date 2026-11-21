@@ -1168,19 +1168,30 @@ const enrichAiReport = (r) => {
   const logoCheck = typeof r.logo_check === 'string' ? JSON.parse(r.logo_check) : (r.logo_check || null);
 
   const realErrorsOnPoster = Array.isArray(ocrIssues) ? ocrIssues.filter((b) => b.status === 'red') : [];
-  const logoPass = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found);
 
-  const ocrTextLower = String(r.ocr_extracted_text || '').toLowerCase();
-  const hasBrandTokenInOcr = ocrTextLower.includes('navjyoti') || ocrTextLower.includes('doaguru') || ocrTextLower.includes('balgopal') || ocrTextLower.includes('medicity');
+  // 1. Strict Brand-Agnostic Logo Validation
+  const isLogoConfigured = Boolean(logoCheck && logoCheck.status !== 'SKIPPED');
+  const isLogoWrongOrMissing = Boolean(
+    isLogoConfigured &&
+    (logoCheck.status === 'FAIL' || logoCheck.reason === 'WRONG_LOGO' || logoCheck.reason === 'MISSING')
+  );
+  const isLogoColorChanged = Boolean(
+    isLogoConfigured &&
+    (logoCheck.reason === 'COLOR_CHANGED' || (logoCheck.status === 'PASS' && logoCheck.reason === 'COLOR_CHANGED'))
+  );
+  const logoPass = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found && !isLogoWrongOrMissing);
+
+  // 2. Client-Agnostic Brand Name Validation (Strictly via brandIdentity, ZERO hardcoded client names)
   const brandPass = Boolean(
-    (brandIdentity && (brandIdentity.brand_name_correct || (brandIdentity.brand_name_match_score || 0) >= 80)) ||
-    hasBrandTokenInOcr
+    brandIdentity &&
+    (brandIdentity.brand_name_correct || (brandIdentity.brand_name_match_score || 0) >= 80) &&
+    brandIdentity.status !== 'UNAUTHORIZED_BRAND' &&
+    brandIdentity.status !== 'BRAND_NOT_FOUND'
   );
 
+  // 3. Client-Agnostic Phone Validation (Strictly via phone_verification, ZERO hardcoded phone numbers)
   const phonePass = Boolean(
-    (brandIdentity?.phone_verification || []).some((p) => p.status === 'clean') ||
-    ocrTextLower.includes('6268875304') ||
-    ocrTextLower.includes('8817232247')
+    (brandIdentity?.phone_verification || []).some((p) => p.status === 'clean')
   );
 
   const passedAnchors = [];
@@ -1191,6 +1202,15 @@ const enrichAiReport = (r) => {
 
   const reasons = [];
 
+  // MANDATORY ENFORCEMENT RULES:
+  // Rule A: Logo FAIL (Wrong/Missing) is a STRICT NON-NEGOTIABLE RED BLOCK (cannot be bypassed by phone/name)
+  if (isLogoWrongOrMissing) {
+    reasons.push(
+      `Logo Compliance Block: ${logoCheck.suggestion || 'Galat ya missing logo detect hua hai. Brand Guidelines ka official logo lagayein.'}`
+    );
+  }
+
+  // Rule B: All 3 Anchors Failed OR Real Spelling Mistakes on Poster -> RED BLOCK
   if (anchorsCount === 0) {
     reasons.push(
       'Cross-Client / Brand Compliance Block: Post me na to official logo mila, na brand name mila, aur na hi registered phone number mila (Teeno mandatory checks fail ho gaye).'
@@ -1204,8 +1224,13 @@ const enrichAiReport = (r) => {
   }
 
   let enforcementState = r.enforcement_state;
-  if (anchorsCount === 0 || realErrorsOnPoster.length > 0) {
+  if (isLogoWrongOrMissing || anchorsCount === 0 || realErrorsOnPoster.length > 0) {
     enforcementState = 'red_block';
+  } else if (isLogoColorChanged) {
+    enforcementState = 'yellow_alert';
+    reasons.push(
+      'Logo Color Notice: Logo ka structure aur text sahi hai lekin color original logo se alag hai. Verify karke proceed karein.'
+    );
   } else if (anchorsCount >= 1 && anchorsCount < 3) {
     enforcementState = 'yellow_alert';
     const missing = [];
@@ -1250,10 +1275,12 @@ const getPostById = async (req, res) => {
       `SELECT p.*, 
               c.name AS client_name, 
               c.is_active AS client_is_active,
+              bg.reference_logo_url AS reference_logo_url,
               u.name AS creator_name, 
               u.email AS creator_email
        FROM posts p
        JOIN clients c ON p.client_id = c.id
+       LEFT JOIN client_brand_guidelines bg ON bg.client_id = p.client_id
        JOIN users u ON p.created_by = u.id
        WHERE p.id = ?`,
       [postId]
