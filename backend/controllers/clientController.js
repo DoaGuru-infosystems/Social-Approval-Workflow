@@ -3,6 +3,7 @@ const fs = require('fs');
 const pool = require('../config/db');
 const { encrypt } = require('../utils/encryption');
 const gmbService = require('../services/gmbService');
+const metaService = require('../services/metaService');
 
 /**
  * Helper to parse comma-separated string or array into clean string array
@@ -732,8 +733,13 @@ const initiateSocialConnect = async (req, res) => {
       });
     }
 
+    const frontendOrigin = req.query.origin || req.headers.origin || null;
+
     if (platform === 'instagram') {
-      const igRes = metaService.getInstagramAuthUrl(id);
+      const igRes = metaService.getInstagramAuthUrl(id, frontendOrigin);
+      if (!igRes.success) {
+        return res.status(400).json(igRes);
+      }
       if (req.query.json === 'true' || req.headers.accept?.includes('application/json')) {
         return res.status(200).json(igRes);
       }
@@ -743,23 +749,10 @@ const initiateSocialConnect = async (req, res) => {
       return res.status(400).json(igRes);
     }
 
-    const statePayload = Buffer.from(
-      JSON.stringify({
-        clientId: id,
-        platform,
-        adminId: req.user.id,
-        nonce: Math.random().toString(36).substring(7),
-      })
-    ).toString('base64');
-
-    const metaAppId = process.env.META_APP_ID;
-    const redirectUri = process.env.META_REDIRECT_URI || 'http://localhost:5000/api/social/callback';
-
-    // If Meta App ID is configured with real credentials, build the Meta Dialog URL
-    const apiVer = process.env.META_API_VERSION || 'v21.0';
-    const metaAuthUrl = `https://www.facebook.com/${apiVer}/dialog/oauth?client_id=${metaAppId}&redirect_uri=${encodeURIComponent(
-      redirectUri
-    )}&state=${statePayload}&scope=pages_show_list,pages_manage_posts,pages_read_engagement,instagram_business_basic,instagram_business_content_publish,business_management`;
+    const fbRes = metaService.getFacebookAuthUrl(id, frontendOrigin);
+    if (!fbRes.success) {
+      return res.status(400).json(fbRes);
+    }
 
     // For interactive API clients or sandbox tests, return authUrl
     if (req.query.json === 'true' || req.headers.accept?.includes('application/json')) {
@@ -767,14 +760,13 @@ const initiateSocialConnect = async (req, res) => {
         success: true,
         platform,
         clientId: id,
-        authUrl: metaAuthUrl,
-        state: statePayload,
-        mockCallbackUrl: `/api/social/callback?code=mock_code_test&state=${statePayload}`,
+        authUrl: fbRes.authUrl,
+        auth_url: fbRes.authUrl,
       });
     }
 
     // Direct browser redirect
-    return res.redirect(metaAuthUrl);
+    return res.redirect(fbRes.authUrl);
   } catch (error) {
     console.error('Error initiating social connect:', error);
     return res.status(500).json({

@@ -32,6 +32,7 @@ const ManagerDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeActionId, setActiveActionId] = useState(null);
   const [comments, setComments] = useState({});
+  const [managerAcks, setManagerAcks] = useState({});
 
   useEffect(() => {
     fetchReviewQueue();
@@ -52,10 +53,29 @@ const ManagerDashboard = () => {
   };
 
   const handleReviewAction = async (postId, action) => {
+    const targetPost = posts.find((p) => p.id === postId);
+    const enforcementState = targetPost?.latest_ai_check?.enforcement_state || 'green_clean';
+
+    if (action === 'approve') {
+      if (enforcementState === 'red_block') {
+        showToast('Cannot approve post: Post has unresolved RED BLOCK violations.', 'error');
+        return;
+      }
+      if (enforcementState === 'yellow_alert' && !managerAcks[postId]) {
+        showToast('Kripya Yellow Zone warning ko acknowledge checkbox tick karein.', 'warning');
+        return;
+      }
+    }
+
     setActiveActionId(`${action}-${postId}`);
     try {
       const comment = (comments[postId] || '').trim();
-      await postService.managerReview(postId, { action, comment });
+      const payload = {
+        action,
+        comment,
+        manager_acknowledged: Boolean(managerAcks[postId]),
+      };
+      await postService.managerReview(postId, payload);
 
       if (action === 'approve') {
         showToast(`Post #${postId} was approved and sent to the Admin for review.`, 'success');
@@ -440,6 +460,23 @@ const ManagerDashboard = () => {
                           className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF9F6] border border-[#E5E2DA] text-xs text-[#2B2A27] placeholder-[#A8A29E] focus:outline-none focus:border-amber-600 focus:bg-white"
                         />
                       </div>
+
+                      {/* Yellow Zone Warning & Manager Acknowledgment */}
+                      {aiReport?.enforcement_state === 'yellow_alert' && (
+                        <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs cursor-pointer select-none shadow-xs">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(managerAcks[post.id])}
+                            onChange={(e) =>
+                              setManagerAcks((prev) => ({ ...prev, [post.id]: e.target.checked }))
+                            }
+                            className="mt-0.5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                          />
+                          <span className="leading-relaxed">
+                            <strong>Yellow Zone Warning (Soft Gate):</strong> Maine warnings (phone mismatch / partial branding) dekh li hain aur mai is post ko approve karne ke liye agree karta/karti hoon.
+                          </span>
+                        </label>
+                      )}
                     </div>
                   </div>
 

@@ -84,9 +84,6 @@ const publishPost = async (postId) => {
     }
   }
 
-  // Detect whether media is video or image
-  const isVideo = Boolean(post.image_path && /\.(mp4|mov|avi|webm|mkv|wmv)$/i.test(post.image_path));
-
   const results = [];
   let successCount = 0;
 
