@@ -34,7 +34,7 @@ const isKeyConfigured = (platform = 'facebook') => {
 /**
  * 1. Independent Facebook Flow:
  * Route: GET /api/auth/meta/facebook -> https://www.facebook.com/v21.0/dialog/oauth
- * Scope: pages_show_list,pages_manage_posts,pages_read_engagement,business_management
+ * Scope: pages_show_list,pages_read_engagement,pages_manage_posts
  */
 const getFacebookAuthUrl = (clientId, frontendOrigin = null) => {
   if (!isFacebookKeyConfigured()) {
@@ -62,10 +62,9 @@ const getFacebookAuthUrl = (clientId, frontendOrigin = null) => {
   ).toString('base64');
 
   const scopes = [
-   /*  */ 'pages_show_list',
-    'pages_manage_posts',
+    'pages_show_list',
     'pages_read_engagement',
-    'business_management',
+    'pages_manage_posts',
   ].join(',');
 
   const authUrl = `https://www.facebook.com/${GRAPH_API_VERSION}/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(
@@ -269,9 +268,9 @@ const handleFacebookCallback = async (code, state, req = null) => {
 /**
  * Strictly query Meta's Instagram Graph API to retrieve verified user identity.
  * Primary documented endpoint for Instagram Login:
- *   GET https://graph.instagram.com/v21.0/me?fields=user_id,username
+ *   GET https://graph.instagram.com/v21.0/me?fields=id,username,account_type
  * Documented node endpoint using actual user_id from OAuth code exchange:
- *   GET https://graph.instagram.com/v21.0/{user_id}?fields=user_id,username
+ *   GET https://graph.instagram.com/v21.0/{user_id}?fields=id,username,account_type
  *
  * Logs exact hostname, API version, endpoint, HTTP status, and full Meta error JSON. Never logs access token.
  * Never invents, guesses, or infers usernames from client business names.
@@ -285,15 +284,15 @@ const fetchInstagramIdentity = async (accessToken, fallbackUserId = null) => {
   const cleanUserId = fallbackUserId ? String(fallbackUserId).trim() : null;
 
   // Documented candidates:
-  // 1. Primary: GET https://graph.instagram.com/{version}/me?fields=user_id,username (minimal supported fields only)
-  // 2. User Node: GET https://graph.instagram.com/{version}/{user_id}?fields=user_id,username
+  // 1. Primary: GET https://graph.instagram.com/{version}/me?fields=id,username,account_type (minimal supported fields only)
+  // 2. User Node: GET https://graph.instagram.com/{version}/{user_id}?fields=id,username,account_type
   const candidateRequests = [
     {
       hostname: 'graph.instagram.com',
       apiVersion,
       endpoint: '/me',
-      fields: 'user_id,username',
-      url: `https://graph.instagram.com/${apiVersion}/me?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+      fields: 'id,username,account_type',
+      url: `https://graph.instagram.com/${apiVersion}/me?fields=id,username,account_type&access_token=${encodeURIComponent(accessToken)}`,
     },
   ];
 
@@ -302,8 +301,8 @@ const fetchInstagramIdentity = async (accessToken, fallbackUserId = null) => {
       hostname: 'graph.instagram.com',
       apiVersion,
       endpoint: `/${cleanUserId}`,
-      fields: 'user_id,username',
-      url: `https://graph.instagram.com/${apiVersion}/${encodeURIComponent(cleanUserId)}?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+      fields: 'id,username,account_type',
+      url: `https://graph.instagram.com/${apiVersion}/${encodeURIComponent(cleanUserId)}?fields=id,username,account_type&access_token=${encodeURIComponent(accessToken)}`,
     });
   }
 
@@ -312,8 +311,8 @@ const fetchInstagramIdentity = async (accessToken, fallbackUserId = null) => {
     hostname: 'graph.instagram.com',
     apiVersion: 'unversioned',
     endpoint: '/me',
-    fields: 'user_id,username',
-    url: `https://graph.instagram.com/me?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+    fields: 'id,username,account_type',
+    url: `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${encodeURIComponent(accessToken)}`,
   });
 
   if (cleanUserId) {
@@ -321,8 +320,8 @@ const fetchInstagramIdentity = async (accessToken, fallbackUserId = null) => {
       hostname: 'graph.instagram.com',
       apiVersion: 'unversioned',
       endpoint: `/${cleanUserId}`,
-      fields: 'user_id,username',
-      url: `https://graph.instagram.com/${encodeURIComponent(cleanUserId)}?fields=user_id,username&access_token=${encodeURIComponent(accessToken)}`,
+      fields: 'id,username,account_type',
+      url: `https://graph.instagram.com/${encodeURIComponent(cleanUserId)}?fields=id,username,account_type&access_token=${encodeURIComponent(accessToken)}`,
     });
   }
 
@@ -335,8 +334,8 @@ const fetchInstagramIdentity = async (accessToken, fallbackUserId = null) => {
       const data = await res.json();
 
       // STRICT VALIDATION: Code 100 or data.error must NEVER be interpreted as success
-      if (data && !data.error && (data.username || data.user_id || data.id)) {
-        const verifiedId = String(data.user_id || data.id || cleanUserId);
+      if (data && !data.error && (data.username || data.id || data.user_id)) {
+        const verifiedId = String(data.id || data.user_id || cleanUserId);
         const verifiedUsername = data.username ? String(data.username).trim() : null;
 
         console.log(`[Instagram Identity] Verified via ${req.hostname} ${req.apiVersion}${req.endpoint} (HTTP ${res.status}): ID=${verifiedId}, username=${verifiedUsername}`);
@@ -890,10 +889,28 @@ const publishInstagram = async (account, post) => {
     throw new Error(`Instagram publishing failed at media_publish (Step 3): ${errorMsg}`);
   }
 
+  // Fetch real Instagram permalink with alphanumeric shortcode (e.g. https://www.instagram.com/p/DgFYiQnn354/)
+  // Using numeric media ID directly in URL results in Instagram "Post isn't available" error.
+  let postUrl = `https://instagram.com/p/${pData.id}`;
+  try {
+    const permalinkRes = await fetch(
+      `https://${apiHost}/${apiVersion}/${pData.id}?fields=permalink,shortcode,id&access_token=${encodeURIComponent(token)}`
+    );
+    const permalinkData = await permalinkRes.json();
+    if (permalinkData && permalinkData.permalink) {
+      postUrl = permalinkData.permalink;
+      console.log('[Instagram Publish] Verified live permalink fetched:', postUrl);
+    } else if (permalinkData && permalinkData.shortcode) {
+      postUrl = `https://www.instagram.com/p/${permalinkData.shortcode}/`;
+    }
+  } catch (permalinkErr) {
+    console.warn('[Instagram Publish] Could not fetch live permalink, falling back to ID URL:', permalinkErr.message);
+  }
+
   return {
     success: true,
     id: pData.id,
-    url: `https://instagram.com/p/${pData.id}`,
+    url: postUrl,
   };
 };
 
