@@ -1,5 +1,6 @@
 const path = require('path');
 const dotenv = require('dotenv');
+const openRouterService = require('./openRouterService');
 
 // Ensure env variables loaded
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
@@ -57,10 +58,45 @@ const checkGrammar = async (text, language = 'auto', whitelist = [], brandName =
     return grammarCache.get(cacheKey);
   }
 
+  const tryOpenRouterFallback = async (primaryFailReason = 'Gemini unavailable/failed') => {
+    if (openRouterService.isKeyConfigured()) {
+      try {
+        const configuredModel = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+        console.log(`\n🔄 [TEXT CHECK - TRIGGERING FALLBACK 1: OpenRouter AI]`);
+        console.log(`   Engine: OpenRouter API (Model: ${configuredModel})`);
+        console.log(`   Reason: Primary Gemini failed (${primaryFailReason})`);
+        console.log(`   Checking: Spelling & Grammar in ${lang === 'hi' ? 'Hindi' : 'English'} copy...`);
+
+        const orResult = await openRouterService.checkGrammarOpenRouter(
+          cleanText,
+          lang,
+          validWhitelist,
+          cleanBrand,
+          gmbData
+        );
+        console.log(`✔ [TEXT CHECK - FALLBACK 1 SUCCESS: OpenRouter AI] Processed successfully (${orResult.length} issue(s) detected).`);
+        grammarCache.set(cacheKey, orResult);
+        return orResult;
+      } catch (orErr) {
+        console.warn(`✖ [TEXT CHECK - FALLBACK 1 FAILED: OpenRouter AI] Error: ${orErr.message}`);
+      }
+    } else {
+      console.log(`⚠️ [TEXT CHECK - FALLBACK 1 SKIPPED] OPENROUTER_API_KEY is not configured.`);
+    }
+
+    console.log(`\n🔄 [TEXT CHECK - TRIGGERING FALLBACK 2 (BACKUP): Node Local Dictionary Engine]`);
+    console.log(`   Backup Name: Node Hunspell / nspell Dictionary Engine`);
+    console.log(`   Checking: Pure spelling against offline word lists (Grammar checking unavailable in dictionary mode).`);
+    return null;
+  };
+
   const apiKey = (process.env.GEMINI_API_KEY || '').trim();
 
   if (!apiKey) {
-    console.warn('[GrammarService] GEMINI_API_KEY not found in environment.');
+    console.warn('\n⚠️ [TEXT CHECK - PRIMARY SKIPPED: Google Gemini AI] GEMINI_API_KEY not found in environment.');
+    const orResult = await tryOpenRouterFallback('GEMINI_API_KEY missing');
+    if (orResult !== null) return orResult;
+
     return [
       {
         original: '',
@@ -177,6 +213,10 @@ If there are no issues at all, return []`;
       },
     });
 
+    console.log(`\n▶ [TEXT CHECK - PRIMARY: Google Gemini AI]`);
+    console.log(`   Engine: Google Gemini Flash (${lang === 'hi' ? 'Hindi वर्तनी व व्याकरण' : 'English Spelling & Grammar'})`);
+    console.log(`   Checking: Copy length ${cleanText.length} chars (Whitelist: ${validWhitelist.length} terms)`);
+
     for (const modelName of CANDIDATE_MODELS) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       const controller = new AbortController();
@@ -192,7 +232,7 @@ If there are no issues at all, return []`;
         clearTimeout(timeout);
 
         if (res.status === 503 || res.status === 429) {
-          console.warn(`[GrammarService] Model ${modelName} returned ${res.status}. Falling back to next model...`);
+          console.warn(`  [Gemini Model] ${modelName} returned status ${res.status}. Trying next candidate model...`);
           continue;
         }
 
@@ -210,10 +250,14 @@ If there are no issues at all, return []`;
       }
     }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      console.warn(`[GrammarService] Gemini returned ${res.status}: ${errText.slice(0, 150)}`);
-      const isKeyErr = res.status === 400 || res.status === 401 || res.status === 403 || /api_key|expired|billing|unauthorized/i.test(errText);
+    if (!res || !res.ok) {
+      const errText = await res?.text().catch(() => '') || lastErrorText || 'Network/timeout';
+      console.warn(`✖ [TEXT CHECK - PRIMARY FAILED: Google Gemini AI] HTTP ${res?.status || 'ERR'}: ${errText.slice(0, 150)}`);
+
+      const orResult = await tryOpenRouterFallback(`Gemini HTTP ${res?.status || 'ERR'}`);
+      if (orResult !== null) return orResult;
+
+      const isKeyErr = res?.status === 400 || res?.status === 401 || res?.status === 403 || /api_key|expired|billing|unauthorized/i.test(errText);
       if (isKeyErr) {
         return [
           {
@@ -234,7 +278,10 @@ If there are no issues at all, return []`;
 
     const data = await res.json();
     const rawOut = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawOut) return [];
+    if (!rawOut) {
+      console.log(`✔ [TEXT CHECK - PRIMARY SUCCESS: Google Gemini AI] Clean response (0 issues found).`);
+      return [];
+    }
 
     let parsed = [];
     try {
@@ -261,12 +308,18 @@ If there are no issues at all, return []`;
         suggestion: String(item.suggestion || '').trim(),
         reason: String(item.reason || (item.type === 'spelling' ? 'Spelling correction' : 'Grammar correction')).trim(),
         type: item.type === 'spelling' ? 'spelling' : 'grammar',
+        source: 'gemini_ai',
       }));
 
+    console.log(`✔ [TEXT CHECK - PRIMARY SUCCESS: Google Gemini AI] Processed successfully (${normalized.length} issue(s) found).`);
     grammarCache.set(cacheKey, normalized);
     return normalized;
   } catch (err) {
-    console.warn('[GrammarService] Error checking grammar/spelling:', err.message);
+    console.warn(`✖ [TEXT CHECK - PRIMARY FAILED: Google Gemini AI] Error: ${err.message}`);
+
+    const orResult = await tryOpenRouterFallback(err.message);
+    if (orResult !== null) return orResult;
+
     const isHardKeyError = /api_key|expired|billing|permission|unauthorized|401|403/i.test(err.message);
     if (isHardKeyError) {
       return [

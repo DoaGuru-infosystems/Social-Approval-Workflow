@@ -388,10 +388,14 @@ def handle_check_post(environ, start_response):
 def application(environ, start_response):
     """
     Main WSGI entry point called by Phusion Passenger.
+    Supports both /check-post and root / for POST requests to bypass Apache rewrite rules.
     """
     route = resolve_route(environ)
+    method = (environ.get("REQUEST_METHOD") or "GET").upper()
 
     if route in ("/", "/health"):
+        if method == "POST":
+            return handle_check_post(environ, start_response)
         return handle_health(environ, start_response)
     elif route == "/check-post":
         return handle_check_post(environ, start_response)
@@ -402,6 +406,6 @@ def application(environ, start_response):
             {
                 "error": "Endpoint not found.",
                 "requested_route": route,
-                "available_endpoints": ["GET /health", "POST /check-post"],
+                "available_endpoints": ["GET /health", "POST /check-post", "POST /"],
             },
         )

@@ -222,6 +222,12 @@ const startServer = async () => {
     const dbStatus = await pool.testConnection();
     if (dbStatus.connected) {
       console.log(`✅ MySQL Database connected successfully.`);
+      try {
+        const { runMigration } = require('./migrations/20261121_universal_logo_verification');
+        await runMigration();
+      } catch (migErr) {
+        console.warn(`⚠️ Startup migration notice: ${migErr.message}`);
+      }
     } else {
       console.warn(`⚠️ MySQL Database connection notice: ${dbStatus.error}`);
       console.warn(`👉 Please ensure MySQL is running and DB '${process.env.DB_NAME || 'social_approval_db'}' exists.`);

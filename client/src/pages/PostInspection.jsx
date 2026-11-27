@@ -351,7 +351,63 @@ const PostInspection = () => {
       </header>
 
       {/* Main 2-Column Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 pt-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-8 pt-6 space-y-5">
+        {/* Inspection Engines Transparency Audit Banner */}
+        <div className="bg-white rounded-2xl p-3.5 border border-[#E5E2DA] shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 font-bold text-[#2B2A27]">
+            <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>Inspection Engine Audit:</span>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Visual OCR Engine */}
+            <div className="px-2.5 py-1 rounded-lg bg-stone-50 border border-stone-200 flex items-center gap-1.5 text-[11px]">
+              <span className="text-stone-500 font-medium">Visual OCR:</span>
+              <span className="font-bold text-stone-800 font-mono">
+                {latestAi.ocr_engine === 'openrouter_multimodal'
+                  ? '🤖 OpenRouter AI (Fallback 1)'
+                  : latestAi.ocr_engine === 'gemini_multimodal' || latestAi.ocr_engine === 'gemini_ai'
+                  ? '🌟 Google Gemini Vision (Primary)'
+                  : '⚡ A2 PaddleOCR (Backup)'}
+              </span>
+            </div>
+
+            {/* Logo Check Engine */}
+            <div className="px-2.5 py-1 rounded-lg bg-stone-50 border border-stone-200 flex items-center gap-1.5 text-[11px]">
+              <span className="text-stone-500 font-medium">Logo Check:</span>
+              <span className="font-bold text-stone-800 font-mono">
+                {latestAi.logo_check?.checked_by === 'Gemini'
+                  ? '🌟 Google Gemini'
+                  : latestAi.logo_check?.checked_by === 'OpenRouter'
+                  ? '🤖 OpenRouter AI'
+                  : latestAi.logo_check?.checked_by === 'Python'
+                  ? '⚡ Python Matcher'
+                  : latestAi.logo_check?.status === 'SKIPPED'
+                  ? '⚪ Skipped'
+                  : (latestAi.ai_provider || 'AI Engine')}
+              </span>
+            </div>
+
+            {/* Text Language Engine */}
+            <div className="px-2.5 py-1 rounded-lg bg-stone-50 border border-stone-200 flex items-center gap-1.5 text-[11px]">
+              <span className="text-stone-500 font-medium">Grammar &amp; Spelling:</span>
+              <span className="font-bold text-stone-800 font-mono">
+                {latestAi.ai_provider === 'openrouter'
+                  ? '🤖 OpenRouter AI'
+                  : latestAi.ai_provider === 'dictionary'
+                  ? '📚 Local Dictionary'
+                  : '🌟 Google Gemini'}
+              </span>
+            </div>
+
+            {/* Brand Rules Engine */}
+            <div className="px-2.5 py-1 rounded-lg bg-stone-50 border border-stone-200 flex items-center gap-1.5 text-[11px]">
+              <span className="text-stone-500 font-medium">Brand Compliance:</span>
+              <span className="font-bold text-emerald-800 font-mono">🛡️ Rules Engine</span>
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* ======================================================== */}
           {/* LEFT COLUMN: Visual Poster OCR & Dedicated Logo Check   */}
@@ -555,9 +611,16 @@ const PostInspection = () => {
               {/* 1. Caption & Title Text Spelling */}
               <div className="space-y-2">
                 <span className="text-xs font-bold text-stone-800 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 flex-wrap">
                     <FileText className="w-3.5 h-3.5 text-stone-500" />
                     <span>Caption &amp; Title Spelling</span>
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
+                      {latestAi.ai_provider === 'openrouter'
+                        ? '🤖 OpenRouter AI (Fallback 1)'
+                        : latestAi.ai_provider === 'dictionary'
+                        ? '📚 Node Local Dictionary (Backup)'
+                        : '🌟 Google Gemini AI (Primary)'}
+                    </span>
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -609,9 +672,16 @@ const PostInspection = () => {
               {/* 2. Poster Image Spelling (OCR Visual) */}
               <div className="space-y-2 pt-2 border-t border-[#E5E2DA]">
                 <span className="text-xs font-bold text-stone-800 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 flex-wrap">
                     <ImageIcon className="w-3.5 h-3.5 text-stone-500" />
                     <span>Poster Image Spelling (OCR)</span>
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
+                      {latestAi.ocr_engine === 'openrouter_multimodal'
+                        ? '🤖 OpenRouter AI (Fallback 1)'
+                        : latestAi.ocr_engine === 'gemini_multimodal' || latestAi.ocr_engine === 'gemini_ai'
+                        ? '🌟 Google Gemini Vision (Primary)'
+                        : '⚡ A2 PaddleOCR + Dictionary (Backup)'}
+                    </span>
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -663,7 +733,14 @@ const PostInspection = () => {
               {/* Grammar Suggestions */}
               <div className="space-y-2 pt-2 border-t border-[#E5E2DA]">
                 <span className="text-xs font-bold text-stone-800 flex items-center justify-between">
-                  <span>Grammar &amp; Punctuation</span>
+                  <span className="flex items-center gap-1.5 flex-wrap">
+                    <span>Grammar &amp; Punctuation</span>
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
+                      {latestAi.ai_provider === 'openrouter'
+                        ? '🤖 OpenRouter AI (Fallback 1)'
+                        : '🌟 Google Gemini AI (Primary)'}
+                    </span>
+                  </span>
                   <span
                     className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                       grammarSuggestions.length > 0

@@ -76,6 +76,11 @@ const executeBackgroundImageCheck = async ({
   textResult,
 }) => {
   try {
+    console.log('\n' + '='.repeat(80));
+    console.log(`🚀 [ASYNC WORKER START] Post ID: ${postId} (Revision: ${revisionId || 0})`);
+    console.log(`   Client ID: ${clientId} | Image: ${imagePath}`);
+    console.log('='.repeat(80));
+
     const imageResult = await aiService.runImageCheck({
       clientId,
       imagePath,
@@ -148,6 +153,8 @@ const executeBackgroundImageCheck = async ({
         postId,
       ]
     );
+
+    console.log(`\n🏁 [ASYNC WORKER COMPLETED] Post ID ${postId} successfully updated to status: '${postStatus}' (Enforcement: ${combinedResult.enforcement_state})\n`);
   } catch (err) {
     console.error(`Background image check error for post ${postId}:`, err);
     await pool.query(

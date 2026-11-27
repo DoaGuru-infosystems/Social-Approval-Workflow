@@ -96,17 +96,44 @@ const AnnotatedPosterOCR = ({
       {/* 1. Header Summary Stats */}
       <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-white border border-[#E5E2DA] shadow-xs">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`w-2.5 h-2.5 rounded-full ${ocrEngine === 'gemini_ai' ? 'bg-purple-500 animate-pulse' : 'bg-amber-500 animate-pulse'}`} />
+          <span className={`w-2.5 h-2.5 rounded-full ${
+            ocrEngine === 'openrouter_multimodal'
+              ? 'bg-indigo-500 animate-pulse'
+              : ocrEngine === 'gemini_ai' || ocrEngine === 'gemini_multimodal'
+              ? 'bg-purple-500 animate-pulse'
+              : 'bg-amber-500 animate-pulse'
+          }`} />
           <span className="text-xs font-bold text-[#2B2A27] flex items-center gap-1.5">
-            <Sparkles className={`w-3.5 h-3.5 ${ocrEngine === 'gemini_ai' ? 'text-purple-600' : 'text-amber-600'}`} />
-            {ocrEngine === 'gemini_ai' ? 'Gemini AI Visual Quality Inspection' : 'PaddleOCR Visual Quality Inspection'}
+            <Sparkles className={`w-3.5 h-3.5 ${
+              ocrEngine === 'openrouter_multimodal'
+                ? 'text-indigo-600'
+                : ocrEngine === 'gemini_ai' || ocrEngine === 'gemini_multimodal'
+                ? 'text-purple-600'
+                : 'text-amber-600'
+            }`} />
+            {ocrEngine === 'openrouter_multimodal'
+              ? 'OpenRouter AI (Vision) Visual OCR Inspection'
+              : ocrEngine === 'gemini_ai' || ocrEngine === 'gemini_multimodal'
+              ? 'Google Gemini Vision Visual OCR Inspection'
+              : 'A2 Remote PaddleOCR Visual Inspection'}
           </span>
-          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md font-mono ${
-            ocrEngine === 'gemini_ai'
+          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-md font-mono flex items-center gap-1 ${
+            ocrEngine === 'openrouter_multimodal'
+              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+              : ocrEngine === 'gemini_ai' || ocrEngine === 'gemini_multimodal'
               ? 'bg-purple-50 text-purple-700 border border-purple-200'
-              : 'bg-amber-50 text-amber-800 border border-amber-200'
+              : 'bg-amber-50 text-amber-900 border border-amber-300'
           }`}>
-            {ocrEngine === 'gemini_ai' ? '✨ Gemini AI' : fallbackUsed ? '⚡ A2 PaddleOCR (Fallback)' : '⚡ A2 PaddleOCR'}
+            {ocrEngine === 'openrouter_multimodal'
+              ? '🤖 Checked by: OpenRouter AI (Fallback 1)'
+              : ocrEngine === 'gemini_ai' || ocrEngine === 'gemini_multimodal'
+              ? '🌟 Checked by: Google Gemini Vision (Primary)'
+              : fallbackUsed
+              ? '⚡ Checked by: A2 PaddleOCR (Fallback 2 Backup)'
+              : '⚡ Checked by: A2 Remote PaddleOCR'}
+          </span>
+          <span className="text-[10px] text-stone-500 hidden sm:inline font-medium">
+            (Checks: Poster Text, Layout &amp; Numbered Bounding Boxes)
           </span>
         </div>
 

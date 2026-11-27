@@ -269,6 +269,9 @@ const runGoogleVisionPostCheck = async ({
   const modelName = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
+  console.log(`  [Gemini Vision] Requesting 5-in-1 multimodal check via model '${modelName}'...`);
+  console.log(`  [Gemini Vision] Poster dimensions: ${posterDims.width}x${posterDims.height} | Reference logo: ${hasLogo ? 'Attached' : 'None'}`);
+
   const requestBody = JSON.stringify({
     contents: [{ parts }],
     generationConfig: {
@@ -294,7 +297,7 @@ const runGoogleVisionPostCheck = async ({
       clearTimeout(timeout);
 
       if ((response.status === 503 || response.status === 429) && attempt < maxAttempts) {
-        console.warn(`[Gemini PostCheck] Attempt ${attempt} returned status ${response.status}. Retrying in 2000ms...`);
+        console.warn(`  ⚠️ [Gemini Vision] Attempt ${attempt} returned status ${response.status}. Retrying in 2000ms...`);
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
@@ -302,7 +305,7 @@ const runGoogleVisionPostCheck = async ({
     } catch (netErr) {
       clearTimeout(timeout);
       if (attempt < maxAttempts) {
-        console.warn(`[Gemini PostCheck] Attempt ${attempt} network error (${netErr.message}). Retrying in 2000ms...`);
+        console.warn(`  ⚠️ [Gemini Vision] Attempt ${attempt} network notice (${netErr.message}). Retrying in 2000ms...`);
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
@@ -312,6 +315,7 @@ const runGoogleVisionPostCheck = async ({
 
   if (!response || !response.ok) {
     const errText = await response?.text().catch(() => '') || '';
+    console.warn(`  ✖ [Gemini Vision] API error HTTP ${response?.status || 'ERR'}: ${errText.slice(0, 150)}`);
     const err = new Error(`Gemini check failed with status ${response?.status || 'network_error'}: ${errText.slice(0, 150)}`);
     if (response?.status === 400 || response?.status === 401 || response?.status === 403 || /api_key|expired|billing|permission/i.test(errText)) {
       err.isKeyError = true;

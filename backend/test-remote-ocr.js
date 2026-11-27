@@ -148,40 +148,75 @@ async function runRemoteCheck(imagePath) {
     mandatory_phrases: ['#ApexHealth'],
   };
 
-  const checkUrl = `${BASE_URL}/check-post`;
-  console.log(`📡 Sending HTTPS POST request to A2 Hosting...`);
-  console.log(`⏳ Awaiting EasyOCR inference and dictionary validation (up to 150s)...`);
-
   const startTime = performance.now();
 
   try {
-    const response = await fetch(checkUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    const endpointsToTry = [
+      `${BASE_URL}/check-post`,
+      `${BASE_URL}/check-post/`,
+      `${BASE_URL}/`,
+    ];
 
-    const durationMs = Math.round(performance.now() - startTime);
+    let response = null;
+    let activeEndpoint = endpointsToTry[0];
+    let rawText = '';
+    let durationMs = 0;
+    let data = null;
+
+    for (const endpoint of endpointsToTry) {
+      activeEndpoint = endpoint;
+      console.log(`📡 Sending HTTPS POST request to: ${endpoint}`);
+      console.log(`⏳ Awaiting EasyOCR inference and dictionary validation (up to 150s)...`);
+
+      const reqStartTime = performance.now();
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+
+        durationMs = Math.round(performance.now() - reqStartTime);
+        const contentType = response.headers.get('content-type') || '';
+
+        if (contentType.includes('application/json')) {
+          const parsed = await response.json();
+          // Check if server returned health check instead of OCR check
+          if (parsed && parsed.service && parsed.status === 'ok' && !('ocr_reliable' in parsed)) {
+            console.warn(`⚠️ Endpoint ${endpoint} returned Health Check instead of OCR check (status 200). Trying next endpoint...`);
+            continue;
+          }
+          data = parsed;
+          break; // Successfully got real OCR check JSON response
+        }
+
+        rawText = await response.text();
+        console.warn(`⚠️ Endpoint ${endpoint} returned non-JSON (HTTP ${response.status}). Trying alternative...`);
+      } catch (err) {
+        console.warn(`⚠️ Request to ${endpoint} failed (${err.message}). Trying alternative...`);
+      }
+    }
+
     const durationSec = (durationMs / 1000).toFixed(2);
-    const contentType = response.headers.get('content-type') || '';
+    const contentType = response?.headers.get('content-type') || '';
 
     console.log(`\n----------------------------------------------------------------------`);
     console.log(`📥 Server Response Received in ${durationMs} ms (${durationSec} s)`);
-    console.log(`   HTTP Status: ${response.status} ${response.statusText}`);
+    console.log(`   HTTP Status: ${response?.status} ${response?.statusText}`);
+    console.log(`   Active URL : ${activeEndpoint}`);
     console.log(`----------------------------------------------------------------------`);
 
-    if (!contentType.includes('application/json')) {
-      const rawText = await response.text();
-      console.error(`\n❌ Unexpected non-JSON response from server (HTTP ${response.status}):`);
+    if (!data) {
+      if (!rawText && response) rawText = await response.text();
+      console.error(`\n❌ Failed to get OCR check response from server (HTTP ${response?.status}):`);
       console.error(rawText.slice(0, 500));
+      console.error(`\n💡 Tip: Make sure app.py on A2 server has been edited to route POST on / to handle_check_post and Passenger restarted.`);
       process.exit(1);
     }
-
-    const data = await response.json();
 
     if (!response.ok) {
       console.error(`\n❌ Remote API returned an error response (HTTP ${response.status}):`);

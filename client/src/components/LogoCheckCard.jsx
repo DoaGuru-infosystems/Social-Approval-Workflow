@@ -39,7 +39,15 @@ const LogoCheckCard = ({ logoCheck, aiProvider, fallbackUsed, referenceLogoUrl }
 
   const isPass = logoCheck.status === 'PASS';
   const isColorChanged = logoCheck.reason === 'COLOR_CHANGED';
-  const checkedBy = logoCheck.checked_by || (aiProvider === 'python' || fallbackUsed ? 'Python' : 'Gemini');
+  const checkedBy =
+    logoCheck.checked_by ||
+    (aiProvider === 'openrouter'
+      ? 'OpenRouter'
+      : aiProvider === 'python'
+      ? 'Python'
+      : fallbackUsed
+      ? 'Python'
+      : 'Gemini');
   const scoreFormatted = Number(logoCheck.score || 0).toFixed(2);
   const locationHindi = logoCheck.location_hindi || 'Sahi jagah pe hai';
 
@@ -95,13 +103,23 @@ const LogoCheckCard = ({ logoCheck, aiProvider, fallbackUsed, referenceLogoUrl }
           >
             {isColorChanged ? 'YELLOW ALERT' : isPass ? 'PASS' : 'RED BLOCK'}
           </span>
-          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-200 flex items-center gap-1">
+          <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-md bg-stone-100 text-stone-800 border border-stone-300 flex items-center gap-1 font-mono">
             {checkedBy === 'Gemini' ? (
-              <Sparkles className="w-2.5 h-2.5 text-amber-500" />
+              <>
+                <Sparkles className="w-2.5 h-2.5 text-amber-500" />
+                <span>Verified by: 🌟 Google Gemini Vision (Primary)</span>
+              </>
+            ) : checkedBy === 'OpenRouter' ? (
+              <>
+                <Sparkles className="w-2.5 h-2.5 text-purple-600" />
+                <span>Verified by: 🤖 OpenRouter AI (Fallback 1)</span>
+              </>
             ) : (
-              <Binary className="w-2.5 h-2.5 text-sky-600" />
+              <>
+                <Binary className="w-2.5 h-2.5 text-sky-600" />
+                <span>Verified by: ⚡ Python Color/Template Matcher (Backup)</span>
+              </>
             )}
-            {checkedBy}
           </span>
         </div>
       </div>

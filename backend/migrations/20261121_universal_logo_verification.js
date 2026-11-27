@@ -61,10 +61,15 @@ async function runMigration() {
   }
 
   console.log('[Migration] Universal logo verification schema migration completed successfully!');
-  process.exit(0);
 }
 
-runMigration().catch((err) => {
-  console.error('[Migration] Failed:', err);
-  process.exit(1);
-});
+module.exports = { runMigration };
+
+if (require.main === module) {
+  runMigration()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('[Migration] Failed:', err);
+      process.exit(1);
+    });
+}

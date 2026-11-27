@@ -12,6 +12,7 @@ const brandLogoService = require('./brandLogoService');
 const grammarService = require('./grammarService');
 const crossClientService = require('./crossClientService');
 const emojiIconService = require('./emojiIconService');
+const openRouterService = require('./openRouterService');
 const fuzzball = require('fuzzball');
 
 // Ensure environment variables are loaded if invoked directly
@@ -178,8 +179,6 @@ const runRemoteAICheck = async (inputData) => {
     throw new Error('Server configuration error: A2_OCR_API_KEY is not defined in environment.');
   }
 
-  const endpoint = `${apiUrl}/check-post`;
-
   let imageBase64 = null;
   let imageFilename = null;
 
@@ -215,38 +214,69 @@ const runRemoteAICheck = async (inputData) => {
     reference_logo_base64: referenceLogoBase64,
   };
 
+  const endpointsToTry = [
+    `${apiUrl}/check-post`,
+    `${apiUrl}/check-post/`,
+    `${apiUrl}/`,
+  ];
   let response;
-  const maxRetries = 2;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(AI_CHECK_TIMEOUT_MS),
-    });
+  let rawText = '';
+  let result = null;
 
-    if (response.status === 503 && attempt < maxRetries) {
-      await new Promise((res) => setTimeout(res, (attempt + 1) * 4000));
-      continue;
+  for (const currentEndpoint of endpointsToTry) {
+    const maxRetries = 1;
+    let endpointSuccess = false;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        response = await fetch(currentEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(AI_CHECK_TIMEOUT_MS),
+        });
+
+        if (response.status === 503 && attempt < maxRetries) {
+          await new Promise((res) => setTimeout(res, (attempt + 1) * 3000));
+          continue;
+        }
+
+        rawText = await response.text();
+        try {
+          const parsed = JSON.parse(rawText);
+          if (parsed && parsed.service && parsed.status === 'ok' && !('ocr_reliable' in parsed)) {
+            // Server returned health check instead of OCR check (e.g. redirected to GET /)
+            break;
+          }
+          result = parsed;
+          endpointSuccess = true;
+          break;
+        } catch (_) {
+          // Non-JSON returned (e.g. Apache HTML rewrite). Fall back to next endpoint.
+          break;
+        }
+      } catch (reqErr) {
+        if (attempt >= maxRetries) break;
+      }
     }
-    break;
+
+    if (endpointSuccess && result) {
+      break;
+    }
+  }
+
+  if (!result) {
+    const snippet = (rawText || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+    throw new Error(`Remote AI check returned non-JSON response (HTTP ${response?.status || 'ERR'}): ${snippet || 'Empty response'}`);
   }
 
   if (!response.ok) {
-    let errorDetail = `HTTP ${response.status} ${response.statusText}`;
-    try {
-      const errJson = await response.json();
-      if (errJson && errJson.error) {
-        errorDetail = errJson.error;
-      }
-    } catch (_) {}
+    const errorDetail = result?.error || `HTTP ${response.status} ${response.statusText}`;
     throw new Error(`Remote AI check failed: ${errorDetail}`);
   }
-
-  const result = await response.json();
 
   if (
     !result ||
@@ -332,6 +362,14 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
   if (caption && caption.trim()) textParts.push(caption.trim());
   const combinedText = textParts.join('\n');
 
+  const clientName = guidelines.organization_name || (clientId ? `Client #${clientId}` : 'Default Client');
+  console.log('\n' + '='.repeat(80));
+  console.log(`📝 [STEP 1: TEXT & BRAND COMPLIANCE CHECK]`);
+  console.log(`   Client : ${clientName} (ID: ${clientId || 'N/A'})`);
+  console.log(`   Title  : "${title || '(none)'}"`);
+  console.log(`   Caption: "${(caption || '').slice(0, 80)}${(caption || '').length > 80 ? '...' : ''}" (${(caption || '').length} chars)`);
+  console.log('='.repeat(80));
+
   // Detect and analyze emojis in text/caption
   const textEmojiReport = emojiIconService.detectTextEmojis(combinedText);
 
@@ -398,7 +436,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
     } else {
-      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
+      // Gemini or OpenRouter Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
       spellingIssues = geminiOut
         .filter((item) => item.type === 'spelling')
         .map((item) => ({
@@ -407,7 +445,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
           suggestion: item.suggestion,
           suggestions: [item.suggestion],
           reason: item.reason,
-          source: 'gemini_ai',
+          source: item.source || 'gemini_ai',
         }));
       grammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
     }
@@ -456,7 +494,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
         return !brandRulesService.fuzzyMatchWhitelist(issue.word, guidelines.whitelist, 80);
       });
     } else {
-      // Gemini Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
+      // Gemini or OpenRouter Succeeded -> AI is PRIMARY for both Spelling and Grammar (NO DICTIONARY)
       spellingIssues = geminiOut
         .filter((item) => item.type === 'spelling')
         .map((item) => ({
@@ -465,7 +503,7 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
           suggestion: item.suggestion,
           suggestions: [item.suggestion],
           reason: item.reason,
-          source: 'gemini_ai',
+          source: item.source || 'gemini_ai',
         }));
       grammarSuggestions = geminiOut.filter((item) => item.type === 'grammar');
     }
@@ -563,10 +601,28 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     summary = `Spelling: ${spellingIssues.length} issue(s) detected in text`;
   }
 
+  const usedOpenRouter = spellingIssues.some((s) => s.source === 'openrouter_ai') || grammarSuggestions.some((g) => g.source === 'openrouter_ai');
+  const usedDictionary = Boolean(keyError);
+  const textAiProvider = usedOpenRouter ? 'openrouter' : (usedDictionary ? 'dictionary' : 'gemini');
+
+  console.log('\n' + '-'.repeat(70));
+  console.log(`📋 [TEXT CHECK AUDIT] Client: ${guidelines.organization_name || clientId}`);
+  console.log(`   • Language Engine Used     : ${textAiProvider === 'openrouter' ? '🤖 OpenRouter AI [Fallback 1]' : (textAiProvider === 'dictionary' ? '📚 Node Local Dictionary [Backup]' : '🌟 Google Gemini AI [Primary]')}`);
+  console.log(`   • Grammar & Spelling Issues: ${spellingIssues.length} spelling error(s), ${grammarSuggestions.length} grammar suggestion(s)`);
+  console.log(`   • Brand Banned Words       : ${bannedWordsFound.length === 0 ? '✔ None' : '✖ Found (' + bannedWordsFound.join(', ') + ')'}`);
+  console.log(`   • Mandatory Phrases        : ${missingMandatoryPhrases.length === 0 ? '✔ All present' : '⚠️ Missing (' + missingMandatoryPhrases.join(', ') + ')'}`);
+  console.log(`   • Phone Verification       : ${phoneWarnings.length === 0 ? '✔ Verified' : '⚠️ ' + phoneWarnings.map((p) => p.message).join('; ')}`);
+  console.log(`   • Cross-Client Collision   : ${textCrossClientReport?.hasCollision ? '✖ Collision with ' + textCrossClientReport.collisions[0]?.foreignClient?.name : '✔ Clean'}`);
+  console.log(`   • Text Enforcement State   : ${textEnforcementState === 'red_block' ? '🔴 RED BLOCK' : (textEnforcementState === 'yellow_alert' ? '🟡 YELLOW ALERT' : '🟢 GREEN CLEAN')}`);
+  console.log('-'.repeat(70) + '\n');
+
   return {
     text_status: 'completed',
     passed,
     summary,
+    ai_provider: textAiProvider,
+    fallback_used: usedOpenRouter || usedDictionary,
+    fallback_reason: usedOpenRouter ? 'gemini_failed_openrouter_used' : (usedDictionary ? 'gemini_and_openrouter_failed' : 'none'),
     emoji_analysis: textEmojiReport,
     enforcement_state: textEnforcementState,
     enforcement_reasons: textEnforcementReasons,
@@ -1329,9 +1385,15 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
   const geminiApiKey = (process.env.GEMINI_API_KEY || '').trim();
   const isDummy = googleVisionService.isDummyKey(geminiApiKey);
 
+  console.log('\n' + '='.repeat(80));
+  console.log(`🖼️  [STEP 2: IMAGE OCR & BRAND VERIFICATION]`);
+  console.log(`   Poster Image  : ${resolvedImagePath || imagePath}`);
+  console.log(`   Reference Logo: ${resolvedLogoPath || 'None configured (Logo check will be SKIPPED)'}`);
+  console.log('='.repeat(80));
+
   if (isDummy) {
-    // 3. DUMMY MODE = NO PASS: Skip Gemini, never return PASS in dummy mode, guaranteed Python fallback.
-    console.log('[Post Check] Gemini DUMMY mode me hai - Skipping Gemini, routing to guaranteed Python Fallback.');
+    console.log(`⚠️ [IMAGE CHECK - PRIMARY SKIPPED: Google Gemini AI] Gemini key is in DUMMY mode.`);
+    console.log(`   Routing request to Fallback Hierarchy...`);
     fallbackUsed = true;
     fallbackReason = 'dummy_mode';
     aiProvider = 'python';
@@ -1342,7 +1404,10 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     };
   } else {
     try {
-      // 2. GEMINI PRIMARY: Multimodal 5-in-1 check via googleVisionService
+      console.log(`\n▶ [IMAGE CHECK - PRIMARY: Google Gemini Multimodal 5-in-1]`);
+      console.log(`   Engine: Google Gemini Vision (${process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'})`);
+      console.log(`   Inspecting: Poster layout, OCR transcription, logo verification & brand rules...`);
+
       const aiResult = await googleVisionService.runGoogleVisionPostCheck({
         imagePath: resolvedImagePath,
         referenceLogoPath: resolvedLogoPath,
@@ -1358,9 +1423,14 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
       aiProvider = 'gemini';
       fallbackUsed = false;
       fallbackReason = 'none';
+
+      console.log(`✔ [IMAGE CHECK - PRIMARY SUCCESS: Google Gemini Multimodal]`);
+      console.log(`   • OCR Extracted Text: ${extractedText.length} characters`);
+      console.log(`   • Detected Boxes    : ${aiResult.ocr_boxes?.length || 0}`);
+      console.log(`   • Logo Check Status : ${aiResult.logo_check?.status || 'SKIPPED'} (Score: ${Math.round((aiResult.logo_check?.score || 0) * 100)}%)`);
     } catch (aiError) {
-      // 4. PYTHON FALLBACK - GUARANTEED: Only if Gemini fails, errors, or returns empty text
-      console.log('[OCR Pipeline] Gemini AI check failed, falling back to Python PaddleOCR:', aiError.message);
+      console.warn(`✖ [IMAGE CHECK - PRIMARY FAILED: Google Gemini Multimodal]`);
+      console.warn(`   Error Details: ${aiError.message}`);
       fallbackUsed = true;
       fallbackReason = aiError.isDummy ? 'dummy_mode' : 'gemini_failed';
       aiProvider = 'python';
@@ -1373,18 +1443,77 @@ const runImageCheck = async ({ clientId = null, imagePath = null, caption = '' }
     }
   }
 
-  if (fallbackUsed || !remoteResult) {
+  // 2. OPENROUTER FALLBACK: Multimodal 5-in-1 check via OpenRouter API (openai/gpt-4o-mini)
+  if (!remoteResult && openRouterService.isKeyConfigured()) {
+    const orModel = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+    try {
+      console.log(`\n🔄 [IMAGE CHECK - TRIGGERING FALLBACK 1: OpenRouter AI Multimodal 5-in-1]`);
+      console.log(`   Engine: OpenRouter Vision API (Model: ${orModel})`);
+      console.log(`   Reason: Primary Gemini check failed/unavailable`);
+      console.log(`   Inspecting: Poster layout, OCR bounding boxes, and reference logo matching...`);
+
+      const openRouterResult = await openRouterService.runOpenRouterPostCheck({
+        imagePath: resolvedImagePath,
+        referenceLogoPath: resolvedLogoPath,
+        brandRules,
+      });
+
+      const extractedText = (openRouterResult?.ocr_text || openRouterResult?.text || '').trim();
+      if (!extractedText) {
+        throw new Error('OpenRouter AI returned empty text');
+      }
+
+      remoteResult = openRouterResult;
+      ocrEngineUsed = 'openrouter_multimodal';
+      aiProvider = 'openrouter';
+      fallbackUsed = true;
+      fallbackReason = isDummy ? 'dummy_mode_openrouter_used' : 'gemini_failed_openrouter_used';
+      keyError = null;
+
+      console.log(`✔ [IMAGE CHECK - FALLBACK 1 SUCCESS: OpenRouter AI Multimodal]`);
+      console.log(`   • OCR Extracted Text: ${extractedText.length} characters`);
+      console.log(`   • Detected Boxes    : ${openRouterResult.ocr_boxes?.length || 0}`);
+      console.log(`   • Logo Check Status : ${openRouterResult.logo_check?.status || 'SKIPPED'} (Score: ${Math.round((openRouterResult.logo_check?.score || 0) * 100)}%)`);
+    } catch (openRouterErr) {
+      console.warn(`✖ [IMAGE CHECK - FALLBACK 1 FAILED: OpenRouter AI Multimodal]`);
+      console.warn(`   Error Details: ${openRouterErr.message}`);
+    }
+  } else if (!remoteResult) {
+    console.log(`⚠️ [IMAGE CHECK - FALLBACK 1 SKIPPED] OpenRouter API key not configured.`);
+  }
+
+  // 3. BACKUP OCR FALLBACK: A2 Remote PaddleOCR / Python Local OCR
+  if (!remoteResult) {
+    const backupUrl = process.env.A2_OCR_API_URL || 'https://siarasystems.com/ocr-test';
+    console.log(`\n🔄 [IMAGE CHECK - TRIGGERING FALLBACK 2 (BACKUP): Remote/Local Python OCR]`);
+    console.log(`   Backup Engine Name: A2 Remote PaddleOCR Service (${backupUrl})`);
+    console.log(`   Reason: Both Gemini Primary and OpenRouter Fallback 1 failed!`);
+    console.log(`   Inspecting: Raw OCR text extraction and Python-based template/color logo analysis...`);
+
     ocrEngineUsed = 'a2_paddleocr';
     aiProvider = 'python';
+    fallbackUsed = true;
+    fallbackReason = 'gemini_and_openrouter_failed';
+    keyError = {
+      service: 'gemini_ai',
+      code: 'ALL_AI_FALLBACK',
+      user_message:
+        'AI se check nahi hua, Python PaddleOCR se check kiya gaya (Warning: Hindi matra aur OCR text ki accuracy kam ho sakti hai, kripya poster manually verify karein).',
+    };
     try {
       remoteResult = await tryA2PaddleOCR();
+      console.log(`✔ [IMAGE CHECK - FALLBACK 2 SUCCESS: A2 Remote PaddleOCR]`);
+      console.log(`   • Raw OCR Characters: ${(remoteResult?.ocr_text || '').length}`);
+      console.log(`   • Confidence Average : ${Math.round((remoteResult?.ocr_confidence_avg || 0) * 100)}% (Reliable: ${Boolean(remoteResult?.ocr_reliable)})`);
     } catch (a2Err) {
-      console.error('[OCR Pipeline] Both Gemini AI and A2 PaddleOCR failed:', a2Err.message);
+      console.error(`✖ [IMAGE CHECK - FALLBACK 2 FAILED: A2 Remote PaddleOCR]`);
+      console.error(`   Error Details: ${a2Err.message}`);
+      console.error(`🚫 [ALL ENGINES FAILED] Primary (Gemini), Fallback 1 (OpenRouter), and Backup (A2 PaddleOCR) all failed!`);
       return {
         image_status: 'failed',
-        image_error: `Gemini AI failed and A2 PaddleOCR fallback failed (${a2Err.message})`,
+        image_error: `Gemini AI failed, OpenRouter failed, and A2 PaddleOCR fallback failed (${a2Err.message})`,
         passed: false,
-        summary: `Image OCR failed: Both Gemini AI and A2 fallback unreachable`,
+        summary: `Image OCR failed: All AI and OCR fallbacks unreachable`,
         ocr_extracted_text: '',
         ocr_confidence: 0,
         ocr_confidence_avg: 0,
@@ -2115,6 +2244,42 @@ const mergeAiCheckResults = (textResult, imageResult) => {
   const isFallbackUsed = Boolean(imageResult?.fallback_used || textResult?.fallback_used);
   const aiProvider = imageResult?.ai_provider || textResult?.ai_provider || 'gemini';
   const fallbackReason = imageResult?.fallback_reason || textResult?.fallback_reason || 'none';
+
+  // Comprehensive Console Audit Log for the entire check
+  const badge =
+    mergedEnforcementState === 'red_block'
+      ? '🔴 RED BLOCK (Submission Blocked)'
+      : mergedEnforcementState === 'yellow_alert'
+      ? '🟡 YELLOW ALERT (Review Warning)'
+      : '🟢 GREEN CLEAN (Verified)';
+
+  console.log('\n' + '='.repeat(80));
+  console.log(`📊 [AI PIPELINE AUDIT REPORT] Complete Check Summary`);
+  console.log('='.repeat(80));
+  console.log(`  1. TEXT CHECK (Grammar & Spelling) :`);
+  console.log(`     • Engine Used         : ${textResult?.ai_provider === 'openrouter' ? '🤖 OpenRouter AI [Fallback 1]' : (textResult?.ai_provider === 'dictionary' ? '📚 Node Local Dictionary [Backup]' : '🌟 Google Gemini AI [Primary]')}`);
+  console.log(`     • Issues Found        : ${mergedSpelling.length} spelling, ${mergedGrammar.length} grammar`);
+  console.log(`  2. IMAGE OCR EXTRACTION :`);
+  console.log(`     • OCR Engine Used     : ${imageResult?.ocr_engine || 'none'} (Provider: ${imageResult?.ai_provider || 'N/A'})`);
+  console.log(`     • Text Extracted      : ${(imageResult?.ocr_extracted_text || '').length} characters, ${imageResult?.ocr_boxes?.length || 0} bounding boxes`);
+  console.log(`  3. LOGO VERIFICATION :`);
+  console.log(`     • Status              : ${imageResult?.logo_check?.status || 'SKIPPED'}`);
+  console.log(`     • Checked By          : ${imageResult?.logo_check?.checked_by || imageResult?.ai_provider || 'N/A'}`);
+  console.log(`     • Suggestion          : ${imageResult?.logo_check?.suggestion || 'N/A'}`);
+  console.log(`  4. BRAND COMPLIANCE & RULES :`);
+  console.log(`     • Banned Terms        : ${bannedWordsFound.length === 0 ? '✔ None' : '✖ Found (' + bannedWordsFound.join(', ') + ')'}`);
+  console.log(`     • Mandatory Phrases   : ${missingMandatoryPhrases.length === 0 ? '✔ All present' : '⚠️ Missing (' + missingMandatoryPhrases.join(', ') + ')'}`);
+  console.log(`     • Phone Numbers       : ${phoneWarnings.length === 0 ? '✔ Clean' : '⚠️ ' + phoneWarnings.map((p) => p.message).join('; ')}`);
+  console.log(`     • Cross-Client Status : ${isCrossClientMismatch ? '✖ Collision Detected' : '✔ Clean'}`);
+  console.log(`  5. FALLBACK HIERARCHY TRACE :`);
+  console.log(`     • Fallback Invoked?   : ${isFallbackUsed ? 'YES' : 'NO (Primary Succeeded)'}`);
+  console.log(`     • Fallback Reason     : ${fallbackReason}`);
+  console.log(`     • Final AI Provider   : ${aiProvider}`);
+  console.log(`  6. FINAL ENFORCEMENT STATE : ${badge}`);
+  if (mergedEnforcementReasons.length > 0) {
+    console.log(`     • Enforcement Reason  : ${mergedEnforcementReasons.join(' | ')}`);
+  }
+  console.log('='.repeat(80) + '\n');
 
   return {
     passed,
