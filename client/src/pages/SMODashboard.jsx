@@ -1412,6 +1412,7 @@ const SMODashboard = () => {
                         logoCheck={inspectingPost.latest_ai_check?.logo_check}
                         aiProvider={inspectingPost.latest_ai_check?.ai_provider}
                         fallbackUsed={inspectingPost.latest_ai_check?.fallback_used}
+                        referenceLogoUrl={inspectingPost.reference_logo_url ? `${SERVER_URL}/${inspectingPost.reference_logo_url.replace(/^[/\\]+/, '')}` : null}
                       />
                     </div>
                   </div>

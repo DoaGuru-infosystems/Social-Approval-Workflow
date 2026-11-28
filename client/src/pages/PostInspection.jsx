@@ -394,6 +394,8 @@ const PostInspection = () => {
               <span className="font-bold text-stone-800 font-mono">
                 {latestAi.ai_provider === 'openrouter'
                   ? '🤖 OpenRouter AI'
+                  : latestAi.ai_provider === 'python'
+                  ? '⚡ A2 PaddleOCR / Python'
                   : latestAi.ai_provider === 'dictionary'
                   ? '📚 Local Dictionary'
                   : '🌟 Google Gemini'}
@@ -617,6 +619,8 @@ const PostInspection = () => {
                     <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
                       {latestAi.ai_provider === 'openrouter'
                         ? '🤖 OpenRouter AI (Fallback 1)'
+                        : latestAi.ai_provider === 'python'
+                        ? '⚡ A2 PaddleOCR / Python (Backup)'
                         : latestAi.ai_provider === 'dictionary'
                         ? '📚 Node Local Dictionary (Backup)'
                         : '🌟 Google Gemini AI (Primary)'}
@@ -738,6 +742,8 @@ const PostInspection = () => {
                     <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
                       {latestAi.ai_provider === 'openrouter'
                         ? '🤖 OpenRouter AI (Fallback 1)'
+                        : latestAi.ai_provider === 'python'
+                        ? '⚡ A2 PaddleOCR / Python (Backup)'
                         : '🌟 Google Gemini AI (Primary)'}
                     </span>
                   </span>

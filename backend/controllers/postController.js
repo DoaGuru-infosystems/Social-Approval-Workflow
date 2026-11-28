@@ -4,6 +4,136 @@ const pool = require('../config/db');
 const aiService = require('../services/aiService');
 
 /**
+ * Helper to enrich and synthesize consistent summary and enforcement reasons for AI reports.
+ */
+function enrichAiReport(r) {
+  if (!r) return null;
+  const spellingIssues = typeof r.spelling_issues === 'string' ? JSON.parse(r.spelling_issues) : (r.spelling_issues || []);
+  const grammarSuggestions = typeof r.grammar_suggestions === 'string' ? JSON.parse(r.grammar_suggestions) : (r.grammar_suggestions || []);
+  const keyError = typeof r.key_error === 'string' ? JSON.parse(r.key_error) : (r.key_error || null);
+  const ocrIssues = typeof r.ocr_issues === 'string' ? JSON.parse(r.ocr_issues) : (r.ocr_issues || []);
+  const bannedWords = typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : (r.banned_words_found || []);
+  const missingMandatory = typeof r.missing_mandatory_phrases === 'string' ? JSON.parse(r.missing_mandatory_phrases) : (r.missing_mandatory_phrases || []);
+  const brandIdentity = typeof r.brand_identity_check === 'string' ? JSON.parse(r.brand_identity_check) : (r.brand_identity_check || null);
+  const logoCheck = typeof r.logo_check === 'string' ? JSON.parse(r.logo_check) : (r.logo_check || null);
+
+  const realErrorsOnPoster = Array.isArray(ocrIssues) ? ocrIssues.filter((b) => b.status === 'red') : [];
+
+  // 1. Strict Brand-Agnostic Logo Validation
+  const isLogoConfigured = Boolean(logoCheck && logoCheck.status !== 'SKIPPED');
+  const isLogoWrongOrMissing = Boolean(
+    isLogoConfigured &&
+    (logoCheck.status === 'FAIL' || logoCheck.reason === 'WRONG_LOGO' || logoCheck.reason === 'MISSING')
+  );
+  const isLogoColorChanged = Boolean(
+    isLogoConfigured &&
+    (logoCheck.reason === 'COLOR_CHANGED' || (logoCheck.status === 'PASS' && logoCheck.reason === 'COLOR_CHANGED'))
+  );
+  const logoPass = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found && !isLogoWrongOrMissing);
+
+  // 2. Client-Agnostic Brand Name Validation (Strictly via brandIdentity, ZERO hardcoded client names)
+  const brandPass = Boolean(
+    brandIdentity &&
+    (brandIdentity.brand_name_correct || (brandIdentity.brand_name_match_score || 0) >= 80) &&
+    brandIdentity.status !== 'UNAUTHORIZED_BRAND' &&
+    brandIdentity.status !== 'BRAND_NOT_FOUND'
+  );
+
+  // 3. Client-Agnostic Phone Validation (Strictly via phone_verification, ZERO hardcoded phone numbers)
+  const phonePass = Boolean(
+    (brandIdentity?.phone_verification || []).some((p) => p.status === 'clean')
+  );
+
+  const passedAnchors = [];
+  if (logoPass) passedAnchors.push('Official Logo');
+  if (brandPass) passedAnchors.push('Brand Name');
+  if (phonePass) passedAnchors.push('Registered Phone');
+  const anchorsCount = passedAnchors.length;
+
+  const reasons = [];
+
+  // MANDATORY ENFORCEMENT RULES:
+  // Rule A: Logo FAIL (Wrong/Missing) is a STRICT NON-NEGOTIABLE RED BLOCK (cannot be bypassed by phone/name)
+  if (isLogoWrongOrMissing) {
+    reasons.push(
+      `Logo Compliance Block: ${logoCheck.suggestion || 'Galat ya missing logo detect hua hai. Brand Guidelines ka official logo lagayein.'}`
+    );
+  }
+
+  // Rule B: All 3 Anchors Failed -> RED BLOCK
+  if (anchorsCount === 0) {
+    reasons.push(
+      'Cross-Client / Brand Compliance Block: Post me na to official logo mila, na brand name mila, aur na hi registered phone number mila (Teeno mandatory checks fail ho gaye).'
+    );
+  }
+
+  let enforcementState = r.enforcement_state || 'green_clean';
+  if (r.enforcement_state === 'red_block' || isLogoWrongOrMissing || anchorsCount === 0) {
+    enforcementState = 'red_block';
+    if (r.enforcement_reasons && Array.isArray(r.enforcement_reasons)) {
+      reasons.unshift(...r.enforcement_reasons);
+    } else if (r.summary && !r.summary.includes('Clean')) {
+      reasons.unshift(r.summary);
+    }
+  } else if (realErrorsOnPoster.length > 0) {
+    enforcementState = 'yellow_alert';
+    const errorWords = realErrorsOnPoster.map((e) => {
+      const match = (e.reason || '').match(/"([^"]+)"/);
+      return match ? match[1] : (e.ocr_read || 'Error');
+    }).slice(0, 4).join(', ');
+    reasons.push(`Poster Spelling Warning: Poster par ${realErrorsOnPoster.length} spelling check alert(s) detect huye hain (${errorWords}). OCR misread/icon ho sakta hai, visually verify karke proceed karein.`);
+  } else if (isLogoColorChanged) {
+    enforcementState = 'yellow_alert';
+    reasons.push(
+      'Logo Color Notice: Logo ka structure aur text sahi hai lekin color original logo se alag hai. Verify karke proceed karein.'
+    );
+  } else if (anchorsCount >= 1 && anchorsCount < 3) {
+    enforcementState = 'yellow_alert';
+    const missing = [];
+    if (!logoPass) missing.push('Logo');
+    if (!brandPass) missing.push('Brand Name');
+    if (!phonePass) missing.push('Phone');
+    reasons.push(`Identity Warning: Post me ${passedAnchors.join(', ')} verify ho gaya hai (${missing.join(', ')} missing). Confirm karke aage proceed karein.`);
+  } else {
+    enforcementState = 'green_clean';
+  }
+
+  let summary = r.summary || (reasons.length > 0 ? reasons[0] : 'All checks verified clean.');
+
+  const resolvedAiProvider = r.ai_provider || (r.fallback_used ? 'openrouter' : 'gemini');
+  const resolvedOcrEngine = r.ocr_engine || (
+    resolvedAiProvider === 'openrouter'
+      ? 'openrouter_multimodal'
+      : resolvedAiProvider === 'gemini'
+      ? 'gemini_multimodal'
+      : 'a2_paddleocr'
+  );
+
+  return {
+    ...r,
+    spelling_issues: spellingIssues,
+    grammar_suggestions: grammarSuggestions,
+    key_error: keyError,
+    ocr_issues: ocrIssues,
+    ocr_unreliable: Boolean(Number(r.ocr_unreliable)),
+    ocr_engine: resolvedOcrEngine,
+    banned_words_found: bannedWords,
+    missing_mandatory_phrases: missingMandatory,
+    brand_identity_check: brandIdentity,
+    logo_check: logoCheck,
+    ai_provider: resolvedAiProvider,
+    fallback_used: Boolean(Number(r.fallback_used)),
+    fallback_reason: r.fallback_reason || 'none',
+    image_status: r.image_status || 'completed',
+    text_status: r.text_status || 'completed',
+    image_error: r.image_error || null,
+    enforcement_state: enforcementState,
+    enforcement_reasons: reasons,
+    summary,
+  };
+}
+
+/**
  * Helper to fetch latest revision and AI check for a post
  */
 const attachLatestDetails = async (posts) => {
@@ -41,20 +171,7 @@ const attachLatestDetails = async (posts) => {
 
   const aiMap = new Map();
   aiChecks.forEach((a) => {
-    aiMap.set(a.post_id, {
-      ...a,
-      spelling_issues: typeof a.spelling_issues === 'string' ? JSON.parse(a.spelling_issues) : a.spelling_issues || [],
-      grammar_suggestions: typeof a.grammar_suggestions === 'string' ? JSON.parse(a.grammar_suggestions) : a.grammar_suggestions || [],
-      key_error: typeof a.key_error === 'string' ? JSON.parse(a.key_error) : a.key_error || null,
-      ocr_issues: typeof a.ocr_issues === 'string' ? JSON.parse(a.ocr_issues) : a.ocr_issues || [],
-      ocr_unreliable: Boolean(Number(a.ocr_unreliable)),
-      banned_words_found: typeof a.banned_words_found === 'string' ? JSON.parse(a.banned_words_found) : a.banned_words_found || [],
-      missing_mandatory_phrases: typeof a.missing_mandatory_phrases === 'string' ? JSON.parse(a.missing_mandatory_phrases) : a.missing_mandatory_phrases || [],
-      brand_identity_check: typeof a.brand_identity_check === 'string' ? JSON.parse(a.brand_identity_check) : a.brand_identity_check || null,
-      image_status: a.image_status || 'completed',
-      text_status: a.text_status || 'completed',
-      image_error: a.image_error || null,
-    });
+    aiMap.set(a.post_id, enrichAiReport(a));
   });
 
   return posts.map((post) => ({
@@ -1141,12 +1258,14 @@ const getPosts = async (req, res) => {
       SELECT p.*, 
              c.name AS client_name, 
              c.is_active AS client_is_active,
+             bg.reference_logo_url AS reference_logo_url,
              u.name AS smo_name, 
              u.email AS smo_email, 
              u.name AS creator_name, 
              u.email AS creator_email
       FROM posts p
       JOIN clients c ON p.client_id = c.id
+      LEFT JOIN client_brand_guidelines bg ON bg.client_id = p.client_id
       JOIN users u ON p.created_by = u.id
     `;
     const params = [];
@@ -1198,121 +1317,6 @@ const getPosts = async (req, res) => {
  * GET /api/posts/:id
  * Full detail with client, revisions, AI reports, and approvals
  */
-/**
- * Helper to enrich and synthesize consistent summary and enforcement reasons for AI reports.
- */
-const enrichAiReport = (r) => {
-  if (!r) return null;
-  const spellingIssues = typeof r.spelling_issues === 'string' ? JSON.parse(r.spelling_issues) : (r.spelling_issues || []);
-  const grammarSuggestions = typeof r.grammar_suggestions === 'string' ? JSON.parse(r.grammar_suggestions) : (r.grammar_suggestions || []);
-  const keyError = typeof r.key_error === 'string' ? JSON.parse(r.key_error) : (r.key_error || null);
-  const ocrIssues = typeof r.ocr_issues === 'string' ? JSON.parse(r.ocr_issues) : (r.ocr_issues || []);
-  const bannedWords = typeof r.banned_words_found === 'string' ? JSON.parse(r.banned_words_found) : (r.banned_words_found || []);
-  const missingMandatory = typeof r.missing_mandatory_phrases === 'string' ? JSON.parse(r.missing_mandatory_phrases) : (r.missing_mandatory_phrases || []);
-  const brandIdentity = typeof r.brand_identity_check === 'string' ? JSON.parse(r.brand_identity_check) : (r.brand_identity_check || null);
-  const logoCheck = typeof r.logo_check === 'string' ? JSON.parse(r.logo_check) : (r.logo_check || null);
-
-  const realErrorsOnPoster = Array.isArray(ocrIssues) ? ocrIssues.filter((b) => b.status === 'red') : [];
-
-  // 1. Strict Brand-Agnostic Logo Validation
-  const isLogoConfigured = Boolean(logoCheck && logoCheck.status !== 'SKIPPED');
-  const isLogoWrongOrMissing = Boolean(
-    isLogoConfigured &&
-    (logoCheck.status === 'FAIL' || logoCheck.reason === 'WRONG_LOGO' || logoCheck.reason === 'MISSING')
-  );
-  const isLogoColorChanged = Boolean(
-    isLogoConfigured &&
-    (logoCheck.reason === 'COLOR_CHANGED' || (logoCheck.status === 'PASS' && logoCheck.reason === 'COLOR_CHANGED'))
-  );
-  const logoPass = Boolean(logoCheck && logoCheck.status === 'PASS' && logoCheck.found && !isLogoWrongOrMissing);
-
-  // 2. Client-Agnostic Brand Name Validation (Strictly via brandIdentity, ZERO hardcoded client names)
-  const brandPass = Boolean(
-    brandIdentity &&
-    (brandIdentity.brand_name_correct || (brandIdentity.brand_name_match_score || 0) >= 80) &&
-    brandIdentity.status !== 'UNAUTHORIZED_BRAND' &&
-    brandIdentity.status !== 'BRAND_NOT_FOUND'
-  );
-
-  // 3. Client-Agnostic Phone Validation (Strictly via phone_verification, ZERO hardcoded phone numbers)
-  const phonePass = Boolean(
-    (brandIdentity?.phone_verification || []).some((p) => p.status === 'clean')
-  );
-
-  const passedAnchors = [];
-  if (logoPass) passedAnchors.push('Official Logo');
-  if (brandPass) passedAnchors.push('Brand Name');
-  if (phonePass) passedAnchors.push('Registered Phone');
-  const anchorsCount = passedAnchors.length;
-
-  const reasons = [];
-
-  // MANDATORY ENFORCEMENT RULES:
-  // Rule A: Logo FAIL (Wrong/Missing) is a STRICT NON-NEGOTIABLE RED BLOCK (cannot be bypassed by phone/name)
-  if (isLogoWrongOrMissing) {
-    reasons.push(
-      `Logo Compliance Block: ${logoCheck.suggestion || 'Galat ya missing logo detect hua hai. Brand Guidelines ka official logo lagayein.'}`
-    );
-  }
-
-  // Rule B: All 3 Anchors Failed -> RED BLOCK
-  if (anchorsCount === 0) {
-    reasons.push(
-      'Cross-Client / Brand Compliance Block: Post me na to official logo mila, na brand name mila, aur na hi registered phone number mila (Teeno mandatory checks fail ho gaye).'
-    );
-  }
-
-  let enforcementState = r.enforcement_state;
-  if (isLogoWrongOrMissing || anchorsCount === 0) {
-    enforcementState = 'red_block';
-  } else if (realErrorsOnPoster.length > 0) {
-    enforcementState = 'yellow_alert';
-    const errorWords = realErrorsOnPoster.map((e) => {
-      const match = (e.reason || '').match(/"([^"]+)"/);
-      return match ? match[1] : (e.ocr_read || 'Error');
-    }).slice(0, 4).join(', ');
-    reasons.push(`Poster Spelling Warning: Poster par ${realErrorsOnPoster.length} spelling check alert(s) detect huye hain (${errorWords}). OCR misread/icon ho sakta hai, visually verify karke proceed karein.`);
-  } else if (isLogoColorChanged) {
-    enforcementState = 'yellow_alert';
-    reasons.push(
-      'Logo Color Notice: Logo ka structure aur text sahi hai lekin color original logo se alag hai. Verify karke proceed karein.'
-    );
-  } else if (anchorsCount >= 1 && anchorsCount < 3) {
-    enforcementState = 'yellow_alert';
-    const missing = [];
-    if (!logoPass) missing.push('Logo');
-    if (!brandPass) missing.push('Brand Name');
-    if (!phonePass) missing.push('Phone');
-    reasons.push(`Identity Warning: Post me ${passedAnchors.join(', ')} verify ho gaya hai (${missing.join(', ')} missing). Confirm karke aage proceed karein.`);
-  } else {
-    enforcementState = 'green_clean';
-  }
-
-  let summary = r.summary || (reasons.length > 0 ? reasons[0] : 'All checks verified clean.');
-
-  return {
-    ...r,
-    spelling_issues: spellingIssues,
-    grammar_suggestions: grammarSuggestions,
-    key_error: keyError,
-    ocr_issues: ocrIssues,
-    ocr_unreliable: Boolean(Number(r.ocr_unreliable)),
-    banned_words_found: bannedWords,
-    missing_mandatory_phrases: missingMandatory,
-    brand_identity_check: brandIdentity,
-    logo_check: logoCheck,
-    ai_provider: r.ai_provider || 'gemini',
-    fallback_used: Boolean(Number(r.fallback_used)),
-    fallback_reason: r.fallback_reason || 'none',
-    image_status: r.image_status || 'completed',
-    text_status: r.text_status || 'completed',
-    image_error: r.image_error || null,
-    enforcement_state: enforcementState,
-    enforcement_reasons: reasons,
-    summary,
-  };
-};
-
 const getPostById = async (req, res) => {
   try {
     const postId = parseInt(req.params.id, 10);

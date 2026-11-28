@@ -215,9 +215,8 @@ const runRemoteAICheck = async (inputData) => {
   };
 
   const endpointsToTry = [
-    `${apiUrl}/check-post`,
-    `${apiUrl}/check-post/`,
     `${apiUrl}/`,
+    `${apiUrl}/check-post`,
   ];
   let response;
   let rawText = '';
@@ -601,7 +600,11 @@ const runTextCheck = async ({ clientId = null, title = '', caption = '' }) => {
     summary = `Spelling: ${spellingIssues.length} issue(s) detected in text`;
   }
 
-  const usedOpenRouter = spellingIssues.some((s) => s.source === 'openrouter_ai') || grammarSuggestions.some((g) => g.source === 'openrouter_ai');
+  const geminiActive = Boolean(process.env.GEMINI_API_KEY && !googleVisionService.isDummyKey(process.env.GEMINI_API_KEY));
+  const usedOpenRouter =
+    spellingIssues.some((s) => s.source === 'openrouter_ai') ||
+    grammarSuggestions.some((g) => g.source === 'openrouter_ai') ||
+    (!geminiActive && openRouterService.isKeyConfigured());
   const usedDictionary = Boolean(keyError);
   const textAiProvider = usedOpenRouter ? 'openrouter' : (usedDictionary ? 'dictionary' : 'gemini');
 

@@ -152,9 +152,8 @@ async function runRemoteCheck(imagePath) {
 
   try {
     const endpointsToTry = [
-      `${BASE_URL}/check-post`,
-      `${BASE_URL}/check-post/`,
       `${BASE_URL}/`,
+      `${BASE_URL}/check-post`,
     ];
 
     let response = null;

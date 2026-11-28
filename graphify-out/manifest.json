@@ -24,10 +24,10 @@
     "semantic_hash": "7da1a73c28c2c89a4f1bb36c10193d2d"
   },
   "backend/controllers/postController.js": {
-    "mtime": 1795594309.9852746,
-    "seen": 1795780457.3997977,
-    "ast_hash": "5686974c1116e5b3d96deca1ea33d367",
-    "semantic_hash": "5686974c1116e5b3d96deca1ea33d367"
+    "mtime": 1795785273.8711226,
+    "seen": 1795844517.181525,
+    "ast_hash": "d844cd8c9ed6a80358dbce0147f54b89",
+    "semantic_hash": "d844cd8c9ed6a80358dbce0147f54b89"
   },
   "backend/middleware/authMiddleware.js": {
     "mtime": 1795594309.986274,
@@ -120,16 +120,16 @@
     "semantic_hash": "09e2bd74f9c4770b0cee08a8a5938a80"
   },
   "backend/server.js": {
-    "mtime": 1795594309.9902713,
-    "seen": 1795780457.3998985,
-    "ast_hash": "8e72ade2ba25c0f748ac850b3ab984b4",
-    "semantic_hash": "8e72ade2ba25c0f748ac850b3ab984b4"
+    "mtime": 1795783903.4970036,
+    "seen": 1795844517.1940567,
+    "ast_hash": "d5a57aace3477717d47a099a5bacddf5",
+    "semantic_hash": "d5a57aace3477717d47a099a5bacddf5"
   },
   "backend/services/aiService.js": {
-    "mtime": 1795268638.5182269,
-    "seen": 1795780457.3999004,
-    "ast_hash": "f00d7d4393c616b908973452e7adf7dc",
-    "semantic_hash": "f00d7d4393c616b908973452e7adf7dc"
+    "mtime": 1795789683.5006437,
+    "seen": 1795844517.1940608,
+    "ast_hash": "a47686d64a764a77397c1b0a883056ab",
+    "semantic_hash": "a47686d64a764a77397c1b0a883056ab"
   },
   "backend/utils/encryption.js": {
     "mtime": 1795075636.4653575,
@@ -270,10 +270,10 @@
     "semantic_hash": "178f61c0ad32f8369da2494d3c9485c6"
   },
   "backend/a2-ocr-server/app.py": {
-    "mtime": 1795088742.8677177,
-    "seen": 1795780457.3997638,
-    "ast_hash": "f4d0a7d852171f8135b0f7eacd3e4f6a",
-    "semantic_hash": "f4d0a7d852171f8135b0f7eacd3e4f6a"
+    "mtime": 1795787764.595353,
+    "seen": 1795844517.177912,
+    "ast_hash": "d39b34af53c0b05c2393040c3beb6f6b",
+    "semantic_hash": "d39b34af53c0b05c2393040c3beb6f6b"
   },
   "backend/a2-ocr-server/cv2_preprocess.py": {
     "mtime": 1795238546.7720013,
@@ -342,16 +342,16 @@
     "semantic_hash": "15a726c55f14a573a1e50ede423c8025"
   },
   "backend/services/googleVisionService.js": {
-    "mtime": 1795172405.9828537,
-    "seen": 1795780457.3999183,
-    "ast_hash": "0afc1f593a3afcb757a4d95ad6432d11",
-    "semantic_hash": "0afc1f593a3afcb757a4d95ad6432d11"
+    "mtime": 1795785069.4489737,
+    "seen": 1795844517.196197,
+    "ast_hash": "e950abf111448db0354fe9c87c097ed7",
+    "semantic_hash": "e950abf111448db0354fe9c87c097ed7"
   },
   "backend/services/grammarService.js": {
-    "mtime": 1795163598.4460902,
-    "seen": 1795780457.3999202,
-    "ast_hash": "5654138888fb12b20b2e233ff41e0e0b",
-    "semantic_hash": "5654138888fb12b20b2e233ff41e0e0b"
+    "mtime": 1795785044.5687625,
+    "seen": 1795844517.1962001,
+    "ast_hash": "eef25cf0fd0b4351a8e82b52d37a9296",
+    "semantic_hash": "eef25cf0fd0b4351a8e82b52d37a9296"
   },
   "backend/services/hindiDictionaryService.js": {
     "mtime": 1795238546.8093479,
@@ -372,10 +372,10 @@
     "semantic_hash": "23619f75c9c0db35682359eaccd2eea8"
   },
   "client/src/components/AnnotatedPosterOCR.jsx": {
-    "mtime": 1795004842.1098988,
-    "seen": 1795780457.3999588,
-    "ast_hash": "7dc0fff048726bbba10b974d0d5cf8d0",
-    "semantic_hash": "7dc0fff048726bbba10b974d0d5cf8d0"
+    "mtime": 1795786145.7980013,
+    "seen": 1795844517.2030246,
+    "ast_hash": "657bef9927cee74d9e29259faed25a2b",
+    "semantic_hash": "657bef9927cee74d9e29259faed25a2b"
   },
   "client/src/components/ImageCheckSkeleton.jsx": {
     "mtime": 1794817277.4063268,
@@ -516,16 +516,16 @@
     "semantic_hash": "9b98f51016a8a82ac3db46099db26d7d"
   },
   "client/src/components/LogoCheckCard.jsx": {
-    "mtime": 1795248268.1729915,
-    "seen": 1795780457.3999662,
-    "ast_hash": "851782fb38ca04e2b612e14070e35c15",
-    "semantic_hash": "851782fb38ca04e2b612e14070e35c15"
+    "mtime": 1795786159.088102,
+    "seen": 1795844517.2059238,
+    "ast_hash": "e43d08120967af3a245cc35caa5c9239",
+    "semantic_hash": "e43d08120967af3a245cc35caa5c9239"
   },
   "client/src/pages/PostInspection.jsx": {
-    "mtime": 1795254881.303308,
-    "seen": 1795780457.3999841,
-    "ast_hash": "5c70e7a73bad246b00fbdd7106847b4f",
-    "semantic_hash": "5c70e7a73bad246b00fbdd7106847b4f"
+    "mtime": 1795786261.5277927,
+    "seen": 1795844517.208008,
+    "ast_hash": "6ebf06200324e102bfecf2638239dbbd",
+    "semantic_hash": "6ebf06200324e102bfecf2638239dbbd"
   },
   "client/src/services/adminService.js": {
     "mtime": 1795005847.5585911,
@@ -624,10 +624,10 @@
     "semantic_hash": "fc48e40ee754b77e301759f174052866"
   },
   "backend/migrations/20261121_universal_logo_verification.js": {
-    "mtime": 1795263539.0796714,
-    "seen": 1795780457.3998253,
-    "ast_hash": "091a210e843cd3e538e85069dec99ca5",
-    "semantic_hash": "091a210e843cd3e538e85069dec99ca5"
+    "mtime": 1795783895.164785,
+    "seen": 1795844517.1855507,
+    "ast_hash": "74b96f7ae18711e5c0ab10590b2043ba",
+    "semantic_hash": "74b96f7ae18711e5c0ab10590b2043ba"
   },
   "backend/migrations/seed_logo_configs.js": {
     "mtime": 1795264793.3194108,
@@ -750,10 +750,10 @@
     "semantic_hash": "7f17014a425c5a2816af02d4f53b3b49"
   },
   "backend/test-remote-ocr.js": {
-    "mtime": 1794657425.1802258,
-    "seen": 1795780457.3999414,
-    "ast_hash": "3f9396c4d3547a3dc33fc2944840cc86",
-    "semantic_hash": "3f9396c4d3547a3dc33fc2944840cc86"
+    "mtime": 1795789657.5966504,
+    "seen": 1795844517.1990912,
+    "ast_hash": "1ab3106dd860d948a44421d844d3742f",
+    "semantic_hash": "1ab3106dd860d948a44421d844d3742f"
   },
   "backend/test-suite-live.js": {
     "mtime": 1794571013.8314168,
@@ -820,5 +820,17 @@
     "seen": 1795780457.4000123,
     "ast_hash": "80f68b6d91a980714ecbbdf37dda9b7b",
     "semantic_hash": "80f68b6d91a980714ecbbdf37dda9b7b"
+  },
+  "backend/services/openRouterService.js": {
+    "mtime": 1795785103.7681885,
+    "seen": 1795844517.196853,
+    "ast_hash": "96933a71de6b293d28b8efd6d8523dd8",
+    "semantic_hash": "96933a71de6b293d28b8efd6d8523dd8"
+  },
+  "social_approval_db.sql": {
+    "mtime": 1795781887.5600274,
+    "seen": 1795844517.2117314,
+    "ast_hash": "ccc9e692e13601aa29e4622b5f73b506",
+    "semantic_hash": "ccc9e692e13601aa29e4622b5f73b506"
   }
 }

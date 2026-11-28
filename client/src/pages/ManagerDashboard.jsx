@@ -175,6 +175,7 @@ const ManagerDashboard = () => {
             {posts.map((post) => {
               const rawImg = post.image_path || post.latest_revision?.image_path;
               const imgSrc = rawImg ? `${SERVER_URL}/${rawImg}` : null;
+              const refLogoSrc = post.reference_logo_url ? `${SERVER_URL}/${post.reference_logo_url.replace(/^[/\\]+/, '')}` : null;
               const aiReport = post.latest_ai_check;
               const spellingIssues = aiReport?.spelling_issues || [];
               const bannedWords = aiReport?.banned_words_found || [];
@@ -419,6 +420,7 @@ const ManagerDashboard = () => {
                                 logoCheck={aiReport.logo_check}
                                 aiProvider={aiReport.ai_provider}
                                 fallbackUsed={aiReport.fallback_used}
+                                referenceLogoUrl={refLogoSrc}
                               />
                             </div>
                           )}

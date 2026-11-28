@@ -12,7 +12,11 @@ import { ShieldCheck, AlertOctagon, AlertTriangle, Info, Sparkles, Binary } from
  * - FAIL: "FAIL - Galat logo / Incomplete text - Checked By: Gemini/Python"
  * - Visual Side-by-Side Comparison: Brand Guidelines official logo vs candidate crop from poster.
  */
-const LogoCheckCard = ({ logoCheck, aiProvider, fallbackUsed, referenceLogoUrl }) => {
+const LogoCheckCard = ({ logoCheck: rawLogoCheck, aiProvider, fallbackUsed, referenceLogoUrl }) => {
+  const logoCheck = typeof rawLogoCheck === 'string'
+    ? (() => { try { return JSON.parse(rawLogoCheck); } catch { return null; } })()
+    : (rawLogoCheck || null);
+
   if (!logoCheck || logoCheck.status === 'SKIPPED') {
     return (
       <div className="p-4 rounded-2xl bg-[#F6F5F2] border border-[#E5E2DA] space-y-2">
